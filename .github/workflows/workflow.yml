@@ -206,9 +206,9 @@ jobs:
       - init
       - build
       - build-posix
-    # Versioned releases are immutable and tag-driven. Branch and manual runs
-    # still produce Actions artifacts without modifying a published release.
-    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+    # Releases stay fully manual and immutable: launch workflow_dispatch from a
+    # v* tag to publish it. Runs launched from a branch only produce artifacts.
+    if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     permissions:
       contents: write
