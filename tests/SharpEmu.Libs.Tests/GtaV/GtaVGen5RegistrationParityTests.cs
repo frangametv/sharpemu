@@ -11,16 +11,20 @@ namespace SharpEmu.Libs.Tests.GtaV;
 public sealed class GtaVGen5RegistrationParityTests
 {
     private const string InventoryResourceName = "SharpEmu.Libs.Tests.GtaVGen5NidInventory.csv";
-    private const string InventorySha256 = "ae59b828e82c89e99af6aa4c5a82ce5841499bffd9b28110320747ebd0aea256";
+    private const string CanonicalInventorySha256 = "efb0a69b0e5e32274db2ca86558041318e9ba65011c0d94f3362629bf826f73a";
     private const string LegacyStackGuardNid = "f7uOxY9mM1U";
 
     [Fact]
     public void PinnedInventory_HasExactCompiledCallableAndDataRegistrationParity()
     {
         var inventoryBytes = ReadInventory();
-        Assert.Equal(InventorySha256, Convert.ToHexString(SHA256.HashData(inventoryBytes)).ToLowerInvariant());
+        var inventoryText = Encoding.UTF8.GetString(inventoryBytes);
+        var canonicalInventoryBytes = Encoding.UTF8.GetBytes(inventoryText.ReplaceLineEndings("\n"));
+        Assert.Equal(
+            CanonicalInventorySha256,
+            Convert.ToHexString(SHA256.HashData(canonicalInventoryBytes)).ToLowerInvariant());
 
-        var inventory = ParseInventory(Encoding.UTF8.GetString(inventoryBytes));
+        var inventory = ParseInventory(inventoryText);
         var inventoryByNid = inventory.ToDictionary(row => row.Nid, StringComparer.Ordinal);
         var catalogNids = inventory.Select(row => row.Nid).ToHashSet(StringComparer.Ordinal);
         var functionNids = inventory
