@@ -856,11 +856,11 @@ public partial class MainWindow : Window
     {
         var version = Assembly.GetExecutingAssembly().GetName().Version;
         var display = version is not null ? $"v{version.ToString(3)}" : "v0.0.1";
-        display += BuildInfo.CommitSha is null
-            ? " · dev"
-            : BuildInfo.IsOfficialRelease
-                ? $" · {BuildInfo.CommitSha}"
-                : $" · UNOFFICIAL {BuildInfo.CommitSha}";
+        var buildId = BuildInfo.CommitSha ?? "dev";
+        var customLabel = CustomVersionLabel.Value;
+        display += string.IsNullOrWhiteSpace(customLabel)
+            ? $" · {buildId}"
+            : $" · {customLabel} {buildId}";
         VersionText.Text = display;
         Title = $"SharpEmu {display}";
         ToolTip.SetTip(VersionText, BuildInfo.Banner);

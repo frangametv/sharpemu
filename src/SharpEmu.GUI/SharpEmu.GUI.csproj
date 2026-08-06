@@ -57,5 +57,8 @@ SPDX-License-Identifier: GPL-2.0-or-later
     <EmbeddedResource Include="Languages\*.json">
       <LogicalName>Languages.%(Filename)%(Extension)</LogicalName>
     </EmbeddedResource>
+    <EmbeddedResource Include="..\..\CUSTOM_VERSION.txt">
+      <LogicalName>SharpEmu.GUI.CUSTOM_VERSION.txt</LogicalName>
+    </EmbeddedResource>
   </ItemGroup>
 </Project>
