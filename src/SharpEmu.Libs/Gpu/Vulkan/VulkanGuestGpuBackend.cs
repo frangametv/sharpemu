@@ -30,7 +30,8 @@ internal sealed class VulkanGuestGpuBackend : IGuestGpuBackend
         int imageBindingBase = 0,
         int scalarRegisterBufferIndex = -1,
         int requiredVertexOutputCount = 0,
-        ulong storageBufferOffsetAlignment = 1)
+        ulong storageBufferOffsetAlignment = 1,
+        IReadOnlyList<uint>? pixelInputControls = null)
     {
         shader = null;
         if (!Gen5SpirvTranslator.TryCompileVertexShader(
@@ -43,7 +44,9 @@ internal sealed class VulkanGuestGpuBackend : IGuestGpuBackend
                 imageBindingBase,
                 scalarRegisterBufferIndex,
                 requiredVertexOutputCount,
-                storageBufferOffsetAlignment))
+                storageBufferOffsetAlignment,
+                VulkanVideoPresenter.SupportsVertexSubgroupOperations,
+                pixelInputControls))
         {
             return false;
         }
@@ -64,8 +67,9 @@ internal sealed class VulkanGuestGpuBackend : IGuestGpuBackend
         int scalarRegisterBufferIndex = -1,
         uint pixelInputEnable = 0,
         uint pixelInputAddress = 0,
-        IReadOnlyList<uint>? pixelInputCntl = null,
-        ulong storageBufferOffsetAlignment = 1)
+        ulong storageBufferOffsetAlignment = 1,
+        IReadOnlyList<uint>? pixelInputControls = null,
+        int gdsBufferIndex = -1)
     {
         shader = null;
         if (!Gen5SpirvTranslator.TryCompilePixelShader(
@@ -80,8 +84,11 @@ internal sealed class VulkanGuestGpuBackend : IGuestGpuBackend
                 scalarRegisterBufferIndex,
                 pixelInputEnable,
                 pixelInputAddress,
-                pixelInputCntl,
-                storageBufferOffsetAlignment))
+                storageBufferOffsetAlignment,
+                VulkanVideoPresenter.SupportsFragmentSubgroupOperations,
+                VulkanVideoPresenter.SupportsFragmentShaderBarycentric,
+                pixelInputControls,
+                gdsBufferIndex))
         {
             return false;
         }
@@ -101,7 +108,8 @@ internal sealed class VulkanGuestGpuBackend : IGuestGpuBackend
         int totalGlobalBufferCount = -1,
         int initialScalarBufferIndex = -1,
         uint waveLaneCount = 32,
-        ulong storageBufferOffsetAlignment = 1)
+        ulong storageBufferOffsetAlignment = 1,
+        int gdsBufferIndex = -1)
     {
         shader = null;
         if (!Gen5SpirvTranslator.TryCompileComputeShader(
@@ -115,13 +123,73 @@ internal sealed class VulkanGuestGpuBackend : IGuestGpuBackend
                 totalGlobalBufferCount,
                 initialScalarBufferIndex,
                 waveLaneCount,
-                storageBufferOffsetAlignment))
+                storageBufferOffsetAlignment,
+                VulkanVideoPresenter.SupportsComputeSubgroupOperations,
+                gdsBufferIndex))
         {
             return false;
         }
 
         shader = new VulkanCompiledGuestShader(compiled.Spirv);
         return true;
+    }
+
+    public bool TryCompileNggComputeShader(
+        Gen5ShaderState state,
+        Gen5ShaderEvaluation evaluation,
+        Gen5NggOutputLayout outputLayout,
+        out IGuestCompiledShader? shader,
+        out string error,
+        int globalBufferBase,
+        int totalGlobalBufferCount,
+        int imageBindingBase,
+        int initialScalarBufferIndex = -1,
+        ulong storageBufferOffsetAlignment = 1)
+    {
+        shader = null;
+        if (!Gen5SpirvTranslator.TryCompileNggComputeShader(
+                state,
+                evaluation,
+                outputLayout,
+                out var compiled,
+                out error,
+                globalBufferBase,
+                totalGlobalBufferCount,
+                imageBindingBase,
+                initialScalarBufferIndex,
+                storageBufferOffsetAlignment,
+                VulkanVideoPresenter.SupportsComputeSubgroupOperations))
+        {
+            return false;
+        }
+
+        shader = new VulkanCompiledGuestShader(compiled.Spirv);
+        return true;
+    }
+
+    public bool TryCreateNggRasterVertexShader(
+        Gen5NggOutputLayout outputLayout,
+        int totalGlobalBufferCount,
+        IReadOnlyList<uint> pixelInputControls,
+        out IGuestCompiledShader? shader,
+        out string error)
+    {
+        shader = null;
+        error = string.Empty;
+        try
+        {
+            shader = new VulkanCompiledGuestShader(
+                SpirvFixedShaders.CreateNggRasterVertex(
+                    outputLayout,
+                    totalGlobalBufferCount,
+                    pixelInputControls));
+            return true;
+        }
+        catch (Exception exception)
+        {
+            error = exception.Message;
+            return false;
+        }
     }
 
     public IGuestCompiledShader GetDepthOnlyFragmentShader() =>
@@ -366,6 +434,9 @@ internal sealed class VulkanGuestGpuBackend : IGuestGpuBackend
     public long CurrentGuestWorkSequenceForDiagnostics =>
         VulkanVideoPresenter.CurrentGuestWorkSequenceForDiagnostics;
 
+    public long CurrentThreadEnqueuedGuestWorkSequenceForDiagnostics =>
+        VulkanVideoPresenter.CurrentThreadEnqueuedGuestWorkSequenceForDiagnostics;
+
     public bool IsGuestImageUploadKnown(ulong address, uint format, uint numberType) =>
         VulkanVideoPresenter.IsGuestImageUploadKnown(address, format, numberType);
 
@@ -385,6 +456,9 @@ internal sealed class VulkanGuestGpuBackend : IGuestGpuBackend
 
     public void RequestCpuWrittenGuestImageSync(ulong scopeAddress = 0, ulong scopeByteCount = ulong.MaxValue) =>
         VulkanVideoPresenter.RequestCpuWrittenGuestImageSync(scopeAddress, scopeByteCount);
+
+    public bool TrySubmitGuestImageCopy(ulong sourceAddress, ulong destinationAddress) =>
+        VulkanVideoPresenter.SubmitGuestImageCopy(sourceAddress, destinationAddress);
 
     public bool TryGetGuestImageExtent(ulong address, out uint width, out uint height, out ulong byteCount) =>
         VulkanVideoPresenter.TryGetGuestImageExtent(address, out width, out height, out byteCount);

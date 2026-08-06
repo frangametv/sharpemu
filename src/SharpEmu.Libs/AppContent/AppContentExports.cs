@@ -10,10 +10,13 @@ namespace SharpEmu.Libs.AppContent;
 
 public static class AppContentExports
 {
+    private const int AppContentErrorNotInitialized = unchecked((int)0x80D90001);
+    private const int AppContentErrorInvalidArgument = unchecked((int)0x80D90002);
     private const ulong BootParamAttrOffset = 4;
     private const string Temp0MountPoint = "/temp0";
     private const uint AppParamSkuFlag = 0;
     private const int AppParamSkuFlagFull = 3;
+    private static Func<string, ulong> _availableSpaceKbProvider = GetHostAvailableSpaceKb;
 
     [SysAbiExport(
         Nid = "R9lA82OraNs",
@@ -121,32 +124,52 @@ public static class AppContentExports
         return (int)OrbisGen2Result.ORBIS_GEN2_OK;
     }
 
-    // Download data is not emulated as a real quota; report a comfortable
-    // fixed amount of free space so titles never take the "storage full" path.
+    // Dev firmware SHA-256 16ea1a4db751772ca5f0bacb440a95a20eaa2cb8b75f4d6b5999da178d8594fc.
+    // Public wrapper RVA 0x1740 forwards a 0x10-byte mount name and an 8-byte output
+    // to operation 0x2000f; GTA passes "/download0" and consumes the result as KiB.
     [SysAbiExport(
         Nid = "Gl6w5i0JokY",
         ExportName = "sceAppContentDownloadDataGetAvailableSpaceKb",
-        Target = Generation.Gen4 | Generation.Gen5,
-        LibraryName = "libSceAppContent")]
+        Target = Generation.Gen5,
+        LibraryName = "libSceAppContent",
+        PreferLle = true)]
     public static int AppContentDownloadDataGetAvailableSpaceKb(CpuContext ctx)
     {
-        const ulong availableSpaceKb = 1024UL * 1024UL; // 1 GiB
+        var mountNameAddress = ctx[CpuRegister.Rdi];
         var availableSpaceAddress = ctx[CpuRegister.Rsi];
-        if (availableSpaceAddress == 0)
+        if (mountNameAddress == 0 || availableSpaceAddress == 0)
         {
-            return (int)OrbisGen2Result.ORBIS_GEN2_ERROR_INVALID_ARGUMENT;
+            return ctx.SetReturn(AppContentErrorInvalidArgument);
         }
 
-        Span<byte> spaceBytes = stackalloc byte[sizeof(ulong)];
-        BinaryPrimitives.WriteUInt64LittleEndian(spaceBytes, availableSpaceKb);
-        if (!ctx.Memory.TryWrite(availableSpaceAddress, spaceBytes))
+        Span<byte> mountName = stackalloc byte[0x10];
+        if (!ctx.Memory.TryRead(mountNameAddress, mountName))
         {
-            return (int)OrbisGen2Result.ORBIS_GEN2_ERROR_MEMORY_FAULT;
+            return ctx.SetReturn(OrbisGen2Result.ORBIS_GEN2_ERROR_MEMORY_FAULT);
         }
 
-        ctx[CpuRegister.Rax] = 0;
-        return (int)OrbisGen2Result.ORBIS_GEN2_OK;
+        ulong availableSpaceKb;
+        try
+        {
+            availableSpaceKb = _availableSpaceKbProvider(ResolveDownload0Root());
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or ArgumentException)
+        {
+            return ctx.SetReturn(AppContentErrorNotInitialized);
+        }
+
+        Span<byte> availableSpace = stackalloc byte[sizeof(ulong)];
+        BinaryPrimitives.WriteUInt64LittleEndian(availableSpace, availableSpaceKb);
+        if (!ctx.Memory.TryWrite(availableSpaceAddress, availableSpace))
+        {
+            return ctx.SetReturn(OrbisGen2Result.ORBIS_GEN2_ERROR_MEMORY_FAULT);
+        }
+
+        return ctx.SetReturn(OrbisGen2Result.ORBIS_GEN2_OK);
     }
+
+    internal static void SetAvailableSpaceKbProviderForTests(Func<string, ulong>? provider) =>
+        _availableSpaceKbProvider = provider ?? GetHostAvailableSpaceKb;
 
     private static bool TryReadUserDefinedParam(uint paramId, out int value)
     {
@@ -203,6 +226,45 @@ public static class AppContentExports
         }
 
         Console.Error.WriteLine($"[LOADER][TRACE] app_content.{message}");
+    }
+
+    private static ulong GetHostAvailableSpaceKb(string path)
+    {
+        var driveRoot = Path.GetPathRoot(Path.GetFullPath(path));
+        if (string.IsNullOrWhiteSpace(driveRoot))
+        {
+            throw new ArgumentException("The download-data root has no filesystem root.", nameof(path));
+        }
+
+        return checked((ulong)new DriveInfo(driveRoot).AvailableFreeSpace) / 1024UL;
+    }
+
+    private static string ResolveDownload0Root()
+    {
+        const string variableName = "SHARPEMU_DOWNLOAD0_DIR";
+        var configuredRoot = Environment.GetEnvironmentVariable(variableName);
+        if (!string.IsNullOrWhiteSpace(configuredRoot))
+        {
+            var configuredPath = Path.GetFullPath(configuredRoot);
+            Directory.CreateDirectory(configuredPath);
+            return configuredPath;
+        }
+
+        var app0Root = Environment.GetEnvironmentVariable("SHARPEMU_APP0_DIR");
+        var appName = string.IsNullOrWhiteSpace(app0Root)
+            ? "default"
+            : Path.GetFileName(Path.TrimEndingDirectorySeparator(app0Root));
+        if (string.IsNullOrWhiteSpace(appName))
+        {
+            appName = "default";
+        }
+
+        var invalidChars = Path.GetInvalidFileNameChars();
+        appName = new string(appName.Select(ch => invalidChars.Contains(ch) ? '_' : ch).ToArray());
+        var root = Path.Combine(Path.GetTempPath(), "SharpEmu", appName, "download0");
+        Directory.CreateDirectory(root);
+        Environment.SetEnvironmentVariable(variableName, root);
+        return root;
     }
 
     private static string ResolveTemp0Root()

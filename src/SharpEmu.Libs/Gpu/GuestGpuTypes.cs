@@ -31,6 +31,15 @@ internal sealed record GuestDrawTexture(
     uint TileMode = 0,
     uint DstSelect = 0xFAC,
     GuestSampler Sampler = default,
+    bool WritesImage = false,
+    ulong SourceOffset = 0,
+    ulong PhysicalSourceByteCount = 0,
+    ulong GuestAllocationByteCount = 0,
+    int SourceX = 0,
+    int SourceY = 0,
+    int ElementsWide = 0,
+    int ElementsHigh = 0,
+    int BytesPerElement = 0,
     // Guest CPU write-tracker generation of the memory RgbaPixels was read
     // from; -1 when the range is untracked or the pixels were not read here.
     long WriteGeneration = -1,
@@ -38,10 +47,6 @@ internal sealed record GuestDrawTexture(
     uint ArrayLayers = 1,
     uint Type = 9,
     uint Depth = 1,
-    // GPU-detile opt-in (SHARPEMU_GPU_DETILE): when Detile is non-null the AGC
-    // layer skipped the CPU deswizzle and shipped the raw TILED bytes here in
-    // TiledSource; the Vulkan backend detiles them on the GPU. RgbaPixels is
-    // empty in that case. Both are neutral (no host graphics-API values).
     byte[]? TiledSource = null,
     DetileParams? Detile = null);
 
@@ -64,6 +69,7 @@ internal readonly record struct TextureContentIdentity(
     uint DstSelect,
     uint TileMode,
     uint Pitch,
+    ulong SourceOffset,
     GuestSampler Sampler,
     bool Arrayed = false,
     uint ArrayLayers = 1,
@@ -185,14 +191,15 @@ internal sealed record GuestRenderState(
         Blends.Count == 0 ? GuestBlendState.Default : Blends[0];
 }
 
-/// <summary>Format/NumberType are raw guest render-target register codes.</summary>
+/// <summary>Format/NumberType/ComponentSwap are raw guest render-target register codes.</summary>
 internal sealed record GuestRenderTarget(
     ulong Address,
     uint Width,
     uint Height,
     uint Format,
     uint NumberType,
-    uint MipLevels = 1);
+    uint MipLevels = 1,
+    uint ComponentSwap = 0);
 
 /// <summary>Guest DB surface bound alongside a color render target.</summary>
 internal sealed record GuestDepthTarget(

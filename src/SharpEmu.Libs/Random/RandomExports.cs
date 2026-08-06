@@ -8,32 +8,49 @@ namespace SharpEmu.Libs.Random;
 
 public static class RandomExports
 {
-    private const int RandomErrorInvalid = unchecked((int)0x817C0016);
-    private const int MaxRandomBytes = 64;
+    private const int MaximumRandomBytes = 0x40;
+    private const int RandomErrorInvalidArgument = unchecked((int)0x817C0016);
+    private const int RandomErrorInternal = unchecked((int)0x817C00FF);
 
+    // Ghidra 12.1.2, libSceRandom.sprx SHA-256
+    // 4af0ac1f1dc40c45a267a13f623e87080bf11cdedc210c1062e474d59b98b8fd,
+    // export 0xD0. RDI is the output buffer and RSI is its unsigned byte count.
+    // The provider requires a non-null output, accepts 0..64 bytes, obtains a
+    // 64-byte kernel RNG block, and copies exactly the requested prefix.
     [SysAbiExport(
         Nid = "PI7jIZj4pcE",
         ExportName = "sceRandomGetRandomNumber",
-        Target = Generation.Gen4 | Generation.Gen5,
-        LibraryName = "libSceRandom")]
-    public static int RandomGetRandomNumber(CpuContext ctx)
+        Target = Generation.Gen5,
+        LibraryName = "libSceRandom",
+        PreferLle = true)]
+    public static int GetRandomNumber(CpuContext ctx)
     {
-        var destination = ctx[CpuRegister.Rdi];
-        var size = ctx[CpuRegister.Rsi];
-        if ((destination == 0 && size != 0) || size > MaxRandomBytes)
+        var outputAddress = ctx[CpuRegister.Rdi];
+        var requestedByteCount = ctx[CpuRegister.Rsi];
+
+        if (outputAddress == 0 || requestedByteCount > MaximumRandomBytes)
         {
-            return ctx.SetReturn(RandomErrorInvalid);
+            return ctx.SetReturn(RandomErrorInvalidArgument);
         }
 
-        if (size == 0)
+        Span<byte> randomBytes = stackalloc byte[MaximumRandomBytes];
+        try
         {
-            return ctx.SetReturn(OrbisGen2Result.ORBIS_GEN2_OK);
+            RandomNumberGenerator.Fill(randomBytes);
+        }
+        catch (CryptographicException)
+        {
+            return ctx.SetReturn(RandomErrorInternal);
         }
 
-        Span<byte> bytes = stackalloc byte[(int)size];
-        RandomNumberGenerator.Fill(bytes);
-        return ctx.Memory.TryWrite(destination, bytes)
-            ? ctx.SetReturn(OrbisGen2Result.ORBIS_GEN2_OK)
-            : ctx.SetReturn(OrbisGen2Result.ORBIS_GEN2_ERROR_MEMORY_FAULT);
+        var requestedBytes = randomBytes[..(int)requestedByteCount];
+        if (!requestedBytes.IsEmpty && !ctx.Memory.TryWrite(outputAddress, requestedBytes))
+        {
+            // The native provider reaches memcpy here and would fault. Keep a
+            // bad guest mapping from escaping into the host process.
+            return ctx.SetReturn(OrbisGen2Result.ORBIS_GEN2_ERROR_MEMORY_FAULT);
+        }
+
+        return ctx.SetReturn(OrbisGen2Result.ORBIS_GEN2_OK);
     }
 }

@@ -9,82 +9,165 @@ namespace SharpEmu.Libs.Tests.VideoOut;
 
 public sealed class VulkanGuestImageAliasTests
 {
-    [Theory]
-    [InlineData(Format.R8G8B8A8Srgb, Format.R8G8B8A8Unorm)]
-    [InlineData(Format.R8G8B8A8Unorm, Format.R8G8B8A8Srgb)]
-    public void SrgbAndUnormCounterpartsShareOneGuestImage(
-        Format existing,
-        Format requested)
+    [Fact]
+    public void ExactExtentIsCompatibleForLinearImages()
     {
-        Assert.True(
-            VulkanVideoPresenter.IsAliasableGuestImageFormat(existing, requested));
-    }
-
-    [Theory]
-    [InlineData(Format.R8G8B8A8Unorm)]
-    [InlineData(Format.R8G8B8A8Srgb)]
-    [InlineData(Format.R16G16B16A16Sfloat)]
-    public void IdenticalFormatsUseTheExactMatchPath(Format format)
-    {
-        // Equal formats are accepted by the exact-match condition; the alias
-        // helper only reports genuinely different identities.
-        Assert.False(
-            VulkanVideoPresenter.IsAliasableGuestImageFormat(format, format));
-    }
-
-    [Theory]
-    [InlineData(Format.R32Uint, Format.R8G8B8A8Unorm)]
-    [InlineData(Format.R32Sint, Format.R8G8B8A8Unorm)]
-    [InlineData(Format.R32Sfloat, Format.R8G8B8A8Unorm)]
-    [InlineData(Format.R16G16Sfloat, Format.R8G8B8A8Unorm)]
-    [InlineData(Format.A2B10G10R10UnormPack32, Format.R8G8B8A8Unorm)]
-    [InlineData(Format.B10G11R11UfloatPack32, Format.R8G8B8A8Srgb)]
-    public void SameClassNumericReinterpretationKeepsRecreatePath(
-        Format existing,
-        Format requested)
-    {
-        // These pairs are legal Vulkan view aliases (same 32-bit class), but
-        // accepting them would attach fragment shaders translated for the
-        // other numeric encoding to the existing attachment format.
-        Assert.True(
-            VulkanVideoPresenter.IsCompatibleGuestImageViewFormat(existing, requested));
-        Assert.False(
-            VulkanVideoPresenter.IsAliasableGuestImageFormat(existing, requested));
-    }
-
-    [Theory]
-    [InlineData(Format.BC3SrgbBlock, Format.BC3UnormBlock)]
-    public void CounterpartsOutsideTheViewClassTableAreNotAliased(
-        Format existing,
-        Format requested)
-    {
-        // sRGB/UNORM counterparts that the view-compatibility table cannot
-        // alias must keep the recreate path: the shared image could never
-        // legally serve the second identity through an alias view.
-        Assert.False(
-            VulkanVideoPresenter.IsCompatibleGuestImageViewFormat(existing, requested));
-        Assert.False(
-            VulkanVideoPresenter.IsAliasableGuestImageFormat(existing, requested));
+        Assert.True(VulkanVideoPresenter.IsSampledGuestImageExtentCompatible(
+            textureWidth: 1920,
+            textureHeight: 1080,
+            tileMode: 0,
+            imageWidth: 1920,
+            imageHeight: 1080));
     }
 
     [Fact]
-    public void R8SrgbAndR8UnormShareOneCompatibilityClass()
+    public void LargerTiledDescriptorCanViewSmallerDynamicResolutionImage()
     {
-        Assert.True(
-            VulkanVideoPresenter.IsCompatibleGuestImageViewFormat(
-                Format.R8Srgb,
-                Format.R8Unorm));
+        Assert.True(VulkanVideoPresenter.IsSampledGuestImageExtentCompatible(
+            textureWidth: 2432,
+            textureHeight: 1368,
+            tileMode: 27,
+            imageWidth: 1920,
+            imageHeight: 1080));
     }
 
     [Fact]
-    public void AliasedPairStaysWithinOneCompatibilityClass()
+    public void SmallerTiledDescriptorCanViewLargerDynamicResolutionImage()
     {
-        // The alias accept creates identity views of both formats on one
-        // mutable-format image; this guards the compatibility table entries
-        // the accept relies on.
-        Assert.True(
-            VulkanVideoPresenter.IsCompatibleGuestImageViewFormat(
-                Format.R8G8B8A8Srgb,
-                Format.R8G8B8A8Unorm));
+        Assert.True(VulkanVideoPresenter.IsSampledGuestImageExtentCompatible(
+            textureWidth: 960,
+            textureHeight: 540,
+            tileMode: 27,
+            imageWidth: 1920,
+            imageHeight: 1080));
+    }
+
+    [Fact]
+    public void MismatchedLinearExtentsAreNotAliases()
+    {
+        Assert.False(VulkanVideoPresenter.IsSampledGuestImageExtentCompatible(
+            textureWidth: 960,
+            textureHeight: 540,
+            tileMode: 0,
+            imageWidth: 1920,
+            imageHeight: 1080));
+    }
+
+    [Fact]
+    public void GpuDmaCopyRequiresMatchingHostFormats()
+    {
+        Assert.False(VulkanVideoPresenter.IsGuestImageCopyCompatible(
+            sourceWidth: 960,
+            sourceHeight: 540,
+            sourceFormat: Format.R16G16B16A16Sfloat,
+            destinationWidth: 960,
+            destinationHeight: 540,
+            destinationFormat: Format.B10G11R11UfloatPack32));
+    }
+
+    [Fact]
+    public void GpuDmaCopyAcceptsMatchingImages()
+    {
+        Assert.True(VulkanVideoPresenter.IsGuestImageCopyCompatible(
+            sourceWidth: 960,
+            sourceHeight: 540,
+            sourceFormat: Format.B10G11R11UfloatPack32,
+            destinationWidth: 960,
+            destinationHeight: 540,
+            destinationFormat: Format.B10G11R11UfloatPack32));
+    }
+
+    [Fact]
+    public void GpuDmaCopyAcceptsMatchingThreeDimensionalImages()
+    {
+        Assert.True(VulkanVideoPresenter.IsGuestImageCopyCompatible(
+            sourceWidth: 32,
+            sourceHeight: 16,
+            sourceDepth: 8,
+            sourceType: VulkanVideoPresenter.Gen5TextureType3D,
+            sourceFormat: Format.R8G8B8A8Unorm,
+            destinationWidth: 32,
+            destinationHeight: 16,
+            destinationDepth: 8,
+            destinationType: VulkanVideoPresenter.Gen5TextureType3D,
+            destinationFormat: Format.R8G8B8A8Unorm));
+    }
+
+    [Fact]
+    public void GpuDmaCopyRejectsTwoDimensionalAliasForThreeDimensionalImage()
+    {
+        Assert.False(VulkanVideoPresenter.IsGuestImageCopyCompatible(
+            sourceWidth: 32,
+            sourceHeight: 16,
+            sourceDepth: 1,
+            sourceType: VulkanVideoPresenter.Gen5TextureType2D,
+            sourceFormat: Format.R8G8B8A8Unorm,
+            destinationWidth: 32,
+            destinationHeight: 16,
+            destinationDepth: 1,
+            destinationType: VulkanVideoPresenter.Gen5TextureType3D,
+            destinationFormat: Format.R8G8B8A8Unorm));
+    }
+
+    [Fact]
+    public void ThreeDimensionalDescriptorsMapToVolumeImageAndViewTypes()
+    {
+        Assert.Equal(
+            ImageType.Type3D,
+            VulkanVideoPresenter.GetGuestTextureImageType(
+                VulkanVideoPresenter.Gen5TextureType3D));
+        Assert.Equal(
+            ImageViewType.Type3D,
+            VulkanVideoPresenter.GetGuestTextureViewType(
+                VulkanVideoPresenter.Gen5TextureType3D,
+                arrayedView: true));
+        Assert.Equal(
+            7u,
+            VulkanVideoPresenter.GetGuestTextureDepth(
+                VulkanVideoPresenter.Gen5TextureType3D,
+                7));
+    }
+
+    [Fact]
+    public void TwoDimensionalArraysKeepLayersSeparateFromImageDepth()
+    {
+        Assert.Equal(
+            ImageType.Type2D,
+            VulkanVideoPresenter.GetGuestTextureImageType(
+                VulkanVideoPresenter.Gen5TextureType2D));
+        Assert.Equal(
+            ImageViewType.Type2DArray,
+            VulkanVideoPresenter.GetGuestTextureViewType(
+                VulkanVideoPresenter.Gen5TextureType2D,
+                arrayedView: true));
+        Assert.Equal(
+            1u,
+            VulkanVideoPresenter.GetGuestTextureDepth(
+                VulkanVideoPresenter.Gen5TextureType2D,
+                7));
+    }
+
+    [Fact]
+    public void GpuDmaCopyAcceptsInitializedGpuAuthoredSource()
+    {
+        Assert.True(VulkanVideoPresenter.ShouldMirrorGuestImageCopyOnGpu(
+            sourceInitialized: true,
+            sourceIsCpuBacked: false));
+    }
+
+    [Fact]
+    public void GpuDmaCopyRejectsCpuBackedSource()
+    {
+        Assert.False(VulkanVideoPresenter.ShouldMirrorGuestImageCopyOnGpu(
+            sourceInitialized: true,
+            sourceIsCpuBacked: true));
+    }
+
+    [Fact]
+    public void GpuDmaCopyRejectsUninitializedSource()
+    {
+        Assert.False(VulkanVideoPresenter.ShouldMirrorGuestImageCopyOnGpu(
+            sourceInitialized: false,
+            sourceIsCpuBacked: false));
     }
 }

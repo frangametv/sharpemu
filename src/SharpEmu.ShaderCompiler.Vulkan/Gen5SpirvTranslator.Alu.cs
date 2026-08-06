@@ -107,6 +107,23 @@ public static partial class Gen5SpirvTranslator
                 case "VMovB32":
                     result = GetRawSource(instruction, 0);
                     break;
+                case "VMovrelsB32":
+                {
+                    if (instruction.Sources.Count == 0 ||
+                        instruction.Sources[0].Kind != Gen5OperandKind.VectorRegister)
+                    {
+                        error = "VMovrelsB32 expects a VGPR source";
+                        return false;
+                    }
+
+                    var relativeIndex = BitwiseAnd(
+                        IAdd(
+                            UInt(instruction.Sources[0].Value),
+                            LoadS(124)),
+                        UInt(VectorRegisterCount - 1));
+                    result = Load(_uintType, VectorPointerDynamic(relativeIndex));
+                    break;
+                }
                 case "VWritelaneB32":
                 {
                     // vdst[lane(src1)] = src0
@@ -892,33 +909,29 @@ public static partial class Gen5SpirvTranslator
                     StoreCarryOut(instruction, carry);
                     break;
                 }
-                case "VBfeU32":
-                {
-                    var width = BitwiseAnd(GetRawSource(instruction, 2), UInt(31));
-                    result = _module.AddInstruction(
-                        SpirvOp.BitFieldUExtract,
+            case "VBfeU32":
+            {
+                var width = BitwiseAnd(GetRawSource(instruction, 2), UInt(31));
+                result = _module.AddInstruction(
+                    SpirvOp.BitFieldUExtract,
                         _uintType,
                         GetRawSource(instruction, 0),
                         BitwiseAnd(GetRawSource(instruction, 1), UInt(31)),
-                        width);
-                    break;
-                }
-                case "VBfeI32":
-                {
-                    // Same extract as VBfeU32 but sign-extended from the top bit
-                    // of the extracted field, so the result type must be signed
-                    // and bitcast back for storage.
-                    var width = BitwiseAnd(GetRawSource(instruction, 2), UInt(31));
-                    result = Bitcast(
-                        _uintType,
-                        _module.AddInstruction(
-                            SpirvOp.BitFieldSExtract,
-                            _intType,
-                            Bitcast(_intType, GetRawSource(instruction, 0)),
-                            BitwiseAnd(GetRawSource(instruction, 1), UInt(31)),
-                            width));
-                    break;
-                }
+                    width);
+                break;
+            }
+            case "VBfeI32":
+            {
+                var width = BitwiseAnd(GetRawSource(instruction, 2), UInt(31));
+                var extracted = _module.AddInstruction(
+                    SpirvOp.BitFieldSExtract,
+                    _intType,
+                    Bitcast(_intType, GetRawSource(instruction, 0)),
+                    BitwiseAnd(GetRawSource(instruction, 1), UInt(31)),
+                    width);
+                result = Bitcast(_uintType, extracted);
+                break;
+            }
                 case "VBfiB32":
                 {
                     var mask = GetRawSource(instruction, 0);
@@ -943,9 +956,6 @@ public static partial class Gen5SpirvTranslator
                         first,
                         second);
                     result = Ext(58, _uintType, vector);
-                    StorePackedHalf(
-                        destination,
-                        vector);
                     break;
                 }
                 case "VCvtPknormI16F32":
@@ -1585,6 +1595,23 @@ public static partial class Gen5SpirvTranslator
 
                 condition = _module.AddInstruction(operation, _boolType, left, right);
             }
+            else if (opcode.EndsWith("U64", StringComparison.Ordinal))
+            {
+                var left = GetRawSource64(instruction, 0);
+                var right = GetRawSource64(instruction, 1);
+                var operation = opcode switch
+                {
+                    "VCmpGtU64" or "VCmpxGtU64" => SpirvOp.UGreaterThan,
+                    _ => SpirvOp.Nop,
+                };
+                if (operation == SpirvOp.Nop)
+                {
+                    error = $"unsupported 64-bit integer compare {opcode}";
+                    return false;
+                }
+
+                condition = _module.AddInstruction(operation, _boolType, left, right);
+            }
             else if (opcode is not ("VCmpClassF32" or "VCmpxClassF32"))
             {
                 var left = GetRawSource(instruction, 0);
@@ -1632,6 +1659,27 @@ public static partial class Gen5SpirvTranslator
                 condition = _module.ConstantBool(true);
             }
 
+            var forceCompareTrueIgnoringExec = false;
+            if (TryParseEnvironmentUnsigned(
+                    "SHARPEMU_FORCE_VECTOR_COMPARE_TRUE_ADDRESS",
+                    out var compareProbeAddress) &&
+                TryParseEnvironmentUnsigned(
+                    "SHARPEMU_FORCE_VECTOR_COMPARE_TRUE_PC",
+                    out var compareProbePc) &&
+                _state.Program.Address == compareProbeAddress &&
+                instruction.Pc == compareProbePc)
+            {
+                condition = _module.ConstantBool(true);
+                forceCompareTrueIgnoringExec =
+                    Environment.GetEnvironmentVariable(
+                        "SHARPEMU_FORCE_VECTOR_COMPARE_TRUE_IGNORE_EXEC") == "1";
+                Console.Error.WriteLine(
+                    $"[AGC][VECTOR-COMPARE-PROBE] " +
+                    $"stage={_stage} address=0x{_state.Program.Address:X16} " +
+                    $"pc=0x{instruction.Pc:X} opcode={opcode} forced=true " +
+                    $"ignore_exec={forceCompareTrueIgnoringExec}");
+            }
+
             // Vector compares fully overwrite the destination mask, but only
             // lanes enabled by EXEC can pass the test: VCC = EXEC & condition.
             // Balloting the raw condition leaks results from disabled lanes
@@ -1641,6 +1689,10 @@ public static partial class Gen5SpirvTranslator
                 _boolType,
                 Load(_boolType, _exec),
                 condition);
+            if (forceCompareTrueIgnoringExec)
+            {
+                activeCondition = _module.ConstantBool(true);
+            }
             if (instruction.Control is Gen5DppControl compareDpp)
             {
                 activeCondition = _module.AddInstruction(
@@ -1662,10 +1714,14 @@ public static partial class Gen5SpirvTranslator
             }
             else
             {
-                var compareDestination = instruction.Control is Gen5SdwaControl
-                    { ScalarDestination: { } scalarDestination }
-                    ? scalarDestination
-                    : 106u;
+                var compareDestination = instruction.Control switch
+                {
+                    Gen5SdwaControl { ScalarDestination: { } scalarDestination } =>
+                        scalarDestination,
+                    Gen5Vop3Control { ScalarDestination: { } scalarDestination } =>
+                        scalarDestination,
+                    _ => 106u,
+                };
                 StoreWaveMask(compareDestination, activeCondition);
             }
 
@@ -1730,9 +1786,61 @@ public static partial class Gen5SpirvTranslator
                 return true;
             }
 
+            if (instruction.Opcode == "SBcnt1I32B64")
+            {
+                var source = GetRawSource64(instruction, 0);
+                var low = _module.AddInstruction(
+                    SpirvOp.UConvert,
+                    _uintType,
+                    source);
+                var high = _module.AddInstruction(
+                    SpirvOp.UConvert,
+                    _uintType,
+                    ShiftRightLogical64(
+                        source,
+                        _module.Constant64(_ulongType, 32)));
+                var bitCountResult = IAdd(
+                    _module.AddInstruction(SpirvOp.BitCount, _uintType, low),
+                    _module.AddInstruction(SpirvOp.BitCount, _uintType, high));
+                StoreS(destination, bitCountResult);
+                Store(_scc, IsNotZero(bitCountResult));
+                return true;
+            }
+
             if (instruction.Opcode.EndsWith("B64", StringComparison.Ordinal) ||
                 instruction.Opcode is "SWqmB64" or "SBfeU64" or "SBfeI64")
             {
+                if (instruction.Opcode == "SFF1I32B64")
+                {
+                    var source = GetRawSource64(instruction, 0);
+                    var low = _module.AddInstruction(
+                        SpirvOp.UConvert,
+                        _uintType,
+                        source);
+                    var high = _module.AddInstruction(
+                        SpirvOp.UConvert,
+                        _uintType,
+                        ShiftRightLogical64(
+                            source,
+                            _module.Constant64(_ulongType, 32)));
+                    var lowIndex = Ext(73, _uintType, low);
+                    var highIndex = IAdd(UInt(32), Ext(73, _uintType, high));
+                    var index = _module.AddInstruction(
+                        SpirvOp.Select,
+                        _uintType,
+                        IsNotZero(low),
+                        lowIndex,
+                        _module.AddInstruction(
+                            SpirvOp.Select,
+                            _uintType,
+                            IsNotZero(high),
+                            highIndex,
+                            UInt(uint.MaxValue)));
+                    StoreS(destination, index);
+                    Store(_scc, IsNotZero(index));
+                    return true;
+                }
+
                 return TryEmitScalar64(instruction, destination, out error);
             }
 
@@ -1793,8 +1901,37 @@ public static partial class Gen5SpirvTranslator
                 case "SMovB32":
                     result = left;
                     break;
+                case "SWqmB32":
+                {
+                    var quadAny = BitwiseOr(
+                        left,
+                        BitwiseOr(
+                            ShiftRightLogical(left, UInt(1)),
+                            BitwiseOr(
+                                ShiftRightLogical(left, UInt(2)),
+                                ShiftRightLogical(left, UInt(3)))));
+                    quadAny = BitwiseAnd(quadAny, UInt(0x1111_1111));
+                    result = _module.AddInstruction(
+                        SpirvOp.IMul,
+                        _uintType,
+                        quadAny,
+                        UInt(0xF));
+                    StoreS(destination, result);
+                    Store(_scc, IsNotZero(result));
+                    return true;
+                }
                 case "SNotB32":
                     result = _module.AddInstruction(SpirvOp.Not, _uintType, left);
+                    StoreS(destination, result);
+                    Store(_scc, IsNotZero(result));
+                    return true;
+                case "SAbsI32":
+                    result = _module.AddInstruction(
+                        SpirvOp.Select,
+                        _uintType,
+                        IsNotZero(BitwiseAnd(left, UInt(0x8000_0000))),
+                        _module.AddInstruction(SpirvOp.ISub, _uintType, UInt(0), left),
+                        left);
                     StoreS(destination, result);
                     Store(_scc, IsNotZero(result));
                     return true;
@@ -2183,6 +2320,22 @@ public static partial class Gen5SpirvTranslator
             {
                 error = "missing scalar compare source";
                 return false;
+            }
+
+            if (instruction.Opcode is "SCmpEqU64" or "SCmpLgU64")
+            {
+                var left64 = GetRawSource64(instruction, 0);
+                var right64 = GetRawSource64(instruction, 1);
+                Store(
+                    _scc,
+                    _module.AddInstruction(
+                        instruction.Opcode == "SCmpEqU64"
+                            ? SpirvOp.IEqual
+                            : SpirvOp.INotEqual,
+                        _boolType,
+                        left64,
+                        right64));
+                return true;
             }
 
             var left = GetRawSource(instruction, 0);
@@ -3693,6 +3846,9 @@ public static partial class Gen5SpirvTranslator
                     outputModifier = control.OutputModifier;
                     clamp = control.Clamp;
                     break;
+                case Gen5Vop3pControl control:
+                    clamp = control.Clamp;
+                    break;
             }
 
             value = outputModifier switch
@@ -3702,6 +3858,18 @@ public static partial class Gen5SpirvTranslator
                 3 => _module.AddInstruction(SpirvOp.FMul, _floatType, value, Float(0.5f)),
                 _ => value,
             };
+            // MODE.DX10_CLAMP is initialized from SPI_SHADER_PGM_RSRC1_*.
+            // RDNA clamps NaN ALU results to zero when this mode is enabled.
+            if (_dx10Clamp)
+            {
+                value = _module.AddInstruction(
+                    SpirvOp.Select,
+                    _floatType,
+                    _module.AddInstruction(SpirvOp.IsNan, _boolType, value),
+                    Float(0),
+                    value);
+            }
+
             if (clamp)
             {
                 value = Ext(43, _floatType, value, Float(0), Float(1));

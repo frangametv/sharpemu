@@ -1,0 +1,18 @@
+component,calls,nid,catalog_symbol
+ACM,1,ZIXln2K3XMk,sceAcmContextCreate
+AGC,1,BfBDZGbti7A,sceAgcGetIsTrinityMode
+AudioPropagation,291,ht-QXT3zGxo,sceAudioPropagationSystemGetRays
+AudioPropagation,23,CPLV6G-eXmk,sceAudioPropagationSystemRegisterMaterial
+AudioPropagation,5,7xyAxrusLko,sceAudioPropagationSystemQueryMemory
+AudioPropagation,5,8bI5h8req30,sceAudioPropagationRoomCreate
+AudioPropagation,5,aNEqtSHdUSo,sceAudioPropagationSystemCreate
+AudioPropagation,1,kIdb+iQUzCs,sceAudioPropagationSystemSetAttributes
+JSON,1,00oCq0RwSAY,_ZN3sce4Json11Initializer27setGlobalNullAccessCallBackEPFRKNS0_5ValueENS0_9ValueTypeEPS3_PvES7_
+Kernel,2,mkgXxsoxWHg,sceKernelClearVirtualRangeName
+Kernel,1,n1-v6FgU7MQ,sceKernelConfiguredFlexibleMemorySize
+NpUniversalDataSystem,1,4llLk7YJRTE,sceNpUniversalDataSystemEventPropertyArraySetString
+Pad,338,znaWI0gpuo8,scePadGetTriggerEffectState
+RUDP,1,amuBfI-AQc4,sceRudpInit
+SaveData,1,WAzWTZm1H+I,sceSaveDataTransferringMount
+Unknown,33,dolOmWH+huQ,not present in local catalog
+Unknown,33,fd5Bp5tGTgo,not present in local catalog

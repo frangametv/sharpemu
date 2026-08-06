@@ -1,6 +1,7 @@
 // Copyright (C) 2026 SharpEmu Emulator Project
 // SPDX-License-Identifier: GPL-2.0-or-later
 
+using System.Reflection;
 using SharpEmu.HLE;
 using SharpEmu.Libs.Kernel;
 using Xunit;
@@ -10,7 +11,26 @@ namespace SharpEmu.Libs.Tests.Pthread;
 public sealed class PthreadMutexSemanticsTests
 {
     [Fact]
-    public void AdaptiveMutex_SelfLockIsIdempotent()
+    public void ZeroInitializedMutex_SelfLockDoesNotInflateRecursion()
+    {
+        const ulong memoryBase = 0x2_0000_0000;
+        const ulong mutexAddress = memoryBase + 0x100;
+        var memory = new AllocatingCpuMemory(memoryBase, 0x4000);
+        var context = new CpuContext(memory, Generation.Gen5);
+        context[CpuRegister.Rdi] = mutexAddress;
+
+        Assert.Equal(0, KernelPthreadCompatExports.PthreadMutexLock(context));
+        Assert.Equal((int)OrbisGen2Result.ORBIS_GEN2_ERROR_DEADLOCK,
+            KernelPthreadCompatExports.PthreadMutexLock(context));
+        Assert.Equal(0, KernelPthreadCompatExports.PthreadMutexUnlock(context));
+
+        // One unlock must fully release the implicit mutex for the next lock.
+        Assert.Equal(0, KernelPthreadCompatExports.PthreadMutexLock(context));
+        Assert.Equal(0, KernelPthreadCompatExports.PthreadMutexUnlock(context));
+    }
+
+    [Fact]
+    public void AdaptiveMutex_SelfLockUsesCompatibilityRecursion()
     {
         const ulong memoryBase = 0x1_0000_0000;
         const ulong mutexAddress = memoryBase + 0x100;
@@ -22,180 +42,126 @@ public sealed class PthreadMutexSemanticsTests
         Assert.Equal(0, KernelPthreadCompatExports.PthreadMutexLock(context));
         Assert.Equal(0, KernelPthreadCompatExports.PthreadMutexLock(context));
         Assert.Equal(0, KernelPthreadCompatExports.PthreadMutexUnlock(context));
-        Assert.NotEqual(0, KernelPthreadCompatExports.PthreadMutexUnlock(context));
-    }
-
-    [Fact]
-    public void AdaptiveMutex_GuestTrackedSelfLockReturnsDeadlockAndSingleUnlockReleases()
-    {
-        const ulong memoryBase = 0x1_0001_0000;
-        const ulong mutexAddress = memoryBase + 0x100;
-        var memory = new AllocatingCpuMemory(memoryBase, 0x4000);
-        var context = new CpuContext(memory, Generation.Gen5);
-        Assert.True(context.TryWriteUInt64(mutexAddress, 1)); // Static adaptive initializer.
-        context[CpuRegister.Rdi] = mutexAddress;
-
-        Assert.Equal(0, KernelPthreadCompatExports.PthreadMutexLock(context));
-
-        var currentThreadHandle = KernelPthreadState.GetCurrentThreadHandle();
-        Assert.True(context.TryWriteUInt64(mutexAddress + 8, currentThreadHandle));
-        Assert.Equal(
-            (int)OrbisGen2Result.ORBIS_GEN2_ERROR_DEADLOCK,
-            KernelPthreadCompatExports.PthreadMutexLock(context));
-
-        Assert.True(context.TryWriteUInt64(mutexAddress + 8, 0));
-        Assert.Equal(0, KernelPthreadCompatExports.PthreadMutexUnlock(context));
-        Assert.Equal(0, KernelPthreadCompatExports.PthreadMutexTrylock(context));
         Assert.Equal(0, KernelPthreadCompatExports.PthreadMutexUnlock(context));
     }
 
     [Fact]
-    public void RecursiveMutex_GuestTrackedSelfLockKeepsRecursiveSemantics()
-    {
-        const ulong memoryBase = 0x1_0002_0000;
-        const ulong attrAddress = memoryBase + 0x100;
-        const ulong mutexAddress = memoryBase + 0x200;
-        var memory = new AllocatingCpuMemory(memoryBase, 0x4000);
-        var context = new CpuContext(memory, Generation.Gen5);
-
-        context[CpuRegister.Rdi] = attrAddress;
-        Assert.Equal(0, KernelPthreadCompatExports.PthreadMutexattrInit(context));
-        context[CpuRegister.Rsi] = 2;
-        Assert.Equal(0, KernelPthreadCompatExports.PthreadMutexattrSettype(context));
-
-        context[CpuRegister.Rdi] = mutexAddress;
-        context[CpuRegister.Rsi] = attrAddress;
-        Assert.Equal(0, KernelPthreadCompatExports.PthreadMutexInit(context));
-        Assert.Equal(0, KernelPthreadCompatExports.PthreadMutexLock(context));
-
-        var currentThreadHandle = KernelPthreadState.GetCurrentThreadHandle();
-        Assert.True(context.TryWriteUInt64(mutexAddress + 8, currentThreadHandle));
-        Assert.Equal(0, KernelPthreadCompatExports.PthreadMutexLock(context));
-        Assert.Equal(0, KernelPthreadCompatExports.PthreadMutexUnlock(context));
-        Assert.Equal(0, KernelPthreadCompatExports.PthreadMutexUnlock(context));
-        Assert.NotEqual(0, KernelPthreadCompatExports.PthreadMutexUnlock(context));
-    }
-
-    [Fact]
-    public async Task ContendedMutex_HandsOffOneHostWaiterAtATime()
-    {
-        const ulong memoryBase = 0x2_0000_0000;
-        const ulong mutexAddress = memoryBase + 0x100;
-        var memory = new AllocatingCpuMemory(memoryBase, 0x4000);
-        var ownerContext = new CpuContext(memory, Generation.Gen5);
-        Assert.True(ownerContext.TryWriteUInt64(mutexAddress, 1));
-        ownerContext[CpuRegister.Rdi] = mutexAddress;
-        Assert.Equal(0, KernelPthreadCompatExports.PthreadMutexLock(ownerContext));
-
-        using var waitersStarted = new CountdownEvent(2);
-        using var firstAcquired = new ManualResetEventSlim(false);
-        using var secondAcquired = new ManualResetEventSlim(false);
-        using var releaseFirst = new ManualResetEventSlim(false);
-        var acquisitionCount = 0;
-
-        Task<(int LockResult, int UnlockResult)> StartWaiter() =>
-            Task.Factory.StartNew(
-                () =>
-                {
-                    var waiterContext = new CpuContext(memory, Generation.Gen5);
-                    waiterContext[CpuRegister.Rdi] = mutexAddress;
-                    waitersStarted.Signal();
-                    var lockResult = KernelPthreadCompatExports.PthreadMutexLock(waiterContext);
-                    if (lockResult != 0)
-                    {
-                        return (lockResult, int.MinValue);
-                    }
-
-                    if (Interlocked.Increment(ref acquisitionCount) == 1)
-                    {
-                        firstAcquired.Set();
-                        releaseFirst.Wait(TimeSpan.FromSeconds(5));
-                    }
-                    else
-                    {
-                        secondAcquired.Set();
-                    }
-
-                    var unlockResult = KernelPthreadCompatExports.PthreadMutexUnlock(waiterContext);
-                    return (lockResult, unlockResult);
-                },
-                CancellationToken.None,
-                TaskCreationOptions.LongRunning,
-                TaskScheduler.Default);
-
-        var firstWaiter = StartWaiter();
-        var secondWaiter = StartWaiter();
-        Assert.True(waitersStarted.Wait(TimeSpan.FromSeconds(5)));
-        Thread.Sleep(50);
-        Assert.Equal(0, Volatile.Read(ref acquisitionCount));
-
-        Assert.Equal(0, KernelPthreadCompatExports.PthreadMutexUnlock(ownerContext));
-        Assert.True(firstAcquired.Wait(TimeSpan.FromSeconds(5)));
-        Assert.Equal(1, Volatile.Read(ref acquisitionCount));
-        releaseFirst.Set();
-        Assert.True(secondAcquired.Wait(TimeSpan.FromSeconds(5)));
-
-        var results = await Task.WhenAll(firstWaiter, secondWaiter).WaitAsync(TimeSpan.FromSeconds(5));
-        Assert.All(results, result => Assert.Equal((0, 0), result));
-        Assert.Equal(2, Volatile.Read(ref acquisitionCount));
-    }
-
-    [Fact]
-    public async Task ContendedMutex_PreservesMutualExclusionUnderLoad()
+    public void ExitingOwner_ReleasesMutexForNextLocker()
     {
         const ulong memoryBase = 0x3_0000_0000;
         const ulong mutexAddress = memoryBase + 0x100;
-        const int workerCount = 4;
-        const int iterationsPerWorker = 250;
         var memory = new AllocatingCpuMemory(memoryBase, 0x4000);
-        var initializationContext = new CpuContext(memory, Generation.Gen5);
-        Assert.True(initializationContext.TryWriteUInt64(mutexAddress, 1));
-        initializationContext[CpuRegister.Rdi] = mutexAddress;
-        Assert.Equal(0, KernelPthreadCompatExports.PthreadMutexLock(initializationContext));
-        Assert.Equal(0, KernelPthreadCompatExports.PthreadMutexUnlock(initializationContext));
+        var context = new CpuContext(memory, Generation.Gen5);
+        context[CpuRegister.Rdi] = mutexAddress;
 
-        using var start = new ManualResetEventSlim(false);
-        var insideCriticalSection = 0;
-        var mutualExclusionViolations = 0;
-        var protectedCounter = 0;
-        var workers = Enumerable.Range(0, workerCount)
-            .Select(_ => Task.Factory.StartNew(
-                () =>
+        Assert.Equal(0, KernelPthreadCompatExports.PthreadMutexLock(context));
+        Assert.Equal(0, KernelPthreadCompatExports.PthreadSelf(context));
+        var ownerThreadHandle = context[CpuRegister.Rax];
+        Assert.NotEqual(0UL, ownerThreadHandle);
+
+        KernelPthreadCompatExports.ReleaseThreadSynchronizationState(ownerThreadHandle);
+
+        context[CpuRegister.Rdi] = mutexAddress;
+        Assert.Equal(0, KernelPthreadCompatExports.PthreadMutexLock(context));
+        Assert.Equal(0, KernelPthreadCompatExports.PthreadMutexUnlock(context));
+    }
+
+    [Fact]
+    public void MutexUnlock_ReservesHandoffForOldestWaiter()
+    {
+        const ulong memoryBase = 0x1_1000_0000;
+        const ulong mutexAddress = memoryBase + 0x100;
+        var memory = new AllocatingCpuMemory(memoryBase, 0x4000);
+        var ownerContext = new CpuContext(memory, Generation.Gen5);
+        ownerContext[CpuRegister.Rdi] = mutexAddress;
+        Assert.True(ownerContext.TryWriteUInt64(mutexAddress, 1)); // Static adaptive initializer.
+        Assert.Equal(0, KernelPthreadCompatExports.PthreadMutexLock(ownerContext));
+
+        var state = GetMutexState(mutexAddress);
+        var waiterCount = state.GetType().GetProperty("WaiterCount", BindingFlags.Instance | BindingFlags.Public);
+        Assert.NotNull(waiterCount);
+
+        using var waiterStarted = new ManualResetEventSlim();
+        using var waiterAcquired = new ManualResetEventSlim();
+        using var releaseWaiter = new ManualResetEventSlim();
+        Exception? waiterError = null;
+        var waiter = new Thread(() =>
+        {
+            try
+            {
+                var waiterContext = new CpuContext(memory, Generation.Gen5);
+                waiterContext[CpuRegister.Rdi] = mutexAddress;
+                waiterStarted.Set();
+                Assert.Equal(0, KernelPthreadCompatExports.PthreadMutexLock(waiterContext));
+                waiterAcquired.Set();
+                Assert.True(releaseWaiter.Wait(TimeSpan.FromSeconds(5)));
+                Assert.Equal(0, KernelPthreadCompatExports.PthreadMutexUnlock(waiterContext));
+            }
+            catch (Exception exception)
+            {
+                waiterError = exception;
+            }
+        });
+
+        waiter.IsBackground = true;
+        waiter.Start();
+        Assert.True(waiterStarted.Wait(TimeSpan.FromSeconds(5)));
+        Assert.True(SpinWait.SpinUntil(
+            () =>
+            {
+                lock (state)
                 {
-                    var context = new CpuContext(memory, Generation.Gen5);
-                    context[CpuRegister.Rdi] = mutexAddress;
-                    start.Wait();
-                    for (var iteration = 0; iteration < iterationsPerWorker; iteration++)
-                    {
-                        if (KernelPthreadCompatExports.PthreadMutexLock(context) != 0)
-                        {
-                            throw new InvalidOperationException("pthread mutex lock failed during contention stress.");
-                        }
+                    return (int)waiterCount.GetValue(state)! == 1;
+                }
+            },
+            TimeSpan.FromSeconds(5)));
 
-                        if (Interlocked.Increment(ref insideCriticalSection) != 1)
-                        {
-                            Interlocked.Increment(ref mutualExclusionViolations);
-                        }
+        int bargingResult;
+        lock (state)
+        {
+            // Keep the waiter from reacquiring the host monitor between these
+            // two calls. The mutex is unowned but already promised to it, so a
+            // newcomer must observe BUSY rather than stealing the hand-off.
+            Assert.Equal(0, KernelPthreadCompatExports.PthreadMutexUnlock(ownerContext));
+            bargingResult = KernelPthreadCompatExports.PthreadMutexTrylock(ownerContext);
+            if (bargingResult == 0)
+            {
+                // Keep the regression test self-cleaning against the old,
+                // barging implementation so its waiter cannot leak on failure.
+                Assert.Equal(0, KernelPthreadCompatExports.PthreadMutexUnlock(ownerContext));
+            }
+        }
 
-                        protectedCounter++;
-                        Thread.SpinWait(20);
-                        Interlocked.Decrement(ref insideCriticalSection);
+        try
+        {
+            Assert.True(waiterAcquired.Wait(TimeSpan.FromSeconds(5)));
+        }
+        finally
+        {
+            releaseWaiter.Set();
+            Assert.True(waiter.Join(TimeSpan.FromSeconds(5)));
+        }
 
-                        if (KernelPthreadCompatExports.PthreadMutexUnlock(context) != 0)
-                        {
-                            throw new InvalidOperationException("pthread mutex unlock failed during contention stress.");
-                        }
-                    }
-                },
-                CancellationToken.None,
-                TaskCreationOptions.LongRunning,
-                TaskScheduler.Default))
-            .ToArray();
+        Assert.Null(waiterError);
+        Assert.Equal((int)OrbisGen2Result.ORBIS_GEN2_ERROR_BUSY, bargingResult);
+    }
 
-        start.Set();
-        await Task.WhenAll(workers).WaitAsync(TimeSpan.FromSeconds(10));
-        Assert.Equal(0, Volatile.Read(ref mutualExclusionViolations));
-        Assert.Equal(workerCount * iterationsPerWorker, protectedCounter);
+    private static object GetMutexState(ulong mutexAddress)
+    {
+        var statesField = typeof(KernelPthreadCompatExports).GetField(
+            "_mutexStates",
+            BindingFlags.NonPublic | BindingFlags.Static);
+        Assert.NotNull(statesField);
+
+        var states = statesField.GetValue(null);
+        Assert.NotNull(states);
+        var tryGetValue = states.GetType().GetMethod("TryGetValue", BindingFlags.Instance | BindingFlags.Public);
+        Assert.NotNull(tryGetValue);
+
+        object?[] arguments = [mutexAddress, null];
+        Assert.True((bool)tryGetValue.Invoke(states, arguments)!);
+        Assert.NotNull(arguments[1]);
+        return arguments[1]!;
     }
 
     /// <summary>

@@ -5,6 +5,10 @@ using System.Runtime.InteropServices;
 
 namespace SharpEmu.HLE;
 
+// Attribution: substantial fixed-address guest-memory portions in this file were originally
+// authored by @xnetcat and later adapted in PR #216. Source snapshot:
+// https://github.com/xnetcat/sharpemu/tree/2497ea6799432ac2385a50f739eff2ce922d6fd4
+
 /// <summary>
 /// Cross-platform host virtual memory API with Win32 semantics.
 /// On Windows this forwards directly to kernel32. On POSIX systems it is
@@ -128,12 +132,17 @@ public static unsafe class HostMemory
         private const int PROT_EXEC = 0x4;
 
         private const int MAP_PRIVATE = 0x02;
-        private const int MAP_FIXED = 0x10;
         private static readonly int MAP_ANON = OperatingSystem.IsMacOS() ? 0x1000 : 0x20;
         private static readonly int MAP_NORESERVE = OperatingSystem.IsMacOS() ? 0 : 0x4000;
 
         // Linux-only: fail instead of clobbering an existing mapping.
         private const int MAP_FIXED_NOREPLACE = 0x100000;
+
+        private const int KERN_SUCCESS = 0;
+
+        // On Darwin fixed placement is represented by the absence of
+        // VM_FLAGS_ANYWHERE. Do not add VM_FLAGS_OVERWRITE: overlap must fail.
+        private const int VM_FLAGS_FIXED = 0;
 
         private static readonly nint MAP_FAILED = -1;
 
@@ -146,6 +155,7 @@ public static unsafe class HostMemory
             public ulong Size;
             public uint DefaultProtect;
             public Dictionary<ulong, uint>? PageProtects;
+            public bool UsesMachAllocation;
 
             public ulong End => Base + Size;
 
@@ -212,6 +222,7 @@ public static unsafe class HostMemory
                 }
 
                 nint result;
+                var usesMachAllocation = false;
                 if (address != null)
                 {
                     // Win32 maps at exactly the requested address or fails
@@ -232,6 +243,27 @@ public static unsafe class HostMemory
 
                     var exactFlags = OperatingSystem.IsMacOS() ? flags : flags | MAP_FIXED_NOREPLACE;
                     result = mmap((nint)address, (nuint)alignedSize, posixProtect, exactFlags, -1, 0);
+                    if (result != MAP_FAILED && (ulong)result != (ulong)address)
+                    {
+                        munmap(result, (nuint)alignedSize);
+                        result = MAP_FAILED;
+                    }
+
+                    if (result == MAP_FAILED && OperatingSystem.IsMacOS())
+                    {
+                        // Darwin commonly ignores low fixed-address mmap hints
+                        // under Rosetta. mach_vm_allocate with fixed placement
+                        // and no overwrite flag atomically maps the requested
+                        // range or fails without clobbering CLR, dyld, JIT, or
+                        // Rosetta memory that is absent from this shadow table.
+                        Trace($"exact mmap hint failed, retrying with fixed Mach allocation: addr=0x{(ulong)address:X16}");
+                        result = AllocateDarwinFixed(
+                            (nint)address,
+                            alignedSize,
+                            posixProtect);
+                        usesMachAllocation = result != MAP_FAILED;
+                    }
+
                     if (result == MAP_FAILED || (ulong)result != (ulong)address)
                     {
                         Trace($"exact mmap failed: addr=0x{(ulong)address:X16} got=0x{(ulong)result:X16} size=0x{alignedSize:X} errno={Marshal.GetLastPInvokeError()}");
@@ -257,7 +289,8 @@ public static unsafe class HostMemory
                 {
                     Base = (ulong)result,
                     Size = alignedSize,
-                    DefaultProtect = protect
+                    DefaultProtect = protect,
+                    UsesMachAllocation = usesMachAllocation,
                 };
 
                 return (void*)result;
@@ -276,8 +309,15 @@ public static unsafe class HostMemory
                     return false;
                 }
 
-                Regions.Remove((ulong)address);
-                return munmap((nint)address, (nuint)region.Size) == 0;
+                var released = region.UsesMachAllocation
+                    ? mach_vm_deallocate(mach_task_self(), (ulong)address, region.Size) == KERN_SUCCESS
+                    : munmap((nint)address, (nuint)region.Size) == 0;
+                if (released)
+                {
+                    Regions.Remove((ulong)address);
+                }
+
+                return released;
             }
         }
 
@@ -474,6 +514,40 @@ public static unsafe class HostMemory
             };
         }
 
+        private static nint AllocateDarwinFixed(nint requestedAddress, ulong size, int posixProtect)
+        {
+            var address = (ulong)requestedAddress;
+            var result = mach_vm_allocate(
+                mach_task_self(),
+                ref address,
+                size,
+                VM_FLAGS_FIXED);
+            if (result != KERN_SUCCESS || address != (ulong)requestedAddress)
+            {
+                if (result == KERN_SUCCESS)
+                {
+                    _ = mach_vm_deallocate(mach_task_self(), address, size);
+                }
+
+                Trace(
+                    $"fixed Mach allocation failed: addr=0x{(ulong)requestedAddress:X16} " +
+                    $"size=0x{size:X} kern_return={result}");
+                return MAP_FAILED;
+            }
+
+            if (mprotect((nint)address, (nuint)size, posixProtect) == 0)
+            {
+                return (nint)address;
+            }
+
+            var error = Marshal.GetLastPInvokeError();
+            _ = mach_vm_deallocate(mach_task_self(), address, size);
+            Trace(
+                $"fixed Mach allocation protection failed: addr=0x{address:X16} " +
+                $"size=0x{size:X} errno={error}");
+            return MAP_FAILED;
+        }
+
         private static void Trace(string message)
         {
             if (string.Equals(Environment.GetEnvironmentVariable("SHARPEMU_LOG_VMEM"), "1", StringComparison.Ordinal))
@@ -494,5 +568,14 @@ public static unsafe class HostMemory
 
         [DllImport("libc", SetLastError = true)]
         private static extern int mprotect(nint addr, nuint length, int prot);
+
+        [DllImport("libSystem.B.dylib")]
+        private static extern uint mach_task_self();
+
+        [DllImport("libSystem.B.dylib")]
+        private static extern int mach_vm_allocate(uint target, ref ulong address, ulong size, int flags);
+
+        [DllImport("libSystem.B.dylib")]
+        private static extern int mach_vm_deallocate(uint target, ulong address, ulong size);
     }
 }

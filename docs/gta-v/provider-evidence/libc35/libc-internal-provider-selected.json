@@ -1,0 +1,107 @@
+{
+  "executable_sha256": "309cb9031209eb9b838216994d2c39613fcd65ec1eae493c4b784b9dacdd06bb",
+  "format": "sharpemu-ghidra-selected-nid-functions-v1",
+  "function_count": 4,
+  "functions": [
+    {
+      "external": false,
+      "function_body_addresses": 325,
+      "function_body_sha256": "6e18cc9234133bf811f2677928d05f1a4a8c71758994ee5a1307b6857b88f7b7",
+      "function_entry": "0015a570",
+      "function_name": "3BytPOQgVKc#D#A",
+      "function_present": true,
+      "instruction_count": 77,
+      "nid": "3BytPOQgVKc",
+      "runtime_direct_bridge_count": 4,
+      "runtime_load_base": "0x0000000805AEA000",
+      "runtime_symbol_addresses": [
+        "0x0000000805C44570"
+      ],
+      "symbol": "3BytPOQgVKc#D#A",
+      "symbol_address": "0015a570",
+      "thunk": false,
+      "thunk_target": null,
+      "thunk_target_external": false
+    },
+    {
+      "external": false,
+      "function_body_addresses": 69,
+      "function_body_sha256": "86269fe5bfb80801d4fde8b422b2d17ab05e8da0764fc4cd022a8a9fee0885a4",
+      "function_entry": "0010f5a0",
+      "function_name": "Vla-Z+eXlxo#D#A",
+      "function_present": true,
+      "instruction_count": 28,
+      "nid": "Vla-Z+eXlxo",
+      "runtime_direct_bridge_count": 4,
+      "runtime_load_base": "0x0000000805AEA000",
+      "runtime_symbol_addresses": [
+        "0x0000000805BF95A0"
+      ],
+      "symbol": "Vla-Z+eXlxo#D#A",
+      "symbol_address": "0010f5a0",
+      "thunk": false,
+      "thunk_target": null,
+      "thunk_target_external": false
+    },
+    {
+      "external": false,
+      "function_body_addresses": 111,
+      "function_body_sha256": "63ca468d074beebad22585d095b4484aeed78d5135adea407c4d32f00dc1b011",
+      "function_entry": "0010f670",
+      "function_name": "gigoVHZvVPE#D#A",
+      "function_present": true,
+      "instruction_count": 36,
+      "nid": "gigoVHZvVPE",
+      "runtime_direct_bridge_count": 4,
+      "runtime_load_base": "0x0000000805AEA000",
+      "runtime_symbol_addresses": [
+        "0x0000000805BF9670"
+      ],
+      "symbol": "gigoVHZvVPE#D#A",
+      "symbol_address": "0010f670",
+      "thunk": false,
+      "thunk_target": null,
+      "thunk_target_external": false
+    },
+    {
+      "external": false,
+      "function_body_addresses": 11,
+      "function_body_sha256": "d81f74073b1860ab0dd30b547bc9e6bc46ecaf55f108f78d8ea8c18e98b36d9b",
+      "function_entry": "0010f860",
+      "function_name": "mfHdJTIvhuo#D#A",
+      "function_present": true,
+      "instruction_count": 5,
+      "nid": "mfHdJTIvhuo",
+      "runtime_direct_bridge_count": 4,
+      "runtime_load_base": "0x0000000805AEA000",
+      "runtime_symbol_addresses": [
+        "0x0000000805BF9860"
+      ],
+      "symbol": "mfHdJTIvhuo#D#A",
+      "symbol_address": "0010f860",
+      "thunk": false,
+      "thunk_target": null,
+      "thunk_target_external": false
+    }
+  ],
+  "ghidra_version": "12.1.2",
+  "missing": [],
+  "program_name": "gta-v-libc.reconstructed.elf",
+  "provenance": {
+    "evidence_policy": "Ghidra plus SharpEmu runtime routing only; no emulator-source contracts",
+    "runtime_log_sha256": "421c0627d2fa265a608c98bd54d280153f54f611ddd240c0bdd1166e00dc9b88",
+    "source_hashes": {
+      "EVIDENCE.md": "70bce710805b582b134c923038ecf9a82329e24a7a2d4f955400ebcb32e87e0d",
+      "cleanup-proof-deep.txt": "66da95fde8c387f9d71ce1cb705c7301869b49c7959c2e6734b9ef9b815a1a87",
+      "cleanup-proof.txt": "bcfcd26bd2cb185f7d4538075268ad333299f3105f3b1d7899d80af931b69448",
+      "consolidated-nid-evidence.json": "fa845efcb3786257c57105f7c54d318d1f1b732a865ee30b37378fb79b4e33b3",
+      "data-import-disposition.csv": "6028eb14a42456f3aaedaf41d1c9a8c0d07ca47835e65e391acace3ded4cadf8",
+      "kernel-hle-contract-queue.csv": "8b9d1d6b7e66afa6d431bc8df186fd557ef8b02c18906a5cd0686b2dd589b7ce",
+      "libc-non-lle-contract-queue.csv": "f0add93f4100a99f556e6b871fdbc76bb4d20f606287e49f69b5da82251ad045",
+      "prefer-lle-include-candidates.csv": "1967c50f439cf71ea00c481bd86277a22251fc21988e41ff780d26b3c9f3c337",
+      "provider-coverage-summary.json": "9bc760c8cda928fd848d5dd93610cf95dca912f291d1ab9f7d9f404e3c82525e"
+    }
+  },
+  "target_count": 4,
+  "without_functions": []
+}

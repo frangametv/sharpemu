@@ -67,6 +67,7 @@ Current capabilities include:
 * Initial loading game files
 * Shader/resource submits and AGC initial
 * Video outputs in some games
+* Experimental, read-only [System UI boot harness](./SYSTEM_UI.md)
 
 Some games have reached like `sceVideoOut` and AGC stages.
 
@@ -97,6 +98,9 @@ chmod +x ./SharpEmu
 
 A Vulkan-capable GPU and current graphics driver are required. The macOS
 release includes the MoltenVK Vulkan implementation.
+
+For artifact-independent System UI bring-up using your own extracted system
+software, see [System UI boot mode](./SYSTEM_UI.md).
 
 > [!IMPORTANT]  
 > This project does **not** support or condone piracy.  

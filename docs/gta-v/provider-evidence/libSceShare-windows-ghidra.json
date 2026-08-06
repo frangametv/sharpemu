@@ -1,0 +1,53 @@
+{
+  "executable_sha256": "02b41c8d10cc86418a7b3182a972d0a24163791eaf67a187ac6d1df531e4560d",
+  "format": "sharpemu-ghidra-selected-nid-functions-v1",
+  "function_count": 2,
+  "functions": [
+    {
+      "external": false,
+      "function_body_addresses": 39,
+      "function_body_sha256": "0ff4ac443b7b32e883e061b68595ed43fafac0c23d77e8f568a6ff271ddb8c63",
+      "function_entry": "00006d30",
+      "function_name": "5wjxESwX68I#I#A",
+      "function_present": true,
+      "instruction_count": 13,
+      "nid": "5wjxESwX68I",
+      "result_file": "libSceShare-chunk-00.result.tsv",
+      "symbol": "5wjxESwX68I#I#A",
+      "symbol_address": "00006d30",
+      "thunk": false,
+      "thunk_target": "",
+      "thunk_target_external": null,
+      "wave": "wave2"
+    },
+    {
+      "external": false,
+      "function_body_addresses": 39,
+      "function_body_sha256": "01839d80f95ce1b7aa83b98b7b18b7abfd601aa63414cadd5840574b5825c822",
+      "function_entry": "00006d00",
+      "function_name": "YBiIdcDPrxs#I#A",
+      "function_present": true,
+      "instruction_count": 13,
+      "nid": "YBiIdcDPrxs",
+      "result_file": "libSceShare-chunk-00.result.tsv",
+      "symbol": "YBiIdcDPrxs#I#A",
+      "symbol_address": "00006d00",
+      "thunk": false,
+      "thunk_target": "",
+      "thunk_target_external": null,
+      "wave": "wave2"
+    }
+  ],
+  "ghidra_version": "12.1.2_PUBLIC_20260605",
+  "missing": [],
+  "program_name": "libSceShare.native.sprx",
+  "provenance": {
+    "audit_sha256": "a28951db44df6f026715f9ab8e47b992cea172e396bc6d80b4383e00c14f2be6",
+    "evidence_policy": "Ghidra analysis of exact Gen5 provider ELFs only; no Kyty-derived contracts or implementations.",
+    "excluded_nids": [],
+    "recommendations_sha256": "f059a17f1440499c499311093ac225a428f19c5a8776c41ca609aecd670df7c5",
+    "summary_sha256": "e1e93ff2f5967daa1d6f838b08f4490de7144118032e0d4e413cb767ab50e0a2"
+  },
+  "target_count": 2,
+  "without_functions": []
+}

@@ -123,6 +123,89 @@ internal static class KernelSocketCompatExports
         return true;
     }
 
+    internal static bool TryGetPeerEndpoint(
+        int fd,
+        out IPEndPoint? endpoint,
+        out bool descriptorExists)
+    {
+        endpoint = null;
+        descriptorExists = false;
+        TcpClient? client;
+        lock (Gate)
+        {
+            if (!Sockets.TryGetValue(fd, out var state) || state is null)
+            {
+                return false;
+            }
+
+            descriptorExists = true;
+            if (!state.Connected || state.Client is null)
+            {
+                return false;
+            }
+
+            client = state.Client;
+        }
+
+        try
+        {
+            endpoint = client.Client.RemoteEndPoint as IPEndPoint;
+            if (endpoint?.Address.IsIPv4MappedToIPv6 == true)
+            {
+                endpoint = new IPEndPoint(endpoint.Address.MapToIPv4(), endpoint.Port);
+            }
+            return endpoint is not null;
+        }
+        catch (SocketException)
+        {
+            return false;
+        }
+        catch (ObjectDisposedException)
+        {
+            return false;
+        }
+    }
+
+    internal static bool TryShutdownSocket(int fd, int how, out bool descriptorExists)
+    {
+        descriptorExists = false;
+        TcpClient? client;
+        lock (Gate)
+        {
+            if (!Sockets.TryGetValue(fd, out var state) || state is null)
+            {
+                return false;
+            }
+
+            descriptorExists = true;
+            if (!state.Connected || state.Client is null)
+            {
+                return false;
+            }
+
+            client = state.Client;
+        }
+
+        try
+        {
+            client.Client.Shutdown(how switch
+            {
+                0 => SocketShutdown.Receive,
+                1 => SocketShutdown.Send,
+                _ => SocketShutdown.Both,
+            });
+            return true;
+        }
+        catch (SocketException)
+        {
+            return false;
+        }
+        catch (ObjectDisposedException)
+        {
+            return false;
+        }
+    }
+
     [SysAbiExport(
         Nid = "TU-d9PfIHPM",
         ExportName = "socket",

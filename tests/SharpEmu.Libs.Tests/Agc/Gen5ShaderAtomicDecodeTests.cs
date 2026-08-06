@@ -103,6 +103,19 @@ public sealed class Gen5ShaderAtomicDecodeTests
         Assert.Equal(new[] { Gen5Operand.Vector(3) }, instruction.Destinations);
     }
 
+    [Fact]
+    public void DsReadB64_ReturnsTwoConsecutiveRegisters()
+    {
+        // DS_READ_B64 v[5:6], v3
+        var instruction = DecodeSingle(0xD9D80000, 0x05000003);
+
+        Assert.Equal("DsReadB64", instruction.Opcode);
+        Assert.Equal(new[] { Gen5Operand.Vector(3) }, instruction.Sources);
+        Assert.Equal(
+            new[] { Gen5Operand.Vector(5), Gen5Operand.Vector(6) },
+            instruction.Destinations);
+    }
+
     private static Gen5ShaderInstruction DecodeSingle(params uint[] words)
     {
         var memory = new FakeCpuMemory(ShaderAddress, 0x1000);

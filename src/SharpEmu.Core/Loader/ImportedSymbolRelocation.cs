@@ -7,4 +7,5 @@ public readonly record struct ImportedSymbolRelocation(
     ulong TargetAddress,
     long Addend,
     string Nid,
-    bool IsData);
+    bool IsData,
+    bool IsWeak = false);

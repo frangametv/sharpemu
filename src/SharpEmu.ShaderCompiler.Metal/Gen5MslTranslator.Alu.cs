@@ -623,6 +623,21 @@ public static partial class Gen5MslTranslator
                 var comparison = $"({F(instruction, 0)} {op} {F(instruction, 1)})";
                 condition = unordered ? $"(!{comparison})" : comparison;
             }
+            else if (opcode.EndsWith("U64", StringComparison.Ordinal))
+            {
+                var op = TrimCompare(opcode) switch
+                {
+                    "Gt" => ">",
+                    _ => string.Empty,
+                };
+                if (op.Length == 0)
+                {
+                    error = $"unsupported 64-bit integer compare {opcode}";
+                    return false;
+                }
+
+                condition = $"(({RawSource64(instruction, 0)}) {op} ({RawSource64(instruction, 1)}))";
+            }
             else
             {
                 var signed = opcode.EndsWith("I32", StringComparison.Ordinal);
@@ -664,10 +679,14 @@ public static partial class Gen5MslTranslator
             }
             else
             {
-                var target = instruction.Control is Gen5SdwaControl
-                    { ScalarDestination: { } scalarDestination }
-                    ? scalarDestination
-                    : VccLoRegister;
+                var target = instruction.Control switch
+                {
+                    Gen5SdwaControl { ScalarDestination: { } scalarDestination } =>
+                        scalarDestination,
+                    Gen5Vop3Control { ScalarDestination: { } scalarDestination } =>
+                        scalarDestination,
+                    _ => VccLoRegister,
+                };
                 StoreMaskBit(target, active);
             }
 
@@ -952,6 +971,17 @@ public static partial class Gen5MslTranslator
                 return true;
             }
 
+            if (instruction.Opcode == "SBcnt1I32B64")
+            {
+                var source = Temp("ulong", RawSource64(instruction, 0));
+                var result = Temp(
+                    "uint",
+                    $"popcount((uint){source}) + popcount((uint)({source} >> 32))");
+                StoreScalar(destination, result);
+                Line($"scc = {result} != 0u;");
+                return true;
+            }
+
             if (instruction.Opcode.EndsWith("B64", StringComparison.Ordinal) ||
                 instruction.Opcode is "SBfeU64" or "SBfeI64")
             {
@@ -1002,6 +1032,15 @@ public static partial class Gen5MslTranslator
                 case "SNotB32":
                 {
                     var result = Temp("uint", $"~{left}");
+                    StoreScalar(destination, result);
+                    Line($"scc = {result} != 0u;");
+                    return true;
+                }
+                case "SAbsI32":
+                {
+                    var result = Temp(
+                        "uint",
+                        $"(({left} & 0x80000000u) != 0u ? (0u - {left}) : {left})");
                     StoreScalar(destination, result);
                     Line($"scc = {result} != 0u;");
                     return true;

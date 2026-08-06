@@ -1,0 +1,44 @@
+{
+  "current_unresolved_after_existing_data": 64,
+  "function_prefer_lle_include_candidates": 34,
+  "gta_v_libc_runtime_load_base": "0x0000000805AEA000",
+  "kernel_semantic_hle_functions": 18,
+  "libc_internal_ext_fail_closed_no_runtime_resolution": 1,
+  "live_hle_data_already_covered": 3,
+  "owned_queue": 67,
+  "posix_semantic_hle_functions": 9,
+  "primary_provider_coverage": {
+    "firmware_libSceLibcInternal": {
+      "data_symbols": 1,
+      "defined_functions": 8,
+      "targets": 9
+    },
+    "gta_v_libc_internal_audit": {
+      "defined_functions": 8,
+      "missing_data_symbol": 1,
+      "targets": 9
+    },
+    "gta_v_libc_libc_plus_hybrid": {
+      "data_symbols": 3,
+      "defined_functions": 30,
+      "targets": 33
+    },
+    "libkernel": {
+      "data_symbols": 1,
+      "defined_functions": 27,
+      "targets": 28
+    },
+    "libkernel_sys": {
+      "data_symbols": 1,
+      "defined_functions": 27,
+      "targets": 28
+    },
+    "libkernel_web": {
+      "data_symbols": 1,
+      "defined_functions": 21,
+      "missing": 6,
+      "targets": 28
+    }
+  },
+  "provider_authoritative_data_metadata_needed": 2
+}

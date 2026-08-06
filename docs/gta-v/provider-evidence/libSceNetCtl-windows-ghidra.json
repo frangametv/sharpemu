@@ -1,0 +1,70 @@
+{
+  "executable_sha256": "8ef1a46c912528979daa7dad7bee48df808793f3aede0545b0453d19ecf7c38b",
+  "format": "sharpemu-ghidra-selected-nid-functions-v1",
+  "function_count": 3,
+  "functions": [
+    {
+      "external": false,
+      "function_body_addresses": 42,
+      "function_body_sha256": "887f9e4a09fae7c9e3732f07a280ddfa25705a28be9eab9a32a2ff1f5ff5fc7b",
+      "function_entry": "000032d0",
+      "function_name": "0cBgduPRR+M#H#A",
+      "function_present": true,
+      "instruction_count": 11,
+      "nid": "0cBgduPRR+M",
+      "result_file": "libSceNetCtl-chunk-00.result.tsv",
+      "symbol": "0cBgduPRR+M#H#A",
+      "symbol_address": "000032d0",
+      "thunk": false,
+      "thunk_target": "",
+      "thunk_target_external": null,
+      "wave": "wave2"
+    },
+    {
+      "external": false,
+      "function_body_addresses": 115,
+      "function_body_sha256": "19d5577e981c34c97771bb4458db17723f96efbf1448b46c63f09f7e68f72be4",
+      "function_entry": "000025c0",
+      "function_name": "Rqm2OnZMCz0#H#A",
+      "function_present": true,
+      "instruction_count": 32,
+      "nid": "Rqm2OnZMCz0",
+      "result_file": "libSceNetCtl-chunk-00.result.tsv",
+      "symbol": "Rqm2OnZMCz0#H#A",
+      "symbol_address": "000025c0",
+      "thunk": false,
+      "thunk_target": "",
+      "thunk_target_external": null,
+      "wave": "wave2"
+    },
+    {
+      "external": false,
+      "function_body_addresses": 1,
+      "function_body_sha256": "ae3f4619b0413d70d3004b9131c3752153074e45725be13b9a148978895e359e",
+      "function_entry": "00002110",
+      "function_name": "Z4wwCFiBELQ#H#A",
+      "function_present": true,
+      "instruction_count": 1,
+      "nid": "Z4wwCFiBELQ",
+      "result_file": "libSceNetCtl-chunk-00.result.tsv",
+      "symbol": "Z4wwCFiBELQ#H#A",
+      "symbol_address": "00002110",
+      "thunk": false,
+      "thunk_target": "",
+      "thunk_target_external": null,
+      "wave": "wave2"
+    }
+  ],
+  "ghidra_version": "12.1.2_PUBLIC_20260605",
+  "missing": [],
+  "program_name": "libSceNetCtl.sprx",
+  "provenance": {
+    "audit_sha256": "a28951db44df6f026715f9ab8e47b992cea172e396bc6d80b4383e00c14f2be6",
+    "evidence_policy": "Ghidra analysis of exact Gen5 provider ELFs only; no Kyty-derived contracts or implementations.",
+    "excluded_nids": [],
+    "recommendations_sha256": "f059a17f1440499c499311093ac225a428f19c5a8776c41ca609aecd670df7c5",
+    "summary_sha256": "e1e93ff2f5967daa1d6f838b08f4490de7144118032e0d4e413cb767ab50e0a2"
+  },
+  "target_count": 3,
+  "without_functions": []
+}

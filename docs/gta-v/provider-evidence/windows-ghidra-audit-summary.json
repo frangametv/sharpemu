@@ -1,0 +1,316 @@
+{
+  "by_library": {
+    "libSceAgcDriver": {
+      "recommendation_counts": {
+        "add_gen5_prefer_lle_registration": 25,
+        "set_prefer_lle_on_existing_gen5_registration": 1
+      },
+      "status_counts": {
+        "defined_body": 26
+      },
+      "targets": 26
+    },
+    "libSceAjm": {
+      "recommendation_counts": {
+        "add_gen5_prefer_lle_registration": 1,
+        "exclude_missing_provider_symbol": 2
+      },
+      "status_counts": {
+        "defined_body": 1,
+        "missing_symbol": 2
+      },
+      "targets": 3
+    },
+    "libSceAmpr": {
+      "recommendation_counts": {
+        "add_gen5_prefer_lle_registration": 46
+      },
+      "status_counts": {
+        "defined_body": 46
+      },
+      "targets": 46
+    },
+    "libSceGameLiveStreaming": {
+      "recommendation_counts": {
+        "add_gen5_prefer_lle_registration": 2
+      },
+      "status_counts": {
+        "defined_body": 2
+      },
+      "targets": 2
+    },
+    "libSceJson2": {
+      "recommendation_counts": {
+        "add_gen5_prefer_lle_registration": 17
+      },
+      "status_counts": {
+        "defined_body": 17
+      },
+      "targets": 17
+    },
+    "libSceNet": {
+      "recommendation_counts": {
+        "add_gen5_prefer_lle_registration": 5
+      },
+      "status_counts": {
+        "defined_body": 5
+      },
+      "targets": 5
+    },
+    "libSceNetCtl": {
+      "recommendation_counts": {
+        "add_gen5_prefer_lle_registration": 3
+      },
+      "status_counts": {
+        "defined_body": 3
+      },
+      "targets": 3
+    },
+    "libSceNpAuth": {
+      "recommendation_counts": {
+        "add_gen5_prefer_lle_registration": 5
+      },
+      "status_counts": {
+        "defined_body": 5
+      },
+      "targets": 5
+    },
+    "libSceNpEntitlementAccess": {
+      "recommendation_counts": {
+        "add_gen5_prefer_lle_registration": 5
+      },
+      "status_counts": {
+        "defined_body": 5
+      },
+      "targets": 5
+    },
+    "libSceNpGameIntent": {
+      "recommendation_counts": {
+        "add_gen5_prefer_lle_registration": 3
+      },
+      "status_counts": {
+        "defined_body": 3
+      },
+      "targets": 3
+    },
+    "libSceNpManager": {
+      "recommendation_counts": {
+        "add_gen5_prefer_lle_registration": 5
+      },
+      "status_counts": {
+        "defined_body": 5
+      },
+      "targets": 5
+    },
+    "libSceNpUniversalDataSystem": {
+      "recommendation_counts": {
+        "add_gen5_prefer_lle_registration": 5
+      },
+      "status_counts": {
+        "defined_body": 5
+      },
+      "targets": 5
+    },
+    "libSceNpUtility": {
+      "recommendation_counts": {
+        "add_gen5_prefer_lle_registration": 5
+      },
+      "status_counts": {
+        "defined_body": 5
+      },
+      "targets": 5
+    },
+    "libSceNpWebApi2": {
+      "recommendation_counts": {
+        "add_gen5_prefer_lle_registration": 17
+      },
+      "status_counts": {
+        "defined_body": 11,
+        "defined_internal_thunk": 6
+      },
+      "targets": 17
+    },
+    "libScePlayerInvitationDialog": {
+      "recommendation_counts": {
+        "add_gen5_prefer_lle_registration": 2
+      },
+      "status_counts": {
+        "defined_body": 2
+      },
+      "targets": 2
+    },
+    "libSceRemoteplay": {
+      "recommendation_counts": {
+        "add_gen5_prefer_lle_registration": 3
+      },
+      "status_counts": {
+        "defined_body": 3
+      },
+      "targets": 3
+    },
+    "libSceRtc": {
+      "recommendation_counts": {
+        "add_gen5_prefer_lle_registration": 2
+      },
+      "status_counts": {
+        "defined_body": 2
+      },
+      "targets": 2
+    },
+    "libSceSaveData_native": {
+      "recommendation_counts": {
+        "add_gen5_prefer_lle_registration": 3
+      },
+      "status_counts": {
+        "defined_body": 3
+      },
+      "targets": 3
+    },
+    "libSceShare": {
+      "recommendation_counts": {
+        "add_gen5_prefer_lle_registration": 2
+      },
+      "status_counts": {
+        "defined_body": 2
+      },
+      "targets": 2
+    },
+    "libSceSharePlay": {
+      "recommendation_counts": {
+        "add_gen5_prefer_lle_registration": 2
+      },
+      "status_counts": {
+        "defined_body": 2
+      },
+      "targets": 2
+    },
+    "libSceSystemService": {
+      "recommendation_counts": {
+        "add_gen5_prefer_lle_registration": 5
+      },
+      "status_counts": {
+        "defined_body": 5
+      },
+      "targets": 5
+    },
+    "libSceVoice": {
+      "recommendation_counts": {
+        "add_gen5_prefer_lle_registration": 15
+      },
+      "status_counts": {
+        "defined_body": 15
+      },
+      "targets": 15
+    }
+  },
+  "evidence_policy": "Ghidra analysis of exact Gen5 provider ELFs only; no Kyty-derived contracts or implementations.",
+  "excluded_missing_symbols": 2,
+  "outputs": {
+    "WINDOWS_GHIDRA_NID_AUDIT.csv": {
+      "bytes": 84980,
+      "rows": 181,
+      "sha256": "a28951db44df6f026715f9ab8e47b992cea172e396bc6d80b4383e00c14f2be6"
+    },
+    "WINDOWS_GHIDRA_PREFER_LLE_RECOMMENDATIONS.csv": {
+      "bytes": 69942,
+      "rows": 181,
+      "sha256": "f059a17f1440499c499311093ac225a428f19c5a8776c41ca609aecd670df7c5"
+    }
+  },
+  "provider_sha256": {
+    "libSceAgcDriver.sprx": "bc2ca28f3632ce69e25ab44991ed1f49bc1624fe39c2fc81f2efc6e705876348",
+    "libSceAjm.sprx": "c7f70f6582a315df1f1f5541100bf83c78f179ce8736e6a2dca39acc0ee1c95e",
+    "libSceAmpr.sprx": "129a972cdb762d1b362ad136cdb802f5cac7d3a5f48ecb8b7e5d695c70af4047",
+    "libSceGameLiveStreaming.sprx": "93b31789fc637b0fa3f4c7fd9364f21130958583bfb10c717c222dac9fc3c369",
+    "libSceJson2.sprx": "1ca532e78ed5e02c553e99ebb01751df6baaefa0bd6481c69db56e08536ba06c",
+    "libSceNet.sprx": "c04e1735a3f80a502c120610a43d0d37741f7ef90040d6b9d3346cc43988c64d",
+    "libSceNetCtl.sprx": "8ef1a46c912528979daa7dad7bee48df808793f3aede0545b0453d19ecf7c38b",
+    "libSceNpAuth.sprx": "8492348ec1cf7be009b7b5f80a52b71ebb04e73998e55e26b2e03aac8e01edda",
+    "libSceNpEntitlementAccess.sprx": "13fbe892dbdea424b46d2c65fdf8b82441516f4dc7089c55bb4e00fc3df68820",
+    "libSceNpGameIntent.sprx": "7b8533f64300c45e45db6fb120c2609a3fcda7b05b0052aecc9a080c77b771ad",
+    "libSceNpManager.sprx": "2c192ec03cf2b3a8acc24c2aefd98ef8232c2bdbdf2f678deb980397ed48cb72",
+    "libSceNpUniversalDataSystem.sprx": "0ae12163797cb01f26cca884db98b3a4b137c84143e173021676e854da9ca6bb",
+    "libSceNpUtility.sprx": "80f7cedc7007c3f8dd0d2ecb6db7a005e1e76216bef7b932d81913585c80e572",
+    "libSceNpWebApi2.sprx": "9a7099ab99a65f1b818a8e61897ffcb31b02b74d6e0c2765688b4c3b71ed4ca5",
+    "libScePlayerInvitationDialog.sprx": "1c2924a5c0fa156299cda9e9ba55433690f7372f809464c0fc4ba6e33d3a569b",
+    "libSceRemoteplay.sprx": "7c33fa5c41b065bf7a3577dbb968af192dbc7768a84e706e2a98dcfa0d501d59",
+    "libSceRtc.sprx": "2af66216f6717b56c484552fb096e0dda4d75b3b559ff58610ce65dff5be121b",
+    "libSceSaveData.native.sprx": "d07ff61fa98adff1f0bdde7f1df03d33133e932a9da82ce1005d4784bc948755",
+    "libSceShare.native.sprx": "02b41c8d10cc86418a7b3182a972d0a24163791eaf67a187ac6d1df531e4560d",
+    "libSceSharePlay.sprx": "d41598603a31066e405fb2f60e5d848b36d12b0b109c3862f8d5eba93ae0ddb4",
+    "libSceSystemService.sprx": "6bcb5dd125d9d09b6053f383ba89b1613335bff5ab83870f0bd732b767f4aac9",
+    "libSceVoice.sprx": "bacd6c18bde775e27eade58f33460c86a7cad68b5c2716ce12b6bec8bd138df3"
+  },
+  "recommendation_counts": {
+    "add_gen5_prefer_lle_registration": 178,
+    "exclude_missing_provider_symbol": 2,
+    "set_prefer_lle_on_existing_gen5_registration": 1
+  },
+  "safe_provider_definitions": 179,
+  "schema_version": 1,
+  "status_counts": {
+    "defined_body": 173,
+    "defined_internal_thunk": 6,
+    "missing_symbol": 2
+  },
+  "targets": 181,
+  "unique_nids": 181,
+  "waves": {
+    "wave1": {
+      "jobs": 16,
+      "log_archive": {
+        "bytes": 86808,
+        "file": "windows-definition-audit-logs.zip",
+        "sha256": "48aac2a58177c68c10ece7ecab1a9b7c4f46a908132cf47701b8aab91189911b"
+      },
+      "log_validation": {
+        "analysis_succeeded": 16,
+        "audit_marker": 16,
+        "benign_cache_unlock_warning": 3,
+        "benign_elf_note_warning": 16,
+        "benign_extension_path_warning": 16,
+        "import_succeeded": 16
+      },
+      "logs": 16,
+      "plan_sha256": "844ea15fe0af6473df7dc272d0d1dd3882cdac441808a46015a62800e855dc72",
+      "result_archive": {
+        "bytes": 36614,
+        "file": "windows-definition-audit.zip",
+        "sha256": "f45b426c914209eda9fbdf43658e9ff4fdfe58946edb10e0fb649b1fd398f647"
+      },
+      "status_counts": {
+        "defined_body": 120,
+        "defined_internal_thunk": 6
+      },
+      "targets": 126
+    },
+    "wave2": {
+      "jobs": 16,
+      "log_archive": {
+        "bytes": 72416,
+        "file": "windows-definition-audit-wave2-logs.zip",
+        "sha256": "ccd5145adabb5c9914587af12f2e0446de7550977ad7d682ce279a15bb7442ae"
+      },
+      "log_validation": {
+        "analysis_succeeded": 16,
+        "audit_marker": 16,
+        "benign_elf_note_warning": 16,
+        "benign_extension_path_warning": 16,
+        "import_succeeded": 16
+      },
+      "logs": 16,
+      "plan_sha256": "e7b0727ab794178a85c1658250c92b044ed5922add7f5bb474a18ec1f2acd330",
+      "result_archive": {
+        "bytes": 23853,
+        "file": "windows-definition-audit-wave2.zip",
+        "sha256": "87d42f6138f4d1e162a193c5fb5d045391805ad9c2f5b99d4c1fe3b63c8c3c2c"
+      },
+      "status_counts": {
+        "defined_body": 53,
+        "missing_symbol": 2
+      },
+      "targets": 55
+    }
+  },
+  "worktree_snapshot": "/Users/mcruz/Developer/sharpemu-gta-v-nids"
+}

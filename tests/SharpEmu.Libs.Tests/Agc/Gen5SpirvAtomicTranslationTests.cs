@@ -52,6 +52,20 @@ public sealed class Gen5SpirvAtomicTranslationTests
     }
 
     [Fact]
+    public void DataShareRead64AndVscntWait_Compile()
+    {
+        // DS_READ_B64 v[5:6], v3; S_WAITCNT_VSCNT null, 0.
+        var opcodes = CompileCompute(
+            [
+                0xD9D80000, 0x05000003,
+                0xBBFD0000,
+            ],
+            new Dictionary<uint, uint>());
+
+        Assert.Contains((ushort)SpirvOp.Load, opcodes);
+    }
+
+    [Fact]
     public void ImageAtomicAdd_EmitsTexelPointerAndAtomicAdd()
     {
         // IMAGE_ATOMIC_ADD v2, v[0:1], s[4:11] dmask:0x1 dim:2D glc against an R32ui T#.

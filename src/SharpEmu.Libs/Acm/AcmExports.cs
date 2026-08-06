@@ -14,30 +14,99 @@ public static class AcmExports
     private static int _nextContextHandle;
     private static int _nextBatchHandle;
 
+    private const int AcmErrorOpenFailed = unchecked((int)0x81940001);
+    private const int AcmErrorOutOfMemory = unchecked((int)0x81940004);
+    private const int AcmErrorTooManyOpenFiles = unchecked((int)0x81940005);
+    private const int AcmErrorInvalidArgument = unchecked((int)0x81940006);
+
+    private static readonly object StateGate = new();
+    private static long _nextDescriptor = 1;
+    private static Func<(int Descriptor, int Errno)>? _openDeviceForTests;
+
     [SysAbiExport(
         Nid = "ZIXln2K3XMk",
         ExportName = "sceAcmContextCreate",
         Target = Generation.Gen4 | Generation.Gen5,
         LibraryName = "libSceAcm")]
-    public static int AcmContextCreate(CpuContext ctx)
+    public static int ContextCreate(CpuContext ctx)
     {
-        var outContextAddress = ctx[CpuRegister.Rdi];
-        if (outContextAddress == 0)
+        var contextAddress = ctx[CpuRegister.Rdi];
+        if (contextAddress == 0)
         {
-            return ctx.SetReturn(OrbisGen2Result.ORBIS_GEN2_ERROR_INVALID_ARGUMENT);
+            return ctx.SetReturn(AcmErrorInvalidArgument);
         }
 
-        var handle = unchecked((uint)Interlocked.Increment(ref _nextContextHandle));
-        Span<byte> handleBytes = stackalloc byte[sizeof(uint)];
-        BinaryPrimitives.WriteUInt32LittleEndian(handleBytes, handle);
-        if (!ctx.Memory.TryWrite(outContextAddress, handleBytes))
+        // Firmware initializes the caller's slot before opening /dev/acm.
+        if (!ctx.TryWriteInt32(contextAddress, -1))
         {
-            return ctx.SetReturn(OrbisGen2Result.ORBIS_GEN2_ERROR_MEMORY_FAULT);
+            return ctx.SetReturn((int)OrbisGen2Result.ORBIS_GEN2_ERROR_MEMORY_FAULT);
         }
 
-        Contexts[handle] = 0;
-        Trace($"context_create context={handle}");
-        return ctx.SetReturn(OrbisGen2Result.ORBIS_GEN2_OK);
+        int descriptor;
+        int errno;
+        lock (StateGate)
+        {
+            if (_openDeviceForTests is not null)
+            {
+                (descriptor, errno) = _openDeviceForTests();
+            }
+            else if (_nextDescriptor <= int.MaxValue)
+            {
+                descriptor = (int)_nextDescriptor++;
+                errno = 0;
+            }
+            else
+            {
+                descriptor = -1;
+                errno = 0x18;
+            }
+        }
+
+        if (descriptor < 0)
+        {
+            var error = errno switch
+            {
+                0x17 or 0x18 => AcmErrorTooManyOpenFiles,
+                0x0C => AcmErrorOutOfMemory,
+                _ => AcmErrorOpenFailed,
+            };
+            return ctx.SetReturn(error);
+        }
+
+        if (!ctx.TryWriteInt32(contextAddress, descriptor))
+        {
+            return ctx.SetReturn((int)OrbisGen2Result.ORBIS_GEN2_ERROR_MEMORY_FAULT);
+        }
+
+        Contexts[unchecked((uint)descriptor)] = 0;
+        Trace($"context_create context={descriptor}");
+        return ctx.SetReturn(0);
+    }
+
+    // Upstream kept the original managed entry-point name while Acelogic
+    // renamed the registered implementation after matching the firmware ABI.
+    public static int AcmContextCreate(CpuContext ctx) => ContextCreate(ctx);
+
+    internal static void SetOpenDeviceForTests(
+        Func<(int Descriptor, int Errno)>? openDevice)
+    {
+        lock (StateGate)
+        {
+            _openDeviceForTests = openDevice;
+        }
+    }
+
+    internal static void ResetForTests()
+    {
+        lock (StateGate)
+        {
+            _nextDescriptor = 1;
+            _openDeviceForTests = null;
+        }
+
+        Contexts.Clear();
+        Interlocked.Exchange(ref _nextContextHandle, 0);
+        Interlocked.Exchange(ref _nextBatchHandle, 0);
     }
 
     [SysAbiExport(
@@ -160,13 +229,6 @@ public static class AcmExports
         LibraryName = "libSceAcm")]
     public static int AcmPanner(CpuContext ctx) =>
         AdvanceBatchInfo(ctx, 512);
-
-    internal static void ResetForTests()
-    {
-        Contexts.Clear();
-        Interlocked.Exchange(ref _nextContextHandle, 0);
-        Interlocked.Exchange(ref _nextBatchHandle, 0);
-    }
 
     private static int CompleteBatchStart(
         CpuContext ctx,

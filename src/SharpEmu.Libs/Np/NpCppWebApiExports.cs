@@ -5,15 +5,16 @@ using SharpEmu.HLE;
 
 namespace SharpEmu.Libs.Np;
 
-// Stub for sce::Np::CppWebApi: titles abort PS5-component startup if
-// Common::initialize returns a negative SCE error, so no-op success is required to boot.
+// Compatibility fallback for titles without a mapped guest provider. When the game
+// ships libSceNpCppWebApi, its LLE export is authoritative over this legacy success.
 public static class NpCppWebApiExports
 {
     [SysAbiExport(
         Nid = "UYPxv8MIzGo",
         ExportName = "_ZN3sce2Np9CppWebApi6Common10initializeERKNS2_10InitParamsERNS2_10LibContextE",
         Target = Generation.Gen4 | Generation.Gen5,
-        LibraryName = "libSceNpCppWebApi")]
+        LibraryName = "libSceNpCppWebApi",
+        PreferLle = true)]
     public static int CppWebApiCommonInitialize(CpuContext ctx)
     {
         // int Common::initialize(const InitParams&, LibContext&) — 0 on success.

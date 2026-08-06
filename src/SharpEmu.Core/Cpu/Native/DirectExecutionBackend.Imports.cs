@@ -72,7 +72,11 @@ public sealed partial class DirectExecutionBackend
 
 	private unsafe static int RawVectoredHandlerManaged(void* exceptionInfo)
 	{
-		if (TryHandleGuestImageWriteFault(exceptionInfo))
+		EXCEPTION_RECORD* exceptionRecord = ((EXCEPTION_POINTERS*)exceptionInfo)->ExceptionRecord;
+		if (exceptionRecord->ExceptionCode == 3221225477u &&
+			exceptionRecord->NumberParameters >= 2 &&
+			SharpEmu.HLE.GuestImageWriteTracker.TryHandleWriteFault(
+				exceptionRecord->ExceptionInformation[1]))
 		{
 			return -1;
 		}
@@ -179,6 +183,99 @@ public sealed partial class DirectExecutionBackend
 			Console.Error.Flush();
 		}
 		return true;
+	}
+
+	private unsafe static bool TryFindStackCheckRecoveryAddress(
+		ulong returnRip,
+		out ulong recoveryRip)
+	{
+		const int SearchBackBytes = 0x100;
+		const int ReturnOpcodeBytes = 2;
+
+		recoveryRip = 0;
+		if (returnRip < SearchBackBytes)
+		{
+			return false;
+		}
+
+		Span<byte> code = stackalloc byte[SearchBackBytes + ReturnOpcodeBytes];
+		var codeAddress = returnRip - SearchBackBytes;
+		if (!TryReadHostBytes(codeAddress, code) ||
+			!TryFindStackCheckRecovery(code, SearchBackBytes, out var recoveryOffset))
+		{
+			return false;
+		}
+
+		recoveryRip = codeAddress + (ulong)recoveryOffset;
+		return true;
+	}
+
+	internal static bool TryFindStackCheckRecovery(
+		ReadOnlySpan<byte> code,
+		int returnOffset,
+		out int recoveryOffset)
+	{
+		const int DirectCallBytes = 5;
+		const int MaxBranchSearchBytes = 0x80;
+
+		recoveryOffset = 0;
+		if (returnOffset < DirectCallBytes ||
+			returnOffset + 2 > code.Length ||
+			code[returnOffset] != 0x0F ||
+			code[returnOffset + 1] != 0x0B)
+		{
+			return false;
+		}
+
+		var failureCallOffset = returnOffset - DirectCallBytes;
+		if (code[failureCallOffset] != 0xE8)
+		{
+			return false;
+		}
+
+		var searchStart = Math.Max(0, failureCallOffset - MaxBranchSearchBytes);
+		for (var branchOffset = failureCallOffset - 2; branchOffset >= searchStart; branchOffset--)
+		{
+			int fallthroughOffset;
+			int branchTarget;
+			if (code[branchOffset] == 0x75 && branchOffset + 2 <= failureCallOffset)
+			{
+				fallthroughOffset = branchOffset + 2;
+				branchTarget = fallthroughOffset + unchecked((sbyte)code[branchOffset + 1]);
+			}
+			else if (code[branchOffset] == 0x0F &&
+				branchOffset + 6 <= failureCallOffset &&
+				code[branchOffset + 1] == 0x85)
+			{
+				fallthroughOffset = branchOffset + 6;
+				branchTarget = fallthroughOffset + BinaryPrimitives.ReadInt32LittleEndian(
+					code.Slice(branchOffset + 2, sizeof(int)));
+			}
+			else
+			{
+				continue;
+			}
+
+			if (branchTarget != failureCallOffset)
+			{
+				continue;
+			}
+
+			// The not-taken path must contain a real return before the cold
+			// stack-check call. This keeps the opt-in recovery constrained to
+			// the canonical compare/jne/epilogue/call/ud2 compiler layout.
+			for (var offset = fallthroughOffset; offset < failureCallOffset; offset++)
+			{
+				if (code[offset] == 0xC3 ||
+					(code[offset] == 0xC2 && offset + 2 < failureCallOffset))
+				{
+					recoveryOffset = fallthroughOffset;
+					return true;
+				}
+			}
+		}
+
+		return false;
 	}
 
 	private unsafe ulong DispatchImport(int importIndex, nint argPackPtr)
@@ -293,32 +390,25 @@ public sealed partial class DirectExecutionBackend
 			}
 		}
 		// Diagnostic compatibility escape hatch for a guest stack-protector
-		// failure whose noreturn call is immediately followed by UD2.  Returning
-		// normally from the HLE export would execute that UD2; redirect this one
-		// well-known compiler epilogue back through its register/stack unwind.
-		// Keep the byte-pattern check strict so the opt-in cannot guess at an
-		// unrelated function layout.
+		// failure whose noreturn call is immediately followed by UD2. Returning
+		// normally from the HLE export would execute that UD2; redirect through
+		// the guarded function's normal register/stack unwind instead. Compilers
+		// may place cold alternate paths between the epilogue and stack-check
+		// call, so recognize the bounded branch-to-failure shape rather than one
+		// fixed byte distance.
 		if (string.Equals(importStubEntry.Nid, "Ou3iL1abvng", StringComparison.Ordinal) &&
 			string.Equals(
 				Environment.GetEnvironmentVariable("SHARPEMU_IGNORE_STACK_CHK"),
 				"1",
 				StringComparison.Ordinal) &&
-			num7 >= 0x20)
+			TryFindStackCheckRecoveryAddress(num7, out var recoveredReturn))
 		{
-			var returnCode = (byte*)num7;
-			if (returnCode[0] == 0x0F && returnCode[1] == 0x0B &&
-				returnCode[-22] == 0x75 && returnCode[-21] == 0x0F &&
-				returnCode[-20] == 0x48 && returnCode[-19] == 0x83 &&
-				returnCode[-18] == 0xC4)
-			{
-				var recoveredReturn = num7 - 20;
-				*(ulong*)(argPackPtr + 96) = recoveredReturn;
-				cpuContext[CpuRegister.Rax] = 0;
-				Console.Error.WriteLine(
-					$"[LOADER][WARN] Recovered guest stack-check epilogue " +
-					$"ret=0x{num7:X16} -> 0x{recoveredReturn:X16}");
-				return 0;
-			}
+			*(ulong*)(argPackPtr + 96) = recoveredReturn;
+			cpuContext[CpuRegister.Rax] = 0;
+			Console.Error.WriteLine(
+				$"[LOADER][WARN] Recovered guest stack-check epilogue " +
+				$"ret=0x{num7:X16} -> 0x{recoveredReturn:X16}");
+			return 0;
 		}
 		if (_activeGuestThreadState is { } activeGuestThreadState)
 		{
@@ -370,7 +460,7 @@ public sealed partial class DirectExecutionBackend
 		}
 		if (!isGuestWorker &&
 			!ActiveForcedGuestExit &&
-			ShouldForceGuestExitOnImportLoop(in importStubEntry, num7, num, value, value2))
+			ShouldForceGuestExitOnImportLoop(in importStubEntry, num7, num, value, value2, num3))
 		{
 			// Break before the forced exit so the loop state is still live.
 			NotifyDebuggerStall(CpuStallKind.ImportLoop, in importStubEntry, num7, num, value, value2);
@@ -686,27 +776,6 @@ public sealed partial class DirectExecutionBackend
 					LastError = $"Failed to complete guest entry after {importStubEntry.Nid}: missing host return sentinel";
 					cpuContext[CpuRegister.Rax] = 18446744071562199298uL;
 				}
-			}
-			if (GuestThreadExecution.TryConsumeCurrentThreadBlock(
-					out var blockReason,
-					out var blockContinuation,
-					out var hasBlockContinuation,
-					out var blockWakeKey,
-					out var blockWaiter,
-					out var blockDeadlineTimestamp) &&
-				TryYieldGuestThreadToHostStub(argPackPtr, num, num7, importStubEntry.Nid, blockReason))
-			{
-				if (hasBlockContinuation)
-				{
-					RegisterBlockedGuestThreadContinuation(
-						GuestThreadExecution.CurrentGuestThreadHandle,
-						blockContinuation,
-						blockWakeKey,
-						blockWaiter,
-						blockDeadlineTimestamp);
-				}
-
-				cpuContext[CpuRegister.Rax] = 0uL;
 			}
 			if (flag || flag2 || flag3)
 			{
@@ -1332,6 +1401,24 @@ public sealed partial class DirectExecutionBackend
 
 		var arg0 = *(ulong*)argPackPtr;
 		var returnRip = *(ulong*)(argPackPtr + 96);
+		var traceFilteredLeaf = !string.IsNullOrWhiteSpace(_importFilter) &&
+			(export.LibraryName.Contains(_importFilter!, StringComparison.OrdinalIgnoreCase) ||
+			 export.Name.Contains(_importFilter!, StringComparison.OrdinalIgnoreCase) ||
+			 importStubEntry.Nid.Contains(_importFilter!, StringComparison.OrdinalIgnoreCase));
+		var traceLeafReturnAddress =
+			_probeImportReturnAddress != 0 && returnRip == _probeImportReturnAddress;
+		if ((traceFilteredLeaf || traceLeafReturnAddress) &&
+			Interlocked.Increment(ref _probeImportReturnAddressCount) <= 2048)
+		{
+			Console.Error.WriteLine(
+				$"[LOADER][TRACE] leaf-import-probe dispatch={dispatchIndex} " +
+				$"library={export.LibraryName} export={export.Name} nid={importStubEntry.Nid} " +
+				$"rdi=0x{arg0:X16} rsi=0x{*(ulong*)(argPackPtr + 8):X16} " +
+				$"rdx=0x{*(ulong*)(argPackPtr + 16):X16} " +
+				$"rcx=0x{*(ulong*)(argPackPtr + 24):X16} " +
+				$"r8=0x{*(ulong*)(argPackPtr + 32):X16} " +
+				$"ret=0x{returnRip:X16}");
+		}
 		var leafStackPointer = (ulong)argPackPtr + 96UL;
 		var probeLeafReturn = _logAllImports &&
 			string.Equals(importStubEntry.Nid, "2Z+PpY6CaJg", StringComparison.Ordinal) &&
@@ -1440,35 +1527,13 @@ public sealed partial class DirectExecutionBackend
 			}
 		}
 
-		var consumedThreadBlock = GuestThreadExecution.TryConsumeCurrentThreadBlock(
-				out var blockReason,
-				out var blockContinuation,
-				out var hasBlockContinuation,
-				out var blockWakeKey,
-				out var blockWaiter,
-				out var blockDeadlineTimestamp);
-		if (consumedThreadBlock &&
-			TryYieldGuestThreadToHostStub(argPackPtr, dispatchIndex, returnRip, importStubEntry.Nid, blockReason))
-		{
-			if (hasBlockContinuation)
-			{
-				RegisterBlockedGuestThreadContinuation(
-					GuestThreadExecution.CurrentGuestThreadHandle,
-					blockContinuation,
-					blockWakeKey,
-					blockWaiter,
-					blockDeadlineTimestamp);
-			}
-
-			cpuContext[CpuRegister.Rax] = 0uL;
-		}
 		if (probeLeafReturn)
 		{
 			Console.Error.WriteLine(
 				$"[LOADER][TRACE] leaf-return-probe-exit nid={importStubEntry.Nid} " +
 				$"original=0x{returnRip:X16} final=0x{*(ulong*)(argPackPtr + 96):X16} " +
 				$"rsp=0x{leafStackPointer:X16} active_slot=0x{ActiveGuestReturnSlotAddress:X16} " +
-				$"block={consumedThreadBlock} yield={ActiveGuestThreadYieldRequested}");
+				$"yield={ActiveGuestThreadYieldRequested}");
 		}
 
 		result = cpuContext[CpuRegister.Rax];
@@ -1528,46 +1593,7 @@ public sealed partial class DirectExecutionBackend
 			return false;
 		}
 
-		var expectedFileProbeMiss =
-			result == OrbisGen2Result.ORBIS_GEN2_ERROR_NOT_FOUND &&
-			IsExpectedFileProbeNotFoundNid(nid);
-		var expectedTimedWaitTimeout =
-			string.Equals(nid, "27bAgiJmOh0", StringComparison.Ordinal) &&
-			unchecked((int)result) == 60;
-		var expectedEqueueTimeout =
-			string.Equals(nid, "fzyMKs9kim0", StringComparison.Ordinal) &&
-			result == OrbisGen2Result.ORBIS_GEN2_ERROR_TIMED_OUT;
-		var expectedMutexTrylockBusy =
-			(nid is "K-jXhbt2gn4" or "upoVrzMHFeE") &&
-			result == OrbisGen2Result.ORBIS_GEN2_ERROR_BUSY;
-		var expectedSemaphoreTrywaitAgain =
-			string.Equals(nid, "H2a+IN9TP0E", StringComparison.Ordinal) &&
-			result == OrbisGen2Result.ORBIS_GEN2_ERROR_TRY_AGAIN;
-		var expectedPollSemaBusy =
-			string.Equals(nid, "12wOHk8ywb0", StringComparison.Ordinal) &&
-			result == OrbisGen2Result.ORBIS_GEN2_ERROR_BUSY;
-		var expectedNetAcceptWouldBlock =
-			string.Equals(nid, "PIWqhn9oSxc", StringComparison.Ordinal) &&
-			resultValue == unchecked((int)0x80410123);
-		var expectedUserServiceNoEvent =
-			string.Equals(nid, "yH17Q6NWtVg", StringComparison.Ordinal) &&
-			resultValue == unchecked((int)0x80960007);
-		var expectedPrivacyInvalidParameter =
-			string.Equals(nid, "D-CzAxQL0XI", StringComparison.Ordinal) &&
-			resultValue == unchecked((int)0x80960009);
-		var expectedPlayGoChunkEnumerationEnd =
-			string.Equals(nid, "uWIYLFkkwqk", StringComparison.Ordinal) &&
-			resultValue == unchecked((int)0x80B2000C);
-		if (!expectedFileProbeMiss &&
-			!expectedTimedWaitTimeout &&
-			!expectedEqueueTimeout &&
-			!expectedMutexTrylockBusy &&
-			!expectedSemaphoreTrywaitAgain &&
-			!expectedPollSemaBusy &&
-			!expectedNetAcceptWouldBlock &&
-			!expectedUserServiceNoEvent &&
-			!expectedPrivacyInvalidParameter &&
-			!expectedPlayGoChunkEnumerationEnd)
+		if (!IsExpectedImportResult(nid, result))
 		{
 			return true;
 		}
@@ -1587,6 +1613,55 @@ public sealed partial class DirectExecutionBackend
 		}
 
 		return count <= 8 || count % 10000 == 0;
+	}
+
+	internal static bool IsExpectedImportResult(string nid, OrbisGen2Result result)
+	{
+		var resultValue = unchecked((int)result);
+		var expectedFileProbeMiss =
+			result == OrbisGen2Result.ORBIS_GEN2_ERROR_NOT_FOUND &&
+			IsExpectedFileProbeNotFoundNid(nid);
+		var expectedPosixTimedWaitTimeout =
+			string.Equals(nid, "27bAgiJmOh0", StringComparison.Ordinal) &&
+			resultValue == 60;
+		var expectedSceTimedWaitTimeout =
+			string.Equals(nid, "BmMjYxmew1w", StringComparison.Ordinal) &&
+			result == OrbisGen2Result.ORBIS_GEN2_ERROR_TIMED_OUT;
+		var expectedKernelSemaTimeout =
+			string.Equals(nid, "Zxa0VhQVTsk", StringComparison.Ordinal) &&
+			result == OrbisGen2Result.ORBIS_GEN2_ERROR_TIMED_OUT;
+		var expectedEqueueTimeout =
+			string.Equals(nid, "fzyMKs9kim0", StringComparison.Ordinal) &&
+			result == OrbisGen2Result.ORBIS_GEN2_ERROR_TIMED_OUT;
+		var expectedMutexTrylockBusy =
+			string.Equals(nid, "K-jXhbt2gn4", StringComparison.Ordinal) &&
+			result == OrbisGen2Result.ORBIS_GEN2_ERROR_BUSY;
+		var expectedSemaphoreTrywaitAgain =
+			string.Equals(nid, "H2a+IN9TP0E", StringComparison.Ordinal) &&
+			result == OrbisGen2Result.ORBIS_GEN2_ERROR_TRY_AGAIN;
+		var expectedSemaphorePollBusy =
+			string.Equals(nid, "12wOHk8ywb0", StringComparison.Ordinal) &&
+			result == OrbisGen2Result.ORBIS_GEN2_ERROR_BUSY;
+		var expectedNetAcceptWouldBlock =
+			string.Equals(nid, "PIWqhn9oSxc", StringComparison.Ordinal) &&
+			resultValue == unchecked((int)0x80410123);
+		var expectedUserServiceNoEvent =
+			string.Equals(nid, "yH17Q6NWtVg", StringComparison.Ordinal) &&
+			resultValue == unchecked((int)0x80960007);
+		var expectedPrivacyInvalidParameter =
+			string.Equals(nid, "D-CzAxQL0XI", StringComparison.Ordinal) &&
+			resultValue == unchecked((int)0x80960009);
+		return expectedFileProbeMiss ||
+			expectedPosixTimedWaitTimeout ||
+			expectedSceTimedWaitTimeout ||
+			expectedKernelSemaTimeout ||
+			expectedEqueueTimeout ||
+			expectedMutexTrylockBusy ||
+			expectedSemaphoreTrywaitAgain ||
+			expectedSemaphorePollBusy ||
+			expectedNetAcceptWouldBlock ||
+			expectedUserServiceNoEvent ||
+			expectedPrivacyInvalidParameter;
 	}
 
 	private static bool ShouldLogExpectedImportResults() =>
@@ -1829,7 +1904,13 @@ public sealed partial class DirectExecutionBackend
 			ActiveCpuContext.TryWriteUInt64(returnSlotAddress, hostExit);
 	}
 
-	private bool ShouldForceGuestExitOnImportLoop(in ImportStubEntry entry, ulong returnRip, long dispatchIndex, ulong arg0, ulong arg1)
+	private bool ShouldForceGuestExitOnImportLoop(
+		in ImportStubEntry entry,
+		ulong returnRip,
+		long dispatchIndex,
+		ulong arg0,
+		ulong arg1,
+		ulong arg2)
 	{
 		if (dispatchIndex < 1200)
 		{
@@ -1845,7 +1926,7 @@ public sealed partial class DirectExecutionBackend
 			return false;
 		}
 		var value = entry.NidHash;
-		RecordImportLoopSignature(value, returnRip, BuildImportLoopSignature(value, returnRip, arg0, arg1));
+		RecordImportLoopSignature(value, returnRip, BuildImportLoopSignature(value, returnRip, arg0, arg1, arg2));
 		// The O(period x repeats) pattern scan is a boot/hang watchdog, not a
 		// steady-state feature; sampling every 256th dispatch keeps its cost
 		// off the hot path while still tripping within a couple of thousand
@@ -1880,9 +1961,10 @@ public sealed partial class DirectExecutionBackend
 		return elapsedTicks >= (long)(_importLoopGuardSeconds * Stopwatch.Frequency);
 	}
 
-	private static bool IsImportLoopGuardBoundary(string nid) =>
+	internal static bool IsImportLoopGuardBoundary(string nid) =>
 		nid is
 			"1jfXLRVzisc" or // sceKernelUsleep
+			"Zxa0VhQVTsk" or // sceKernelWaitSema
 			"WKAXJ4XBPQ4" or // scePthreadCondWait
 			"BmMjYxmew1w" or // scePthreadCondTimedwait
 			"Op8TBGY5KHg" or // pthread_cond_wait
@@ -1906,10 +1988,18 @@ public sealed partial class DirectExecutionBackend
 		return DefaultImportLoopGuardSeconds;
 	}
 
-	private ulong BuildImportLoopSignature(ulong nidHash, ulong returnRip, ulong arg0, ulong arg1)
+	internal static ulong BuildImportLoopSignature(
+		ulong nidHash,
+		ulong returnRip,
+		ulong arg0,
+		ulong arg1,
+		ulong arg2)
 	{
 		ulong num = returnRip >> 2;
-		ulong num2 = ((arg0 >> 4) * 11400714819323198485uL) ^ ((arg1 >> 4) * 14029467366897019727uL);
+		ulong num2 =
+			((arg0 >> 4) * 11400714819323198485uL) ^
+			((arg1 >> 4) * 14029467366897019727uL) ^
+			((arg2 >> 4) * 1609587929392839161uL);
 		return num ^ nidHash * 11400714819323198485uL ^ num2;
 	}
 
@@ -2135,8 +2225,11 @@ public sealed partial class DirectExecutionBackend
 		}
 		var moduleHandle = unchecked((int)cpuContext[CpuRegister.Rdi]);
 		if (!TryResolveModuleSymbolAddress(moduleHandle, symbolName, out var resolvedAddress) &&
-			!TryResolveRuntimeSymbolAddress(symbolName, out resolvedAddress) &&
-			!TryResolveRuntimeSymbolAddress(ComputePsNid(symbolName), out resolvedAddress) &&
+			!TryResolveGlobalDlsymSymbolAddress(
+				_runtimeSymbolsByName,
+				_runtimeDataSymbolsByName,
+				symbolName,
+				out resolvedAddress) &&
 			!TryResolveRuntimeSymbolAlias(symbolName, out resolvedAddress))
 		{
 			Console.Error.WriteLine(
@@ -2280,22 +2373,55 @@ public sealed partial class DirectExecutionBackend
 
 	private bool TryResolveRuntimeSymbolAddress(string symbolName, out ulong address)
 	{
+		return TryResolveCallableRuntimeSymbolAddress(_runtimeSymbolsByName, symbolName, out address);
+	}
+
+	internal static bool TryResolveGlobalDlsymSymbolAddress(
+		IReadOnlyDictionary<string, ulong> runtimeSymbols,
+		IReadOnlyDictionary<string, ulong> runtimeDataSymbols,
+		string symbolName,
+		out ulong address)
+	{
+		if (TryResolveIndexedRuntimeSymbolAddress(runtimeSymbols, symbolName, out address) ||
+			TryResolveIndexedRuntimeSymbolAddress(runtimeDataSymbols, symbolName, out address))
+		{
+			return true;
+		}
+
+		var nid = ComputePsNid(symbolName);
+		return TryResolveIndexedRuntimeSymbolAddress(runtimeSymbols, nid, out address) ||
+			TryResolveIndexedRuntimeSymbolAddress(runtimeDataSymbols, nid, out address);
+	}
+
+	internal static bool TryResolveCallableRuntimeSymbolAddress(
+		IReadOnlyDictionary<string, ulong> runtimeSymbols,
+		string symbolName,
+		out ulong address)
+	{
+		return TryResolveIndexedRuntimeSymbolAddress(runtimeSymbols, symbolName, out address);
+	}
+
+	private static bool TryResolveIndexedRuntimeSymbolAddress(
+		IReadOnlyDictionary<string, ulong> runtimeSymbols,
+		string symbolName,
+		out ulong address)
+	{
 		address = 0uL;
 		if (string.IsNullOrWhiteSpace(symbolName))
 		{
 			return false;
 		}
-		if (_runtimeSymbolsByName.TryGetValue(symbolName, out var value) && IsRuntimeSymbolAddressUsable(value))
+		if (runtimeSymbols.TryGetValue(symbolName, out var value) && IsRuntimeSymbolAddressUsable(value))
 		{
 			address = value;
 			return true;
 		}
-		if (symbolName.StartsWith("_", StringComparison.Ordinal) && _runtimeSymbolsByName.TryGetValue(symbolName[1..], out value) && IsRuntimeSymbolAddressUsable(value))
+		if (symbolName.StartsWith("_", StringComparison.Ordinal) && runtimeSymbols.TryGetValue(symbolName[1..], out value) && IsRuntimeSymbolAddressUsable(value))
 		{
 			address = value;
 			return true;
 		}
-		if (_runtimeSymbolsByName.TryGetValue("_" + symbolName, out value) && IsRuntimeSymbolAddressUsable(value))
+		if (runtimeSymbols.TryGetValue("_" + symbolName, out value) && IsRuntimeSymbolAddressUsable(value))
 		{
 			address = value;
 			return true;

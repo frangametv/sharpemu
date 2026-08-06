@@ -1,0 +1,420 @@
+{
+  "configured_cpu_cap": 80,
+  "evidence": [
+    {
+      "defined_body_count": 1,
+      "job": "job-000",
+      "missing_symbol_count": 0,
+      "provider_label": "libkernel",
+      "sha256": "a526ad8eb01a76fae53dfc2172c2f0f8eb3a4fb029a68389dd87b848d4be7188",
+      "symbol_only_count": 1,
+      "target_count": 2
+    },
+    {
+      "defined_body_count": 2,
+      "job": "job-001",
+      "missing_symbol_count": 0,
+      "provider_label": "libkernel",
+      "sha256": "83de84986f1c87d7876ff2864a05f7f3aace2929b024882098fc440266f51b49",
+      "symbol_only_count": 0,
+      "target_count": 2
+    },
+    {
+      "defined_body_count": 2,
+      "job": "job-002",
+      "missing_symbol_count": 0,
+      "provider_label": "libkernel",
+      "sha256": "0ecba1d2783e1e7bbf76b4bb5dd6bedc3bd216a1e03c36813650498a8c8075ca",
+      "symbol_only_count": 0,
+      "target_count": 2
+    },
+    {
+      "defined_body_count": 2,
+      "job": "job-003",
+      "missing_symbol_count": 0,
+      "provider_label": "libkernel",
+      "sha256": "605171980caf58c87dbe2ac371b9c8d81142ef025116d51f718feac04fc76116",
+      "symbol_only_count": 0,
+      "target_count": 2
+    },
+    {
+      "defined_body_count": 2,
+      "job": "job-004",
+      "missing_symbol_count": 0,
+      "provider_label": "libkernel",
+      "sha256": "7f355a9b8c77a7a1d1e08651aa6796643bbbc411ac165b0e22d822cca7b9ff20",
+      "symbol_only_count": 0,
+      "target_count": 2
+    },
+    {
+      "defined_body_count": 2,
+      "job": "job-005",
+      "missing_symbol_count": 0,
+      "provider_label": "libkernel",
+      "sha256": "3c448cd0d6be038a00063950c41f18fbd0637227572dc1ce5d4e5c7ebed6dbb2",
+      "symbol_only_count": 0,
+      "target_count": 2
+    },
+    {
+      "defined_body_count": 2,
+      "job": "job-006",
+      "missing_symbol_count": 0,
+      "provider_label": "libkernel",
+      "sha256": "8d86c8412ebc22070cc77cdd54429e6a52aa4bf3e333a5d566efe9d6ddc5a219",
+      "symbol_only_count": 0,
+      "target_count": 2
+    },
+    {
+      "defined_body_count": 2,
+      "job": "job-007",
+      "missing_symbol_count": 0,
+      "provider_label": "libkernel",
+      "sha256": "db68abb0fd2c2e33572fb3f3be1f2b7ecb4cb9323ee71c5c935dbde7843339d5",
+      "symbol_only_count": 0,
+      "target_count": 2
+    },
+    {
+      "defined_body_count": 2,
+      "job": "job-008",
+      "missing_symbol_count": 0,
+      "provider_label": "libkernel",
+      "sha256": "4b8b743dbc5cc48941eca0ea0d59102307efa701f284ef82291c69f5337b35d1",
+      "symbol_only_count": 0,
+      "target_count": 2
+    },
+    {
+      "defined_body_count": 2,
+      "job": "job-009",
+      "missing_symbol_count": 0,
+      "provider_label": "libkernel",
+      "sha256": "9817adaa4c0e89858046b25c43bd664bb1063ae963ef04f0ec39fad5f15f715b",
+      "symbol_only_count": 0,
+      "target_count": 2
+    },
+    {
+      "defined_body_count": 2,
+      "job": "job-010",
+      "missing_symbol_count": 0,
+      "provider_label": "libkernel",
+      "sha256": "c330eeee033e9fb2305918e64c79aa76e9c15abfee627397a68ec18a407c7909",
+      "symbol_only_count": 0,
+      "target_count": 2
+    },
+    {
+      "defined_body_count": 2,
+      "job": "job-011",
+      "missing_symbol_count": 0,
+      "provider_label": "libkernel",
+      "sha256": "4e96cabca1887be8a7f64891c78eaf68a65e6929d9c6ba5d7c1f0fa365f58581",
+      "symbol_only_count": 0,
+      "target_count": 2
+    },
+    {
+      "defined_body_count": 2,
+      "job": "job-012",
+      "missing_symbol_count": 0,
+      "provider_label": "libkernel",
+      "sha256": "0b4f7295d1075f9b2c15353b0f802bba140d218b9d620371619864d91cdcf3b7",
+      "symbol_only_count": 0,
+      "target_count": 2
+    },
+    {
+      "defined_body_count": 2,
+      "job": "job-013",
+      "missing_symbol_count": 0,
+      "provider_label": "libkernel",
+      "sha256": "671d173e1730fd85c6eab32371b9b8541589ba5fc209f34db59cc8bdf6fe6d77",
+      "symbol_only_count": 0,
+      "target_count": 2
+    },
+    {
+      "defined_body_count": 2,
+      "job": "job-014",
+      "missing_symbol_count": 0,
+      "provider_label": "libkernel_sys",
+      "sha256": "150110c0bcaa7aa423f99eb4067a8ab2d811fa897d9c6ee9a77090fc0217c3d5",
+      "symbol_only_count": 1,
+      "target_count": 3
+    },
+    {
+      "defined_body_count": 3,
+      "job": "job-015",
+      "missing_symbol_count": 0,
+      "provider_label": "libkernel_sys",
+      "sha256": "6e75c7e5491ab0161d613b2aeff38b4be5811d25b0f36a8402aeb6804a6cb961",
+      "symbol_only_count": 0,
+      "target_count": 3
+    },
+    {
+      "defined_body_count": 2,
+      "job": "job-016",
+      "missing_symbol_count": 0,
+      "provider_label": "libkernel_sys",
+      "sha256": "982cce848e7e529b7fef1a956fcb518a8cc32ebb5f231c8404093d0e9b9a6fdf",
+      "symbol_only_count": 0,
+      "target_count": 2
+    },
+    {
+      "defined_body_count": 2,
+      "job": "job-017",
+      "missing_symbol_count": 0,
+      "provider_label": "libkernel_sys",
+      "sha256": "693140b16c0fb10d80576c8fcc4b1c225ec1a184f9be3b0593473529acd9226d",
+      "symbol_only_count": 0,
+      "target_count": 2
+    },
+    {
+      "defined_body_count": 2,
+      "job": "job-018",
+      "missing_symbol_count": 0,
+      "provider_label": "libkernel_sys",
+      "sha256": "2373bf5b871beec2d72c4e7d1b6ef9a8cdfc99c5415e12a1ff79fe1056df0ed0",
+      "symbol_only_count": 0,
+      "target_count": 2
+    },
+    {
+      "defined_body_count": 2,
+      "job": "job-019",
+      "missing_symbol_count": 0,
+      "provider_label": "libkernel_sys",
+      "sha256": "2dfb4439710be8954631c782993fe4d0acc5d1fe02757e9e999577b6bf99a3da",
+      "symbol_only_count": 0,
+      "target_count": 2
+    },
+    {
+      "defined_body_count": 2,
+      "job": "job-020",
+      "missing_symbol_count": 0,
+      "provider_label": "libkernel_sys",
+      "sha256": "6940cc6af7d24ff9c924f9a4be267407a5d1c29a065362ffb0f606f8d458cbce",
+      "symbol_only_count": 0,
+      "target_count": 2
+    },
+    {
+      "defined_body_count": 2,
+      "job": "job-021",
+      "missing_symbol_count": 0,
+      "provider_label": "libkernel_sys",
+      "sha256": "1fe69f5f170c46bff7538e32093c4d7a13729a373dbc11fd01acc382423a4a82",
+      "symbol_only_count": 0,
+      "target_count": 2
+    },
+    {
+      "defined_body_count": 2,
+      "job": "job-022",
+      "missing_symbol_count": 0,
+      "provider_label": "libkernel_sys",
+      "sha256": "1a7a8557b65c23ae10f324288b811c9ba513bd96e7dd824c4c74e4b44c43e15e",
+      "symbol_only_count": 0,
+      "target_count": 2
+    },
+    {
+      "defined_body_count": 2,
+      "job": "job-023",
+      "missing_symbol_count": 0,
+      "provider_label": "libkernel_sys",
+      "sha256": "d5b2ed6b470b4098d1711b1a4698559ce80664fc088d44d724ddf8837e84dc64",
+      "symbol_only_count": 0,
+      "target_count": 2
+    },
+    {
+      "defined_body_count": 2,
+      "job": "job-024",
+      "missing_symbol_count": 0,
+      "provider_label": "libkernel_sys",
+      "sha256": "f0e884d9aca5fda14fc4e6a8a87798ca357e6e8f8251a6b95d7693d2826a3bea",
+      "symbol_only_count": 0,
+      "target_count": 2
+    },
+    {
+      "defined_body_count": 2,
+      "job": "job-025",
+      "missing_symbol_count": 0,
+      "provider_label": "libkernel_sys",
+      "sha256": "6aaae323958a463b3569c764190af51c91fca6c503f5e56cc62109d4e5afc088",
+      "symbol_only_count": 0,
+      "target_count": 2
+    },
+    {
+      "defined_body_count": 2,
+      "job": "job-026",
+      "missing_symbol_count": 0,
+      "provider_label": "libkernel_sys",
+      "sha256": "97cc313a6390ab6bb6cf4d468bc65c8537d7cced6b8599b4f332aef9dfbaba75",
+      "symbol_only_count": 0,
+      "target_count": 2
+    },
+    {
+      "defined_body_count": 2,
+      "job": "job-027",
+      "missing_symbol_count": 0,
+      "provider_label": "libkernel_web",
+      "sha256": "f8c7bdf8dd29b49772b7448b90682795eb0280be27129844e39a61105266596b",
+      "symbol_only_count": 1,
+      "target_count": 3
+    },
+    {
+      "defined_body_count": 3,
+      "job": "job-028",
+      "missing_symbol_count": 0,
+      "provider_label": "libkernel_web",
+      "sha256": "dc5a96ecc47c79281066957887b4a0baf4820fb7c370372aaf876d5f91f942d7",
+      "symbol_only_count": 0,
+      "target_count": 3
+    },
+    {
+      "defined_body_count": 2,
+      "job": "job-029",
+      "missing_symbol_count": 0,
+      "provider_label": "libkernel_web",
+      "sha256": "0db82b9d855f0f59fc5224f6fe27c762750bd2f24c4e3bacd058b6ff8b41f370",
+      "symbol_only_count": 0,
+      "target_count": 2
+    },
+    {
+      "defined_body_count": 2,
+      "job": "job-030",
+      "missing_symbol_count": 0,
+      "provider_label": "libkernel_web",
+      "sha256": "bdfbddcf22cec78582c3eab2752ea92c133bb0dd528e9e298a785f4d5c25d429",
+      "symbol_only_count": 0,
+      "target_count": 2
+    },
+    {
+      "defined_body_count": 2,
+      "job": "job-031",
+      "missing_symbol_count": 0,
+      "provider_label": "libkernel_web",
+      "sha256": "6cb3a0b505f24524b54f79d12c242f28a15220c55647ce2d5dd3576e063cd78d",
+      "symbol_only_count": 0,
+      "target_count": 2
+    },
+    {
+      "defined_body_count": 1,
+      "job": "job-032",
+      "missing_symbol_count": 1,
+      "provider_label": "libkernel_web",
+      "sha256": "ae7135f0ce613403e62848db8bfede4a80f634871f06e153cef8ec3065aa573f",
+      "symbol_only_count": 0,
+      "target_count": 2
+    },
+    {
+      "defined_body_count": 1,
+      "job": "job-033",
+      "missing_symbol_count": 1,
+      "provider_label": "libkernel_web",
+      "sha256": "5ec48589bcbb767c465ec0bccf59b69d25aeb8de5db0dd9dcf15200972a80a58",
+      "symbol_only_count": 0,
+      "target_count": 2
+    },
+    {
+      "defined_body_count": 1,
+      "job": "job-034",
+      "missing_symbol_count": 1,
+      "provider_label": "libkernel_web",
+      "sha256": "30ceceb64debba22a6368d96b183b45cda719fcf7f63d4f0b10b4bd9d4fc6ba7",
+      "symbol_only_count": 0,
+      "target_count": 2
+    },
+    {
+      "defined_body_count": 1,
+      "job": "job-035",
+      "missing_symbol_count": 1,
+      "provider_label": "libkernel_web",
+      "sha256": "7983f17b877d530c400cd78ae622fb1bfc6733a3e54bb11f52093fc29436d3b0",
+      "symbol_only_count": 0,
+      "target_count": 2
+    },
+    {
+      "defined_body_count": 1,
+      "job": "job-036",
+      "missing_symbol_count": 1,
+      "provider_label": "libkernel_web",
+      "sha256": "4c668b4743b416832e4d29fbd151644125eea5b92e7a0ff54f9171e5dfbae156",
+      "symbol_only_count": 0,
+      "target_count": 2
+    },
+    {
+      "defined_body_count": 1,
+      "job": "job-037",
+      "missing_symbol_count": 1,
+      "provider_label": "libkernel_web",
+      "sha256": "07b9164671d94c18c20df1d4f1dfbf933bcc04017096e346f6259a839188f068",
+      "symbol_only_count": 0,
+      "target_count": 2
+    },
+    {
+      "defined_body_count": 2,
+      "job": "job-038",
+      "missing_symbol_count": 0,
+      "provider_label": "libkernel_web",
+      "sha256": "65fceb6866240a02f8365e48c0d987b5f4770810fe1cb47a3a9e5360131ec3ae",
+      "symbol_only_count": 0,
+      "target_count": 2
+    },
+    {
+      "defined_body_count": 2,
+      "job": "job-039",
+      "missing_symbol_count": 0,
+      "provider_label": "libkernel_web",
+      "sha256": "5869f5a54515ac59b5530da1d8d07780e14d5619068690d34d87ceb1bba69bd6",
+      "symbol_only_count": 0,
+      "target_count": 2
+    }
+  ],
+  "failed_jobs": 0,
+  "format": "sharpemu-rho-wave-summary-v1",
+  "launched_jobs": 40,
+  "max_cpu_per_job": 2,
+  "max_parallel_jobs": 40,
+  "peak_active_java": 200,
+  "peak_cpu_cores": 79.655,
+  "peak_cpu_percent": 7965.5,
+  "peak_load1": 74.07,
+  "peak_rss_kb": 25624372,
+  "result_jobs": 40,
+  "sample_count": 58,
+  "status_codes": [
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0
+  ],
+  "successful_jobs": 40
+}

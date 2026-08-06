@@ -1,0 +1,70 @@
+{
+  "executable_sha256": "7c33fa5c41b065bf7a3577dbb968af192dbc7768a84e706e2a98dcfa0d501d59",
+  "format": "sharpemu-ghidra-selected-nid-functions-v1",
+  "function_count": 3,
+  "functions": [
+    {
+      "external": false,
+      "function_body_addresses": 18,
+      "function_body_sha256": "3b78f5fbb7c0eba5644c241e3a6675649eeae34828a7c5da747ac2ca3e0be98d",
+      "function_entry": "000019e0",
+      "function_name": "BOwybKVa3Do#D#A",
+      "function_present": true,
+      "instruction_count": 6,
+      "nid": "BOwybKVa3Do",
+      "result_file": "libSceRemoteplay-chunk-00.result.tsv",
+      "symbol": "BOwybKVa3Do#D#A",
+      "symbol_address": "000019e0",
+      "thunk": false,
+      "thunk_target": "",
+      "thunk_target_external": null,
+      "wave": "wave2"
+    },
+    {
+      "external": false,
+      "function_body_addresses": 89,
+      "function_body_sha256": "066b98e752382d716c5a5e630f21b528977e9a797e7cccd44c6e43b76686b91d",
+      "function_entry": "00001b30",
+      "function_name": "g3PNjYKWqnQ#D#A",
+      "function_present": true,
+      "instruction_count": 31,
+      "nid": "g3PNjYKWqnQ",
+      "result_file": "libSceRemoteplay-chunk-00.result.tsv",
+      "symbol": "g3PNjYKWqnQ#D#A",
+      "symbol_address": "00001b30",
+      "thunk": false,
+      "thunk_target": "",
+      "thunk_target_external": null,
+      "wave": "wave2"
+    },
+    {
+      "external": false,
+      "function_body_addresses": 36,
+      "function_body_sha256": "27ac586b311e9410b6827eea08f5b12e1989a9ed4796687f505ed5a060962339",
+      "function_entry": "000019b0",
+      "function_name": "k1SwgkMSOM8#D#A",
+      "function_present": true,
+      "instruction_count": 14,
+      "nid": "k1SwgkMSOM8",
+      "result_file": "libSceRemoteplay-chunk-00.result.tsv",
+      "symbol": "k1SwgkMSOM8#D#A",
+      "symbol_address": "000019b0",
+      "thunk": false,
+      "thunk_target": "",
+      "thunk_target_external": null,
+      "wave": "wave2"
+    }
+  ],
+  "ghidra_version": "12.1.2_PUBLIC_20260605",
+  "missing": [],
+  "program_name": "libSceRemoteplay.sprx",
+  "provenance": {
+    "audit_sha256": "a28951db44df6f026715f9ab8e47b992cea172e396bc6d80b4383e00c14f2be6",
+    "evidence_policy": "Ghidra analysis of exact Gen5 provider ELFs only; no Kyty-derived contracts or implementations.",
+    "excluded_nids": [],
+    "recommendations_sha256": "f059a17f1440499c499311093ac225a428f19c5a8776c41ca609aecd670df7c5",
+    "summary_sha256": "e1e93ff2f5967daa1d6f838b08f4490de7144118032e0d4e413cb767ab50e0a2"
+  },
+  "target_count": 3,
+  "without_functions": []
+}

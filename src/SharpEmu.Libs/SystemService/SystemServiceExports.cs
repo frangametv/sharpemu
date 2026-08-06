@@ -3,8 +3,10 @@
 
 using SharpEmu.HLE;
 using SharpEmu.Libs.Gpu;
+using SharpEmu.Libs.Kernel;
 using SharpEmu.Libs.VideoOut;
 using System.Buffers.Binary;
+using System.Threading;
 
 namespace SharpEmu.Libs.SystemService;
 
@@ -25,6 +27,8 @@ public static class SystemServiceExports
         _mainAppTitleId = string.IsNullOrWhiteSpace(titleId) ? null : titleId.Trim();
     }
 
+    internal static void ResetForTests() => Volatile.Write(ref _noticeScreenSkipFlag, 0);
+
     [SysAbiExport(
         Nid = "3RQ5aQfnstU",
         ExportName = "sceSystemServiceGetNoticeScreenSkipFlag",
@@ -38,39 +42,41 @@ public static class SystemServiceExports
             return ctx.SetReturn(OrbisSystemServiceErrorParameter);
         }
 
-        // Keep the flag state even though the emulator does not display the
-        // system notice screen. Titles use this service as a normal preference
-        // store and expect a later get to observe the value they set.
         Span<byte> flagBytes = stackalloc byte[1];
-        flagBytes[0] = unchecked((byte)Volatile.Read(ref _noticeScreenSkipFlag));
-        return ctx.Memory.TryWrite(flagAddress, flagBytes)
+        flagBytes[0] = Volatile.Read(ref _noticeScreenSkipFlag) == 0 ? (byte)0 : (byte)1;
+        return KernelMemoryCompatExports.TryWriteCompat(ctx, flagAddress, flagBytes)
             ? ctx.SetReturn(0)
             : ctx.SetReturn((int)OrbisGen2Result.ORBIS_GEN2_ERROR_MEMORY_FAULT);
     }
 
     [SysAbiExport(
-        Nid = "8Lo6Zv94aho",
-        ExportName = "sceSystemServiceDisableNoticeScreenSkipFlagAutoSet",
-        Target = Generation.Gen5,
-        LibraryName = "libSceSystemService")]
-    public static int SystemServiceDisableNoticeScreenSkipFlagAutoSet(CpuContext ctx) =>
-        ctx.SetReturn(0);
-
-    // Settings entry calls this immediately before spawning SaveModTime/Load
-    // threads. An unresolved stub returns NOT_FOUND and the title can stall in
-    // that path; accept the write and report success.
-    [SysAbiExport(
         Nid = "Q3utJvma4Mo",
         ExportName = "sceSystemServiceSetNoticeScreenSkipFlag",
         Target = Generation.Gen5,
-        LibraryName = "libSceSystemService")]
+        LibraryName = "libSceSystemService",
+        PreferLle = true)]
     public static int SystemServiceSetNoticeScreenSkipFlag(CpuContext ctx)
     {
-        // The native API takes the flag value in the first argument. Treat any
-        // non-zero value as true, matching the bool-like PS5 ABI.
-        Volatile.Write(ref _noticeScreenSkipFlag, ctx[CpuRegister.Rdi] != 0 ? 1 : 0);
+        // The Gen5 provider takes no arguments and sends operation 0x62 to the
+        // system-service proxy. The flag is observable through the getter, so
+        // retain that state locally when the guest provider is unavailable.
+        Interlocked.Exchange(ref _noticeScreenSkipFlag, 1);
         return ctx.SetReturn(0);
     }
+
+    // Ghidra 12.1.2_PUBLIC_20260605, libSceSystemService.sprx
+    // SHA-256 6bcb5dd125d9d09b6053f383ba89b1613335bff5ab83870f0bd732b767f4aac9,
+    // entry RVA 0x3A80. The provider takes no arguments and sends proxy
+    // operation 0x61. SharpEmu has no automatic flag setter to disable, so the
+    // faithful provider-free fallback succeeds without altering explicit state.
+    [SysAbiExport(
+        Nid = "8Lo6Zv94aho",
+        ExportName = "sceSystemServiceDisableNoticeScreenSkipFlagAutoSet",
+        Target = Generation.Gen5,
+        LibraryName = "libSceSystemService",
+        PreferLle = true)]
+    public static int SystemServiceDisableNoticeScreenSkipFlagAutoSet(CpuContext ctx) =>
+        ctx.SetReturn(0);
 
     [SysAbiExport(
         Nid = "4veE0XiIugA",
@@ -93,7 +99,7 @@ public static class SystemServiceExports
         Span<byte> titleIdBytes = stackalloc byte[TitleIdFieldSize];
         titleIdBytes.Clear();
         System.Text.Encoding.ASCII.GetBytes(titleId.AsSpan(0, length), titleIdBytes);
-        return ctx.Memory.TryWrite(titleIdAddress, titleIdBytes[..(length + 1)])
+        return KernelMemoryCompatExports.TryWriteCompat(ctx, titleIdAddress, titleIdBytes[..(length + 1)])
             ? ctx.SetReturn(0)
             : ctx.SetReturn((int)OrbisGen2Result.ORBIS_GEN2_ERROR_MEMORY_FAULT);
     }
@@ -121,7 +127,7 @@ public static class SystemServiceExports
 
         Span<byte> valueBytes = stackalloc byte[sizeof(int)];
         BinaryPrimitives.WriteInt32LittleEndian(valueBytes, value);
-        return ctx.Memory.TryWrite(valueAddress, valueBytes)
+        return KernelMemoryCompatExports.TryWriteCompat(ctx, valueAddress, valueBytes)
             ? ctx.SetReturn(0)
             : ctx.SetReturn((int)OrbisGen2Result.ORBIS_GEN2_ERROR_MEMORY_FAULT);
     }
@@ -150,7 +156,7 @@ public static class SystemServiceExports
         Span<byte> output = stackalloc byte[writeLength + 1];
         value.AsSpan(0, writeLength).CopyTo(output);
         output[writeLength] = 0;
-        return ctx.Memory.TryWrite(bufferAddress, output)
+        return KernelMemoryCompatExports.TryWriteCompat(ctx, bufferAddress, output)
             ? ctx.SetReturn(0)
             : ctx.SetReturn((int)OrbisGen2Result.ORBIS_GEN2_ERROR_MEMORY_FAULT);
     }
@@ -173,7 +179,7 @@ public static class SystemServiceExports
         BinaryPrimitives.WriteInt32LittleEndian(status, 0);
         status[0x06] = 1;
 
-        return ctx.Memory.TryWrite(statusAddress, status)
+        return KernelMemoryCompatExports.TryWriteCompat(ctx, statusAddress, status)
             ? ctx.SetReturn(0)
             : ctx.SetReturn((int)OrbisGen2Result.ORBIS_GEN2_ERROR_MEMORY_FAULT);
     }
@@ -195,7 +201,7 @@ public static class SystemServiceExports
         info.Clear();
         BinaryPrimitives.WriteSingleLittleEndian(info, 1.0f);
 
-        return ctx.Memory.TryWrite(infoAddress, info)
+        return KernelMemoryCompatExports.TryWriteCompat(ctx, infoAddress, info)
             ? ctx.SetReturn(0)
             : ctx.SetReturn((int)OrbisGen2Result.ORBIS_GEN2_ERROR_MEMORY_FAULT);
     }
@@ -217,7 +223,7 @@ public static class SystemServiceExports
         BinaryPrimitives.WriteSingleLittleEndian(luminance, 1000.0f);
         BinaryPrimitives.WriteSingleLittleEndian(luminance[sizeof(float)..], 1000.0f);
         BinaryPrimitives.WriteSingleLittleEndian(luminance[(sizeof(float) * 2)..], 0.01f);
-        return ctx.Memory.TryWrite(luminanceAddress, luminance)
+        return KernelMemoryCompatExports.TryWriteCompat(ctx, luminanceAddress, luminance)
             ? ctx.SetReturn(0)
             : ctx.SetReturn((int)OrbisGen2Result.ORBIS_GEN2_ERROR_MEMORY_FAULT);
     }
@@ -239,7 +245,4 @@ public static class SystemServiceExports
         Target = Generation.Gen4 | Generation.Gen5,
         LibraryName = "libSceSystemService")]
     public static int SystemServiceReportAbnormalTermination(CpuContext ctx) => ctx.SetReturn(0);
-
-    internal static void ResetForTests() =>
-        Volatile.Write(ref _noticeScreenSkipFlag, 0);
 }

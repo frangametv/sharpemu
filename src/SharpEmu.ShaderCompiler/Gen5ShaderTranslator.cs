@@ -80,6 +80,11 @@ public static class Gen5ShaderTranslator
     public static bool IsScalarConsumed(ulong[] mask, uint register) =>
         register < 256 && (mask[register >> 6] & (1UL << (int)(register & 63))) != 0;
 
+    // Headerless compatibility paths have no authoritative byte length. Keep
+    // those scans byte-bounded; normal AGC-created shaders use their declared size.
+    private const uint MaximumHeaderlessShaderBytes = 64 * 1024;
+    private const ulong ShaderSizeOffset = 0x44;
+    private const uint MaximumShaderSizeBytes = 1024 * 1024;
     private const int MaxInstructions = 16384;
     private const uint PsUserDataRegister = 0x0C;
     private const uint VsUserDataRegister = 0x4C;
@@ -93,8 +98,67 @@ public static class Gen5ShaderTranslator
     private sealed class ShaderDecodeCache
     {
         public object Gate { get; } = new();
-        public Dictionary<ulong, Gen5ShaderProgram> Programs { get; } = new();
+        public Dictionary<
+            (ulong Address, uint SizeBytes, ulong ContinuationAddress, uint ContinuationSizeBytes),
+            Gen5ShaderProgram> Programs { get; } = new();
+        public Dictionary<ulong, CombinedShaderProgram> CombinedPrograms { get; } = new();
         public Dictionary<ulong, Gen5ShaderMetadata?> Metadata { get; } = new();
+    }
+
+    private sealed record CombinedShaderProgram(
+        ulong EntryHeaderAddress,
+        ulong ContinuationAddress,
+        ulong ContinuationHeaderAddress);
+
+    /// <summary>
+    /// Records the two physical code objects that AGC combines into one logical
+    /// GFX10 shader. The entry object ends with S_SETPC_B64 and its target is
+    /// supplied through system SGPRs by hardware; retaining the relationship
+    /// here lets the host translator follow that handoff without decoding the
+    /// trailing shader metadata as instructions.
+    /// </summary>
+    public static void RegisterCombinedShader(
+        CpuContext ctx,
+        ulong entryAddress,
+        ulong entryHeaderAddress,
+        ulong continuationAddress,
+        ulong continuationHeaderAddress)
+    {
+        if (entryAddress == 0 ||
+            entryHeaderAddress == 0 ||
+            continuationAddress == 0 ||
+            continuationHeaderAddress == 0)
+        {
+            return;
+        }
+
+        var cache = _decodeCaches.GetValue(ctx.Memory, static _ => new ShaderDecodeCache());
+        lock (cache.Gate)
+        {
+            cache.CombinedPrograms[entryAddress] = new CombinedShaderProgram(
+                entryHeaderAddress,
+                continuationAddress,
+                continuationHeaderAddress);
+
+            // A guest can recreate a combined descriptor after either half was
+            // uploaded again. Do not retain a stale standalone/composed decode
+            // for the entry address across that registration.
+            foreach (var key in cache.Programs.Keys
+                         .Where(key => key.Address == entryAddress)
+                         .ToArray())
+            {
+                cache.Programs.Remove(key);
+            }
+        }
+    }
+
+    public static bool IsCombinedShader(CpuContext ctx, ulong entryAddress)
+    {
+        var cache = _decodeCaches.GetValue(ctx.Memory, static _ => new ShaderDecodeCache());
+        lock (cache.Gate)
+        {
+            return cache.CombinedPrograms.ContainsKey(entryAddress);
+        }
     }
 
     private static readonly uint[] FullscreenBarycentricEs =
@@ -188,6 +252,35 @@ public static class Gen5ShaderTranslator
                 .Select(word => $"{word:X8}"))
             : $"error={error}";
 
+    private static bool TryGetDeclaredShaderSize(
+        CpuContext ctx,
+        ulong shaderHeaderAddress,
+        out uint shaderSizeBytes,
+        out string error)
+    {
+        shaderSizeBytes = 0;
+        error = string.Empty;
+        if (shaderHeaderAddress == 0)
+        {
+            return true;
+        }
+
+        if (!TryReadUInt32(
+                ctx,
+                shaderHeaderAddress + ShaderSizeOffset,
+                out shaderSizeBytes) ||
+            shaderSizeBytes == 0 ||
+            (shaderSizeBytes & (sizeof(uint) - 1)) != 0 ||
+            shaderSizeBytes > MaximumShaderSizeBytes)
+        {
+            error = $"invalid-shader-size header=0x{shaderHeaderAddress:X} " +
+                $"size=0x{shaderSizeBytes:X}";
+            return false;
+        }
+
+        return true;
+    }
+
     public static bool TryCreateState(
         CpuContext ctx,
         ulong shaderAddress,
@@ -197,28 +290,96 @@ public static class Gen5ShaderTranslator
         out Gen5ShaderState state,
         out string error,
         Gen5ComputeSystemRegisters? computeSystemRegisters = null,
-        uint userDataScalarRegisterBase = 0)
+        uint userDataScalarRegisterBase = 0,
+        Gen5GraphicsSystemRegisters? graphicsSystemRegisters = null)
     {
         ValidateUserSgprCountDecoding();
         state = default!;
         error = string.Empty;
+        if (!TryGetDeclaredShaderSize(
+                ctx,
+                shaderHeaderAddress,
+                out var shaderSizeBytes,
+                out error))
+        {
+            return false;
+        }
+
         var cache = _decodeCaches.GetValue(ctx.Memory, static _ => new ShaderDecodeCache());
+        CombinedShaderProgram? combinedProgram;
+        lock (cache.Gate)
+        {
+            cache.CombinedPrograms.TryGetValue(shaderAddress, out combinedProgram);
+        }
+
+        var entryShaderSizeBytes = shaderSizeBytes;
+        uint continuationShaderSizeBytes = 0;
+        if (combinedProgram is not null &&
+            (!TryGetDeclaredShaderSize(
+                 ctx,
+                 combinedProgram.EntryHeaderAddress,
+                 out entryShaderSizeBytes,
+                 out error) ||
+             !TryGetDeclaredShaderSize(
+                 ctx,
+                 combinedProgram.ContinuationHeaderAddress,
+                 out continuationShaderSizeBytes,
+                 out error)))
+        {
+            return false;
+        }
+
+        var programKey = (
+            shaderAddress,
+            entryShaderSizeBytes,
+            combinedProgram?.ContinuationAddress ?? 0,
+            continuationShaderSizeBytes);
         Gen5ShaderProgram? program;
         lock (cache.Gate)
         {
-            cache.Programs.TryGetValue(shaderAddress, out program);
+            cache.Programs.TryGetValue(programKey, out program);
         }
 
         if (program is null)
         {
-            if (!TryDecodeProgram(ctx, shaderAddress, out program, out error))
+            const int maximumDeclaredShaderDecodeAttempts = 5;
+            var decodeAttempt = 0;
+            while (!(combinedProgram is not null
+                         ? TryDecodeCombinedProgram(
+                             ctx,
+                             shaderAddress,
+                             entryShaderSizeBytes,
+                             combinedProgram.ContinuationAddress,
+                             continuationShaderSizeBytes,
+                             out program,
+                             out error)
+                         : TryDecodeStandaloneProgram(
+                             ctx,
+                             shaderAddress,
+                             entryShaderSizeBytes,
+                             out program,
+                             out error)))
             {
-                return false;
+                decodeAttempt++;
+                if (entryShaderSizeBytes == 0 ||
+                    decodeAttempt >= maximumDeclaredShaderDecodeAttempts)
+                {
+                    return false;
+                }
+
+                // AGC shader programs can be uploaded by another guest thread
+                // immediately before the draw reaches the submission worker.
+                // A yield alone can re-read the same partial upload several
+                // times before that writer runs. Use a small bounded backoff so
+                // the next attempt receives a genuinely newer snapshot instead
+                // of permanently dropping that one-shot draw.
+                var backoffMilliseconds = 1 << Math.Min(decodeAttempt - 1, 2);
+                Thread.Sleep(backoffMilliseconds);
             }
 
             lock (cache.Gate)
             {
-                cache.Programs.TryAdd(shaderAddress, program);
+                cache.Programs.TryAdd(programKey, program);
             }
         }
 
@@ -267,12 +428,16 @@ public static class Gen5ShaderTranslator
             shaderRegisters.TryGetValue(userDataBaseRegister + index, out userData[index]);
         }
 
+        shaderRegisters.TryGetValue(rsrc2Register - 1, out var programResource1);
+
         state = new Gen5ShaderState(
             program,
             userData,
             metadata,
             computeSystemRegisters,
-            userDataScalarRegisterBase);
+            userDataScalarRegisterBase,
+            programResource1,
+            graphicsSystemRegisters);
         return true;
     }
 
@@ -369,12 +534,18 @@ public static class Gen5ShaderTranslator
         var systemRegisters = state.ComputeSystemRegisters is { } compute
             ? $" compute[{DescribeComputeSystemRegisters(compute)}]"
             : string.Empty;
+        var graphicsRegisters = state.GraphicsSystemRegisters is { } graphics
+            ? $" graphics[indirect_ud=0x{graphics.IndirectUserDataAddress:X16}" +
+              (graphics.MergedWaveInfo is { } mergedWaveInfo
+                  ? $" merged_wave=0x{mergedWaveInfo:X8}]"
+                  : "]")
+            : string.Empty;
         if (state.Metadata is not { } metadata)
         {
             return
                 $"ud_base=s{state.UserDataScalarRegisterBase} hw_ud={state.UserData.Count} " +
                 $"ud[{userData}]" +
-                $"{systemRegisters} metadata=missing";
+                $"{systemRegisters}{graphicsRegisters} metadata=missing";
         }
 
         var direct = string.Join(
@@ -388,7 +559,8 @@ public static class Gen5ShaderTranslator
         return
             $"ud_base=s{state.UserDataScalarRegisterBase} hw_ud={state.UserData.Count} " +
             $"ud[{userData}]" +
-            $"{systemRegisters} metadata[eud={metadata.ExtendedUserDataSizeDwords}," +
+            $"{systemRegisters}{graphicsRegisters} " +
+            $"metadata[eud={metadata.ExtendedUserDataSizeDwords}," +
             $"srt={metadata.ShaderResourceTableSizeDwords},direct={direct},resources={resources}]";
     }
 
@@ -428,8 +600,162 @@ public static class Gen5ShaderTranslator
         out Gen5ShaderProgram program,
         out string error)
     {
+        var cache = _decodeCaches.GetValue(ctx.Memory, static _ => new ShaderDecodeCache());
+        CombinedShaderProgram? combinedProgram;
+        lock (cache.Gate)
+        {
+            cache.CombinedPrograms.TryGetValue(address, out combinedProgram);
+        }
+
+        if (combinedProgram is null)
+        {
+            return TryDecodeStandaloneProgram(ctx, address, 0, out program, out error);
+        }
+
+        if (!TryGetDeclaredShaderSize(
+                ctx,
+                combinedProgram.EntryHeaderAddress,
+                out var entryShaderSizeBytes,
+                out error) ||
+            !TryGetDeclaredShaderSize(
+                ctx,
+                combinedProgram.ContinuationHeaderAddress,
+                out var continuationShaderSizeBytes,
+                out error))
+        {
+            program = new Gen5ShaderProgram(address, []);
+            return false;
+        }
+
+        return TryDecodeCombinedProgram(
+            ctx,
+            address,
+            entryShaderSizeBytes,
+            combinedProgram.ContinuationAddress,
+            continuationShaderSizeBytes,
+            out program,
+            out error);
+    }
+
+    private enum ShaderProgramTermination
+    {
+        None,
+        EndProgram,
+        SetProgramCounter,
+    }
+
+    private static bool TryDecodeStandaloneProgram(
+        CpuContext ctx,
+        ulong address,
+        uint shaderSizeBytes,
+        out Gen5ShaderProgram program,
+        out string error) =>
+        TryDecodeProgramSegment(
+            ctx,
+            address,
+            shaderSizeBytes,
+            acceptSetProgramCounter: false,
+            out program,
+            out _,
+            out error);
+
+    private static bool TryDecodeCombinedProgram(
+        CpuContext ctx,
+        ulong entryAddress,
+        uint entryShaderSizeBytes,
+        ulong continuationAddress,
+        uint continuationShaderSizeBytes,
+        out Gen5ShaderProgram program,
+        out string error)
+    {
+        program = new Gen5ShaderProgram(entryAddress, []);
+        error = string.Empty;
+        if (continuationAddress <= entryAddress ||
+            continuationAddress - entryAddress > uint.MaxValue ||
+            ((continuationAddress - entryAddress) & (sizeof(uint) - 1)) != 0)
+        {
+            error = $"invalid-combined-shader-layout entry=0x{entryAddress:X} " +
+                $"continuation=0x{continuationAddress:X}";
+            return false;
+        }
+
+        if (!TryDecodeProgramSegment(
+                ctx,
+                entryAddress,
+                entryShaderSizeBytes,
+                acceptSetProgramCounter: true,
+                out var entryProgram,
+                out var entryTermination,
+                out error))
+        {
+            error = $"combined-entry: {error}";
+            return false;
+        }
+
+        if (entryTermination != ShaderProgramTermination.SetProgramCounter ||
+            entryProgram.Instructions.Count == 0)
+        {
+            error = $"combined-entry-missing-setpc entry=0x{entryAddress:X}";
+            return false;
+        }
+
+        if (!TryDecodeStandaloneProgram(
+                ctx,
+                continuationAddress,
+                continuationShaderSizeBytes,
+                out var continuationProgram,
+                out error))
+        {
+            error = $"combined-continuation: {error}";
+            return false;
+        }
+
+        var continuationPc = checked((uint)(continuationAddress - entryAddress));
+        var instructions = new List<Gen5ShaderInstruction>(
+            entryProgram.Instructions.Count + continuationProgram.Instructions.Count);
+        instructions.AddRange(entryProgram.Instructions.Take(entryProgram.Instructions.Count - 1));
+
+        // S_SETPC_B64 is a hardware handoff through system SGPRs. The paired
+        // code object is already known here, so retain a no-op at the original
+        // PC (preserving any local branch target) and continue with the second
+        // object at its physical address delta. Physical PCs keep S_GETPC and
+        // every relative branch in the continuation semantically correct.
+        var setProgramCounter = entryProgram.Instructions[^1];
+        instructions.Add(CreateInstruction(
+            setProgramCounter.Pc,
+            Gen5ShaderEncoding.Sopp,
+            "SNop",
+            [0xBF800000u]));
+
+        foreach (var instruction in continuationProgram.Instructions)
+        {
+            var rebasedPc = (ulong)continuationPc + instruction.Pc;
+            if (rebasedPc > uint.MaxValue)
+            {
+                error = $"combined-continuation-pc-overflow pc=0x{instruction.Pc:X} " +
+                    $"base=0x{continuationPc:X}";
+                return false;
+            }
+
+            instructions.Add(instruction with { Pc = (uint)rebasedPc });
+        }
+
+        program = new Gen5ShaderProgram(entryAddress, instructions);
+        return true;
+    }
+
+    private static bool TryDecodeProgramSegment(
+        CpuContext ctx,
+        ulong address,
+        uint shaderSizeBytes,
+        bool acceptSetProgramCounter,
+        out Gen5ShaderProgram program,
+        out ShaderProgramTermination termination,
+        out string error)
+    {
         ValidateDppControlVectors();
         program = new Gen5ShaderProgram(address, []);
+        termination = ShaderProgramTermination.None;
         error = string.Empty;
         if (address == 0)
         {
@@ -439,9 +765,37 @@ public static class Gen5ShaderTranslator
 
         var instructions = new List<Gen5ShaderInstruction>();
         var instructionCount = 0;
-        for (uint pc = 0; instructionCount < MaxInstructions;)
+        var programLimitBytes = shaderSizeBytes == 0
+            ? MaximumHeaderlessShaderBytes
+            : shaderSizeBytes;
+        byte[]? declaredProgramBytes = null;
+        if (shaderSizeBytes != 0)
         {
-            if (!TryReadUInt32(ctx, address + pc, out var word))
+            declaredProgramBytes = new byte[checked((int)shaderSizeBytes)];
+            if (!ctx.Memory.TryRead(address, declaredProgramBytes))
+            {
+                error = $"read-failed pc=0x0 size=0x{shaderSizeBytes:X}";
+                return false;
+            }
+        }
+
+        var maximumInstructions = checked((int)(programLimitBytes / sizeof(uint)));
+        uint pc = 0;
+        for (; instructionCount < maximumInstructions && pc < programLimitBytes;)
+        {
+            if (programLimitBytes - pc < sizeof(uint))
+            {
+                error = $"truncated-word pc=0x{pc:X} limit=0x{programLimitBytes:X}";
+                return false;
+            }
+
+            uint word;
+            if (declaredProgramBytes is not null)
+            {
+                word = BinaryPrimitives.ReadUInt32LittleEndian(
+                    declaredProgramBytes.AsSpan((int)pc, sizeof(uint)));
+            }
+            else if (!TryReadUInt32(ctx, address + pc, out word))
             {
                 error = $"read-failed pc=0x{pc:X}";
                 return false;
@@ -452,11 +806,29 @@ public static class Gen5ShaderTranslator
                     address,
                     pc,
                     word,
+                    programLimitBytes - pc,
                     out var encoding,
                     out var name,
                     out var sizeDwords,
                     out error))
             {
+                if (!error.Contains(" pc=", StringComparison.Ordinal))
+                {
+                    error += $" pc=0x{pc:X}";
+                }
+
+                if (!error.Contains(" word=", StringComparison.Ordinal))
+                {
+                    error += $" word=0x{word:X8}";
+                }
+                return false;
+            }
+
+            var instructionBytes = sizeDwords * sizeof(uint);
+            if (instructionBytes > programLimitBytes - pc)
+            {
+                error = $"truncated-instruction pc=0x{pc:X} " +
+                    $"dwords={sizeDwords} limit=0x{programLimitBytes:X}";
                 return false;
             }
 
@@ -464,9 +836,15 @@ public static class Gen5ShaderTranslator
             words[0] = word;
             for (uint wordIndex = 1; wordIndex < sizeDwords; wordIndex++)
             {
-                if (!TryReadUInt32(ctx, address + pc + wordIndex * sizeof(uint), out words[wordIndex]))
+                var wordPc = pc + wordIndex * sizeof(uint);
+                if (declaredProgramBytes is not null)
                 {
-                    error = $"read-failed pc=0x{pc + wordIndex * sizeof(uint):X}";
+                    words[wordIndex] = BinaryPrimitives.ReadUInt32LittleEndian(
+                        declaredProgramBytes.AsSpan((int)wordPc, sizeof(uint)));
+                }
+                else if (!TryReadUInt32(ctx, address + wordPc, out words[wordIndex]))
+                {
+                    error = $"read-failed pc=0x{wordPc:X}";
                     return false;
                 }
             }
@@ -482,15 +860,27 @@ public static class Gen5ShaderTranslator
             instructions.Add(instruction);
             instructionCount++;
 
-            pc += sizeDwords * sizeof(uint);
+            pc += instructionBytes;
             if (string.Equals(name, "SEndpgm", StringComparison.Ordinal))
             {
                 program = new Gen5ShaderProgram(address, instructions);
+                termination = ShaderProgramTermination.EndProgram;
+                return true;
+            }
+
+            if (acceptSetProgramCounter &&
+                string.Equals(name, "SSetpcB64", StringComparison.Ordinal))
+            {
+                program = new Gen5ShaderProgram(address, instructions);
+                termination = ShaderProgramTermination.SetProgramCounter;
                 return true;
             }
         }
 
-        error = "unterminated";
+        error = $"unterminated pc=0x{pc:X} instructions={instructionCount}" +
+            (shaderSizeBytes == 0
+                ? $" fallback_limit=0x{programLimitBytes:X}"
+                : $" size=0x{shaderSizeBytes:X}");
         return false;
     }
 
@@ -545,6 +935,7 @@ public static class Gen5ShaderTranslator
         ulong baseAddress,
         uint pc,
         uint word,
+        uint availableBytes,
         out Gen5ShaderEncoding encoding,
         out string name,
         out uint sizeDwords,
@@ -614,7 +1005,8 @@ public static class Gen5ShaderTranslator
             case 0x34:
             case 0x35:
                 encoding = Gen5ShaderEncoding.Vop3;
-                if (!TryReadUInt32(ctx, baseAddress + pc + sizeof(uint), out var vop3Extra))
+                if (availableBytes < 2 * sizeof(uint) ||
+                    !TryReadUInt32(ctx, baseAddress + pc + sizeof(uint), out var vop3Extra))
                 {
                     error = $"vop3-extra-read-failed pc=0x{pc:X}";
                     return false;
@@ -635,7 +1027,8 @@ public static class Gen5ShaderTranslator
                 return DecodeFlat(word, out name, out sizeDwords, out error);
             case 0x38:
                 encoding = Gen5ShaderEncoding.Mubuf;
-                if (!TryReadUInt32(ctx, baseAddress + pc + sizeof(uint), out var mubufExtra))
+                if (availableBytes < 2 * sizeof(uint) ||
+                    !TryReadUInt32(ctx, baseAddress + pc + sizeof(uint), out var mubufExtra))
                 {
                     error = $"mubuf-extra-read-failed pc=0x{pc:X}";
                     return false;
@@ -644,7 +1037,8 @@ public static class Gen5ShaderTranslator
                 return DecodeMubuf(word, mubufExtra, out name, out sizeDwords, out error);
             case 0x3A:
                 encoding = Gen5ShaderEncoding.Mtbuf;
-                if (!TryReadUInt32(ctx, baseAddress + pc + sizeof(uint), out var mtbufExtra))
+                if (availableBytes < 2 * sizeof(uint) ||
+                    !TryReadUInt32(ctx, baseAddress + pc + sizeof(uint), out var mtbufExtra))
                 {
                     error = $"mtbuf-extra-read-failed pc=0x{pc:X}";
                     return false;
@@ -686,6 +1080,7 @@ public static class Gen5ShaderTranslator
             0,
             pc,
             word,
+            uint.MaxValue,
             out _,
             out name,
             out sizeDwords,
@@ -716,10 +1111,13 @@ public static class Gen5ShaderTranslator
             0x04 => "SMovB64",
             0x07 => "SNotB32",
             0x08 => "SNotB64",
+            0x09 => "SWqmB32",
             0x0A => "SWqmB64",
             0x0B => "SBrevB32",
             0x0F => "SBcnt1I32B32",
+            0x10 => "SBcnt1I32B64",
             0x13 => "SFF1I32B32",
+            0x14 => "SFF1I32B64",
             0x1D => "SBitset1B32",
             0x1F => "SGetpcB64",
             0x20 => "SSetpcB64",
@@ -732,6 +1130,7 @@ public static class Gen5ShaderTranslator
             0x29 => "SNandSaveexecB64",
             0x2A => "SNorSaveexecB64",
             0x2B => "SXnorSaveexecB64",
+            0x34 => "SAbsI32",
             0x37 => "SAndn1SaveexecB64",
             0x38 => "SOrn1SaveexecB64",
             0x3C => "SAndSaveexecB32",
@@ -841,6 +1240,8 @@ public static class Gen5ShaderTranslator
             0x0D => "SBitcmp1B32",
             0x0E => "SBitcmp0B64",
             0x0F => "SBitcmp1B64",
+            0x12 => "SCmpEqU64",
+            0x13 => "SCmpLgU64",
             _ => string.Empty,
         };
 
@@ -866,7 +1267,9 @@ public static class Gen5ShaderTranslator
             0x0A => "SBarrier",
             0x0C => "SWaitcnt",
             0x10 => "SSendmsg",
+            0x12 => "STrap",
             0x16 => "STtraceData",
+            0x17 => "SCbranchCdbgsys",
             0x20 => "SInstPrefetch",
             0x21 => "SClause",
             0x23 => "SWaitcntDepctr",
@@ -898,6 +1301,7 @@ public static class Gen5ShaderTranslator
             0x0E => "SCmpkLeU32",
             0x0F => "SAddkI32",
             0x10 => "SMulkI32",
+            0x17 => "SWaitcntVscnt",
             _ => string.Empty,
         };
 
@@ -1117,6 +1521,8 @@ public static class Gen5ShaderTranslator
             ? opcode switch
             {
                 0x128 => "VAddCoCiU32",
+                0x129 => "VSubbU32",
+                0x12A => "VSubbrevU32",
                 0x30F => "VAddCoU32",
                 0x310 => "VSubCoU32",
                 0x319 => "VSubrevCoU32",
@@ -1125,6 +1531,7 @@ public static class Gen5ShaderTranslator
             }
             : opcode switch
         {
+            0x0E4 => "VCmpGtU64",
             0x101 => "VCndmaskB32",
             0x103 => "VAddF32",
             0x104 => "VSubF32",
@@ -1188,7 +1595,8 @@ public static class Gen5ShaderTranslator
     }
 
     private static bool IsVop3BOpcode(uint opcode) =>
-        opcode is 0x128 or 0x16D or 0x16E or 0x176 or 0x177 or 0x30F or 0x310 or 0x319;
+        opcode is 0x128 or 0x129 or 0x12A or 0x16D or 0x16E or 0x176 or 0x177 or
+            0x30F or 0x310 or 0x319;
 
     private static bool DecodeRaw2(
         uint word,
@@ -1282,7 +1690,12 @@ public static class Gen5ShaderTranslator
             0x36 => "DsReadB32",
             0x37 => "DsRead2B32",
             0x38 => "DsRead2St64B32",
+            0x3D => "DsConsume",
+            0x3E => "DsAppend",
             0x4D => "DsWriteB64",
+            0x76 => "DsReadB64",
+            0xB0 => "DsWriteAddtidB32",
+            0xB2 => "DsPermuteB32",
             0xDE => "DsWriteB96",
             0xDF => "DsWriteB128",
             0xFE => "DsReadB96",
@@ -1499,7 +1912,10 @@ public static class Gen5ShaderTranslator
 
     private static bool DecodeMimg(uint word, out string name, out uint sizeDwords, out string error)
     {
-        var opcode = (word >> 18) & 0x7F;
+        // GFX10 MIMG stores OP[6:0] in bits 24:18 and OP[7] in bit 0.
+        // Bit 0 used to be dropped here, misreporting ray/BVH opcode 0xE6 as
+        // the otherwise unrelated low opcode 0x66.
+        var opcode = ((word & 1) << 7) | ((word >> 18) & 0x7F);
         sizeDwords = 2 + ((word >> 1) & 0x3);
         error = string.Empty;
         name = opcode switch
@@ -1523,6 +1939,10 @@ public static class Gen5ShaderTranslator
             0x1B => "ImageAtomicInc",
             0x1C => "ImageAtomicDec",
             0x20 => "ImageSample",
+            // PS5 AGC emits the OPM form of the otherwise ordinary sampled
+            // image operation.  GTA V uses this encoding for 2D texture
+            // reads; its operands and result layout match IMAGE_SAMPLE.
+            0xA0 => "ImageSampleOpm",
             0x22 => "ImageSampleD",
             0x24 => "ImageSampleL",
             0x25 => "ImageSampleB",
@@ -1537,6 +1957,7 @@ public static class Gen5ShaderTranslator
             0x4E => "ImageGather4CBCl",
             0x57 => "ImageGather4LzO",
             0x5F => "ImageGather4CLzO",
+            0xE6 => "ImageBvhIntersectRay",
             _ => string.Empty,
         };
 
@@ -1622,6 +2043,15 @@ public static class Gen5ShaderTranslator
         name.StartsWith("ImageStore", StringComparison.Ordinal) ||
         name.StartsWith("ImageAtomic", StringComparison.Ordinal);
 
+    public static bool IsImageWriteOperation(string name) =>
+        name.StartsWith("ImageStore", StringComparison.Ordinal) ||
+        name.StartsWith("ImageAtomic", StringComparison.Ordinal);
+
+    // GFX10 image descriptors use word 5 bits 22:20 for operation/cache policy.
+    // AGC emits 0x00700000 on writable views, so an IMAGE_LOAD and IMAGE_STORE
+    // targeting the same image can legitimately differ only in these bits.
+    private const uint ImageDescriptorOperationPolicyMask = 0x0070_0000u;
+
     public static bool RequiresStorageImage(
         Gen5ImageBinding binding,
         IReadOnlyList<Gen5ImageBinding> stageBindings)
@@ -1636,14 +2066,57 @@ public static class Gen5ShaderTranslator
             return false;
         }
 
-        // IMAGE_LOAD itself is read-only and maps naturally to OpImageFetch,
-        // including for block-compressed textures which Vulkan cannot expose
-        // as storage images. Keep it as storage only when the same resolved
-        // descriptor is also written in this shader stage, preserving coherent
-        // read/write access through one storage-image representation.
-        return stageBindings.Any(candidate =>
+        // Preserve the storage-image semantics used by RDNA IMAGE_LOAD for
+        // ordinary images. In particular, ASTRO's temporal resolve reads a
+        // 1x1 RGBA32F control image this way; lowering that read to a sampled
+        // OpImageFetch regresses the title pyramid on MoltenVK. Block-compressed
+        // images cannot be exposed as Vulkan storage images, so those remain
+        // sampled unless the stage also writes the same resolved resource.
+        return !IsBlockCompressedImageDescriptor(binding.ResourceDescriptor) ||
+            stageBindings.Any(candidate =>
             IsStorageImageOperation(candidate.Opcode) &&
-            binding.ResourceDescriptor.SequenceEqual(candidate.ResourceDescriptor));
+            RefersToSameImageResource(
+                binding.ResourceDescriptor,
+                candidate.ResourceDescriptor));
+    }
+
+    private static bool IsBlockCompressedImageDescriptor(
+        IReadOnlyList<uint> descriptor)
+    {
+        if (descriptor.Count < 2)
+        {
+            return false;
+        }
+
+        var unifiedFormat = (descriptor[1] >> 20) & 0x1FFu;
+        return Gfx10UnifiedFormat.TryDecode(
+                unifiedFormat,
+                out var dataFormat,
+                out _) &&
+            dataFormat is >= 169 and <= 182;
+    }
+
+    private static bool RefersToSameImageResource(
+        IReadOnlyList<uint> left,
+        IReadOnlyList<uint> right)
+    {
+        if (left.Count != right.Count)
+        {
+            return false;
+        }
+
+        for (var index = 0; index < left.Count; index++)
+        {
+            var mask = index == 5
+                ? ~ImageDescriptorOperationPolicyMask
+                : uint.MaxValue;
+            if ((left[index] & mask) != (right[index] & mask))
+            {
+                return false;
+            }
+        }
+
+        return true;
     }
 
     public static bool IsArrayedImageBinding(Gen5ImageBinding binding) =>
@@ -1785,8 +2258,21 @@ public static class Gen5ShaderTranslator
                 ];
                 break;
             case Gen5ShaderEncoding.Sopk:
-                sources = [new Gen5Operand(Gen5OperandKind.EncodedConstant, word & 0xFFFF)];
-                destinations = [Gen5Operand.Scalar((word >> 16) & 0x7F)];
+                if (opcode == "SWaitcntVscnt")
+                {
+                    // Unlike ordinary SOPK instructions, the SDST-shaped field is an
+                    // optional scalar source (normally null/s125), not a destination.
+                    sources =
+                    [
+                        Gen5Operand.Scalar((word >> 16) & 0x7F),
+                        new Gen5Operand(Gen5OperandKind.EncodedConstant, word & 0xFFFF),
+                    ];
+                }
+                else
+                {
+                    sources = [new Gen5Operand(Gen5OperandKind.EncodedConstant, word & 0xFFFF)];
+                    destinations = [Gen5Operand.Scalar((word >> 16) & 0x7F)];
+                }
                 break;
             case Gen5ShaderEncoding.Smrd:
             {
@@ -2015,7 +2501,10 @@ public static class Gen5ShaderTranslator
                     Gen5Operand.Source((extra >> 9) & 0x1FF, literal),
                     Gen5Operand.Source((extra >> 18) & 0x1FF, literal),
                 ];
-                destinations = [Gen5Operand.Vector(word & 0xFF)];
+                var isCompare = opcode.StartsWith("VCmp", StringComparison.Ordinal);
+                destinations = isCompare
+                    ? [Gen5Operand.Scalar(word & 0xFF)]
+                    : [Gen5Operand.Vector(word & 0xFF)];
                 if (opcode == "VReadlaneB32")
                 {
                     // V_READLANE uses the VOP3A vdst byte even though the
@@ -2030,7 +2519,11 @@ public static class Gen5ShaderTranslator
                     (extra >> 27) & 0x3,
                     ((word >> 15) & 1) != 0,
                     isVop3B ? 0 : (word >> 11) & 0xF,
-                    isVop3B ? (word >> 8) & 0x7F : null);
+                    isVop3B
+                        ? (word >> 8) & 0x7F
+                        : isCompare
+                            ? word & 0xFF
+                            : null);
                 break;
             }
             case Gen5ShaderEncoding.Vop3p:
@@ -2068,6 +2561,9 @@ public static class Gen5ShaderTranslator
                     ((word >> 17) & 1) != 0);
                 sources = opcode switch
                 {
+                    "DsWriteAddtidB32" => [
+                        Gen5Operand.Vector(vectorData0),
+                    ],
                     "DsWriteB32" => [
                         Gen5Operand.Vector(vectorAddress),
                         Gen5Operand.Vector(vectorData0),
@@ -2096,6 +2592,11 @@ public static class Gen5ShaderTranslator
                         Gen5Operand.Vector(vectorData1),
                     ],
                     "DsSwizzleB32" => [Gen5Operand.Vector(vectorData0)],
+                    "DsConsume" or "DsAppend" => [],
+                    "DsPermuteB32" => [
+                        Gen5Operand.Vector(vectorAddress),
+                        Gen5Operand.Vector(vectorData0),
+                    ],
                     // DS_CMPST operand order is reversed vs buffer/image cmpswap:
                     // DATA0 holds the comparator, DATA1 holds the new value.
                     "DsCmpstB32" or "DsCmpstRtnB32" => [
@@ -2111,8 +2612,18 @@ public static class Gen5ShaderTranslator
                 };
                 destinations = opcode switch
                 {
-                    "DsReadB32" or "DsSwizzleB32" => [
+                    "DsAddRtnU32" => [
                         Gen5Operand.Vector(vectorDestination),
+                    ],
+                    "DsConsume" or "DsAppend" => [
+                        Gen5Operand.Vector(vectorDestination),
+                    ],
+                    "DsReadB32" or "DsSwizzleB32" or "DsPermuteB32" => [
+                        Gen5Operand.Vector(vectorDestination),
+                    ],
+                    "DsReadB64" => [
+                        Gen5Operand.Vector(vectorDestination),
+                        Gen5Operand.Vector(vectorDestination + 1),
                     ],
                     "DsRead2B32" or "DsRead2St64B32" => [
                         Gen5Operand.Vector(vectorDestination),
@@ -2323,6 +2834,7 @@ public static class Gen5ShaderTranslator
                 var vectorData = (extra >> 8) & 0xFF;
                 var scalarResource = ((extra >> 16) & 0x1F) * 4;
                 var scalarSampler = ((extra >> 21) & 0x1F) * 4;
+                var isBvhIntersectRay = opcode == "ImageBvhIntersectRay";
                 var addressRegisters = new List<uint>(1 + Math.Max(0, words.Length - 2) * 4)
                 {
                     vectorAddress,
@@ -2335,6 +2847,15 @@ public static class Gen5ShaderTranslator
                     }
                 }
 
+                // GFX10 IMAGE_BVH_INTERSECT_RAY has 11 A16=0 address VGPRs.
+                // Its final NSA dword contains two padding bytes, which are not
+                // v0 operands.  It also consumes a special four-SGPR BVH
+                // descriptor and no sampler.
+                if (isBvhIntersectRay && addressRegisters.Count > 11)
+                {
+                    addressRegisters.RemoveRange(11, addressRegisters.Count - 11);
+                }
+
                 var imageSources = new List<Gen5Operand>(addressRegisters.Count + 2);
                 foreach (var addressRegister in addressRegisters)
                 {
@@ -2342,11 +2863,23 @@ public static class Gen5ShaderTranslator
                 }
 
                 imageSources.Add(Gen5Operand.Scalar(scalarResource));
-                imageSources.Add(Gen5Operand.Scalar(scalarSampler));
+                if (!isBvhIntersectRay)
+                {
+                    imageSources.Add(Gen5Operand.Scalar(scalarSampler));
+                }
                 sources = imageSources;
-                destinations = opcode.StartsWith("ImageStore", StringComparison.Ordinal)
-                    ? []
-                    : [Gen5Operand.Vector(vectorData)];
+                destinations = opcode switch
+                {
+                    _ when opcode.StartsWith("ImageStore", StringComparison.Ordinal) => [],
+                    "ImageBvhIntersectRay" =>
+                    [
+                        Gen5Operand.Vector(vectorData),
+                        Gen5Operand.Vector(vectorData + 1),
+                        Gen5Operand.Vector(vectorData + 2),
+                        Gen5Operand.Vector(vectorData + 3),
+                    ],
+                    _ => [Gen5Operand.Vector(vectorData)],
+                };
                 var dimension = (word >> 3) & 0x7;
                 control = new Gen5ImageControl(
                     (word >> 8) & 0xF,
@@ -2354,7 +2887,7 @@ public static class Gen5ShaderTranslator
                     addressRegisters,
                     vectorData,
                     scalarResource,
-                    scalarSampler,
+                    isBvhIntersectRay ? 0 : scalarSampler,
                     dimension,
                     dimension is 4 or 5 or 7,
                     ((word >> 13) & 1) != 0,

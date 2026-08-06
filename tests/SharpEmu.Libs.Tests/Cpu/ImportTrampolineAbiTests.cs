@@ -13,6 +13,53 @@ namespace SharpEmu.Libs.Tests.Cpu;
 
 public sealed class ImportTrampolineAbiTests
 {
+	[Fact]
+	public void StackCheckRecovery_FindsColdFailureBranchAfterLongEpilogue()
+	{
+		var code = new byte[128];
+		const int returnOffset = 100;
+		const int failureCallOffset = returnOffset - 5;
+		const int branchOffset = returnOffset - 81;
+		const int epilogueOffset = branchOffset + 2;
+
+		code[branchOffset] = 0x75; // jne __stack_chk_fail
+		code[branchOffset + 1] = checked((byte)(failureCallOffset - epilogueOffset));
+		code[epilogueOffset] = 0x48; // add rsp,0x28
+		code[epilogueOffset + 1] = 0x83;
+		code[epilogueOffset + 2] = 0xC4;
+		code[epilogueOffset + 3] = 0x28;
+		code[epilogueOffset + 12] = 0xC3; // ret
+		code[failureCallOffset] = 0xE8; // call __stack_chk_fail
+		code[returnOffset] = 0x0F;
+		code[returnOffset + 1] = 0x0B; // ud2
+
+		Assert.True(DirectExecutionBackend.TryFindStackCheckRecovery(
+			code,
+			returnOffset,
+			out var recoveryOffset));
+		Assert.Equal(epilogueOffset, recoveryOffset);
+	}
+
+	[Fact]
+	public void StackCheckRecovery_RejectsBranchWithoutNormalReturn()
+	{
+		var code = new byte[64];
+		const int returnOffset = 56;
+		const int failureCallOffset = returnOffset - 5;
+		const int branchOffset = 12;
+
+		code[branchOffset] = 0x75;
+		code[branchOffset + 1] = checked((byte)(failureCallOffset - (branchOffset + 2)));
+		code[failureCallOffset] = 0xE8;
+		code[returnOffset] = 0x0F;
+		code[returnOffset + 1] = 0x0B;
+
+		Assert.False(DirectExecutionBackend.TryFindStackCheckRecovery(
+			code,
+			returnOffset,
+			out _));
+	}
+
     [Fact]
     public unsafe void GeneratedTrampoline_PreservesVolatileGuestState()
     {

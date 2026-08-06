@@ -1,0 +1,17 @@
+{
+  "campaign_processes_remaining": 0,
+  "campaign_root": "/Users/mcruz/Developer/kawaiidra-mcp/evidence/gta_v_remaining90_mac_20260718.sdRJVV",
+  "checked_utc": "2026-07-18T08:20:53.284241+00:00",
+  "cleanup_method": "Moved transient project tree, 16 isolated Ghidra user homes, and Python bytecode cache to macOS Trash; recoverable until Trash is emptied.",
+  "durable_evidence_retained": [
+    "logs",
+    "result TSVs",
+    "target TSVs",
+    "provider derivatives and provenance reports",
+    "JSON, CSV, and Markdown summaries"
+  ],
+  "format": "sharpemu-ghidra-local-cleanup-proof-v1",
+  "ghidra_user_directories_remaining": 0,
+  "transient_projects_path": "/Users/mcruz/Developer/kawaiidra-mcp/evidence/gta_v_remaining90_mac_20260718.sdRJVV/projects",
+  "transient_projects_present": false
+}

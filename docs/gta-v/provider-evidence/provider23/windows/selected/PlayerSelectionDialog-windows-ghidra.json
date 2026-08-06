@@ -1,0 +1,38 @@
+{
+  "executable_sha256": "c2e61df112cf0a0b2405de812d7c0d9ae22cd1094a6531d5087703c0f4baacc6",
+  "format": "sharpemu-ghidra-selected-nid-functions-v1",
+  "function_count": 1,
+  "functions": [
+    {
+      "external": false,
+      "function_body_addresses": 77,
+      "function_body_sha256": "c16dd42d54fe7cfb5ac98638e0d04ca49b570579375dfb155c2a6aa18013fc08",
+      "function_entry": "00000720",
+      "function_name": "CgdJ1PkIsE4#F#A",
+      "function_present": true,
+      "instruction_count": 22,
+      "log_file": "audit-10-PlayerSelectionDialog.log",
+      "nid": "CgdJ1PkIsE4",
+      "result_file": "10-PlayerSelectionDialog.result.tsv",
+      "symbol": "CgdJ1PkIsE4#F#A",
+      "symbol_address": "00000720",
+      "thunk": false,
+      "thunk_target": "",
+      "thunk_target_external": null
+    }
+  ],
+  "ghidra_version": "12.1.2_PUBLIC_20260605",
+  "missing": [],
+  "program_name": "libScePlayerSelectionDialog.sprx",
+  "provenance": {
+    "audit_script_sha256": "f946f435e38dc99db306165473b180209d5db7e0581c6c52d3b417510f87dfa9",
+    "computer": "DESKTOP-RAAKAQJ",
+    "evidence_policy": "Ghidra analysis of exact Gen5 provider ELFs only; no Kyty or other emulator-derived source, contracts, or implementations.",
+    "log_sha256": "7f8481f4ad78075fc521667a842a6fe6ac17c9a1b534d3da6ddb94b834a45e67",
+    "plan_sha256": "7b98c992e0d65d55d9743b30b320ad197f0bc52bb803d5654398a701a814d831",
+    "provider_role": "primary",
+    "result_sha256": "ce0590cd03f2aa0211e691256eeb121e893960ee16ed4337672f5ee4c47d835f"
+  },
+  "target_count": 1,
+  "without_functions": []
+}

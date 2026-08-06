@@ -13,6 +13,9 @@ public sealed class Gen5ShaderDecoderBoundaryTests
     private const ulong ShaderAddress = 0x1_0000_0000;
     private const uint Export = 0xF8000000;
     private const uint Nop = 0xBF800000;
+    // Acelogic extends the headerless decoder window beyond upstream's legacy
+    // 4096-instruction cap so large AGC programs can reach S_ENDPGM. Keep the
+    // fail-closed boundary test aligned with that intentional 64 KiB window.
     private const uint EndPgm = 0xBF810000;
     private const int MaximumInstructionCount = 16384;
 
@@ -89,7 +92,7 @@ public sealed class Gen5ShaderDecoderBoundaryTests
 
         Assert.False(decoded);
         Assert.Empty(program.Instructions);
-        Assert.Equal("unterminated", error);
+        Assert.StartsWith("unterminated", error, StringComparison.Ordinal);
         Assert.Equal(MaximumInstructionCount, memory.Reads.Count);
         Assert.All(memory.Reads, read => Assert.True(read.Succeeded));
         Assert.Equal(

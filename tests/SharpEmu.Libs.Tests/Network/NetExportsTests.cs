@@ -1,6 +1,9 @@
 // Copyright (C) 2026 SharpEmu Emulator Project
 // SPDX-License-Identifier: GPL-2.0-or-later
 
+using System.Buffers.Binary;
+using System.Runtime.InteropServices;
+using System.Text;
 using SharpEmu.HLE;
 using SharpEmu.Libs.Network;
 using Xunit;
@@ -12,6 +15,9 @@ namespace SharpEmu.Libs.Tests.Network;
 // little-endian guest) the emulator targets, so network (big-endian) order is always a byte swap.
 public sealed class NetExportsTests
 {
+    private const ulong MemoryBase = 0x1_0000_0000;
+    private const ulong SourceAddress = MemoryBase + 0x100;
+    private const ulong DestinationAddress = MemoryBase + 0x200;
     private readonly CpuContext _ctx = new(new FakeCpuMemory(0x1_0000_0000, 0x1000), Generation.Gen5);
 
     [Fact]
@@ -90,5 +96,146 @@ public sealed class NetExportsTests
         _ctx[CpuRegister.Rdi] = 0x0102;
         NetExports.NetHtons(_ctx);
         Assert.NotEqual(0UL, _ctx[CpuRegister.Rax]);
+    }
+
+    [Fact]
+    public void NetInetPtonParsesStrictIpv4ForGtaNetCtlAddress()
+    {
+        WriteCString("127.0.0.1");
+        _ctx[CpuRegister.Rdi] = 2;
+        _ctx[CpuRegister.Rsi] = SourceAddress;
+        _ctx[CpuRegister.Rdx] = DestinationAddress;
+
+        Assert.Equal(0, NetExports.NetInetPton(_ctx));
+        Assert.Equal(1UL, _ctx[CpuRegister.Rax]);
+        AssertBytes(DestinationAddress, new byte[] { 127, 0, 0, 1 });
+    }
+
+    [Fact]
+    public void NetInetPtonParsesIpv6Compression()
+    {
+        WriteCString("2001:db8::1");
+        _ctx[CpuRegister.Rdi] = 28;
+        _ctx[CpuRegister.Rsi] = SourceAddress;
+        _ctx[CpuRegister.Rdx] = DestinationAddress;
+
+        Assert.Equal(0, NetExports.NetInetPton(_ctx));
+        AssertBytes(
+            DestinationAddress,
+            new byte[] { 0x20, 0x01, 0x0D, 0xB8, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1 });
+    }
+
+    [Fact]
+    public void NetInetPtonInvalidSyntaxReturnsZeroWithoutChangingDestinationOrErrno()
+    {
+        _ctx[CpuRegister.Rdi] = 123;
+        Assert.Equal(unchecked((int)0x8041012F), NetExports.NetInetPton(_ctx));
+        NetExports.NetErrnoLoc(_ctx);
+        var errnoAddress = unchecked((nint)_ctx[CpuRegister.Rax]);
+        Assert.Equal(47, Marshal.ReadInt32(errnoAddress));
+
+        WriteCString("127.0.0");
+        Assert.True(_ctx.Memory.TryWrite(DestinationAddress, new byte[] { 0xAA, 0xBB, 0xCC, 0xDD }));
+        _ctx[CpuRegister.Rdi] = 2;
+        _ctx[CpuRegister.Rsi] = SourceAddress;
+        _ctx[CpuRegister.Rdx] = DestinationAddress;
+
+        Assert.Equal(0, NetExports.NetInetPton(_ctx));
+        Assert.Equal(0UL, _ctx[CpuRegister.Rax]);
+        AssertBytes(DestinationAddress, new byte[] { 0xAA, 0xBB, 0xCC, 0xDD });
+        Assert.Equal(47, Marshal.ReadInt32(errnoAddress));
+    }
+
+    [Fact]
+    public void NetInetPtonNullSourceSetsProviderInvalidArgumentAndErrno()
+    {
+        _ctx[CpuRegister.Rdi] = 2;
+        _ctx[CpuRegister.Rsi] = 0;
+        _ctx[CpuRegister.Rdx] = DestinationAddress;
+
+        Assert.Equal(unchecked((int)0x80410116), NetExports.NetInetPton(_ctx));
+        NetExports.NetErrnoLoc(_ctx);
+        Assert.Equal(22, Marshal.ReadInt32(unchecked((nint)_ctx[CpuRegister.Rax])));
+    }
+
+    [Fact]
+    public void NetInetPtonRegistersAsExactLlePreferredGen5Fallback()
+    {
+        var export = Assert.Single(
+            SharpEmu.Generated.SysAbiExportRegistry.CreateExports(Generation.Gen5),
+            candidate => candidate.Nid == "8Kcp5d-q1Uo");
+
+        Assert.Equal("sceNetInetPton", export.Name);
+        Assert.Equal("libSceNet", export.LibraryName);
+        Assert.True(export.PreferLle);
+        Assert.Equal(typeof(NetExports), export.Function.Method.DeclaringType);
+    }
+
+    [Fact]
+    public void NetGetSockInfoWritesBoundLocalPortForGtaSocketBootstrap()
+    {
+        WriteCString("gta-sockinfo-test");
+        _ctx[CpuRegister.Rdi] = SourceAddress;
+        _ctx[CpuRegister.Rsi] = 2;
+        _ctx[CpuRegister.Rdx] = 2;
+        _ctx[CpuRegister.Rcx] = 17;
+        Assert.Equal(0, NetExports.NetSocket(_ctx));
+        var socketId = _ctx[CpuRegister.Rax];
+
+        try
+        {
+            Span<byte> socketAddress = stackalloc byte[16];
+            socketAddress[0] = 16;
+            socketAddress[1] = 2;
+            socketAddress[4] = 127;
+            socketAddress[7] = 1;
+            Assert.True(_ctx.Memory.TryWrite(SourceAddress, socketAddress));
+
+            _ctx[CpuRegister.Rdi] = socketId;
+            _ctx[CpuRegister.Rsi] = SourceAddress;
+            _ctx[CpuRegister.Rdx] = 16;
+            Assert.Equal(0, NetExports.NetBind(_ctx));
+
+            _ctx[CpuRegister.Rdi] = socketId;
+            _ctx[CpuRegister.Rsi] = DestinationAddress;
+            _ctx[CpuRegister.Rdx] = 1;
+            _ctx[CpuRegister.Rcx] = 0;
+            Assert.Equal(0, NetExports.NetGetSockInfo(_ctx));
+
+            Span<byte> port = stackalloc byte[sizeof(ushort)];
+            Assert.True(_ctx.Memory.TryRead(DestinationAddress + 0x3C, port));
+            Assert.NotEqual(0, BinaryPrimitives.ReadUInt16BigEndian(port));
+        }
+        finally
+        {
+            _ctx[CpuRegister.Rdi] = socketId;
+            NetExports.NetSocketClose(_ctx);
+        }
+    }
+
+    [Fact]
+    public void NetGetSockInfoRegistersAsSemanticLlePreferredGen5Fallback()
+    {
+        var export = Assert.Single(
+            SharpEmu.Generated.SysAbiExportRegistry.CreateExports(Generation.Gen5),
+            candidate => candidate.Nid == "hLuXdjHnhiI");
+
+        Assert.Equal("sceNetGetSockInfo", export.Name);
+        Assert.Equal("libSceNet", export.LibraryName);
+        Assert.True(export.PreferLle);
+        Assert.Equal(typeof(NetExports), export.Function.Method.DeclaringType);
+    }
+
+    private void WriteCString(string value)
+    {
+        var bytes = Encoding.UTF8.GetBytes(value + "\0");
+        Assert.True(_ctx.Memory.TryWrite(SourceAddress, bytes));
+    }
+
+    private void AssertBytes(ulong address, byte[] expected)
+    {
+        var actual = new byte[expected.Length];
+        Assert.True(_ctx.Memory.TryRead(address, actual));
+        Assert.Equal(expected, actual);
     }
 }

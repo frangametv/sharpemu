@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 
 using System.Runtime.InteropServices;
+using SharpEmu.HLE;
 using SharpEmu.HLE.Host;
 using SharpEmu.HLE.Host.Posix;
 using Xunit;
@@ -47,6 +48,44 @@ public sealed unsafe class PosixHostMemoryTests
 
             Assert.Equal(0UL, result);
             Assert.All(sentinel.ToArray(), value => Assert.Equal(0xA5, value));
+        }
+        finally
+        {
+            Assert.Equal(0, munmap(externalMapping, size));
+        }
+    }
+
+    [Fact]
+    public void LegacyHostMemoryExactAllocationDoesNotReplaceUntrackedDarwinMapping()
+    {
+        if (!OperatingSystem.IsMacOS())
+        {
+            return;
+        }
+
+        var size = checked((nuint)Environment.SystemPageSize);
+        var externalMapping = mmap(
+            0,
+            size,
+            ProtRead | ProtWrite,
+            MapPrivate | MapAnonymousDarwin,
+            -1,
+            0);
+        Assert.NotEqual(MapFailed, externalMapping);
+
+        try
+        {
+            var sentinel = new Span<byte>((void*)externalMapping, checked((int)size));
+            sentinel.Fill(0x5A);
+
+            var result = HostMemory.Alloc(
+                (void*)externalMapping,
+                size,
+                HostMemory.MEM_COMMIT | HostMemory.MEM_RESERVE,
+                HostMemory.PAGE_READWRITE);
+
+            Assert.Equal(0, (nint)result);
+            Assert.All(sentinel.ToArray(), value => Assert.Equal(0x5A, value));
         }
         finally
         {

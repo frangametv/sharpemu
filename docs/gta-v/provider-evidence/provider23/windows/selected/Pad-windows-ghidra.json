@@ -1,0 +1,38 @@
+{
+  "executable_sha256": "9396eb7947760db43eec22be66cc40f2a5e999be09645412cb92020b1e9dfe34",
+  "format": "sharpemu-ghidra-selected-nid-functions-v1",
+  "function_count": 1,
+  "functions": [
+    {
+      "external": false,
+      "function_body_addresses": 7,
+      "function_body_sha256": "a4314ff92139f9e4a1653c715a64a75663bbf5870fdb8faadbd45542c42cbf59",
+      "function_entry": "00003da0",
+      "function_name": "rIZnR6eSpvk#D#A",
+      "function_present": true,
+      "instruction_count": 2,
+      "log_file": "audit-09-Pad.log",
+      "nid": "rIZnR6eSpvk",
+      "result_file": "09-Pad.result.tsv",
+      "symbol": "rIZnR6eSpvk#D#A",
+      "symbol_address": "00003da0",
+      "thunk": false,
+      "thunk_target": "",
+      "thunk_target_external": null
+    }
+  ],
+  "ghidra_version": "12.1.2_PUBLIC_20260605",
+  "missing": [],
+  "program_name": "libScePad.sprx",
+  "provenance": {
+    "audit_script_sha256": "f946f435e38dc99db306165473b180209d5db7e0581c6c52d3b417510f87dfa9",
+    "computer": "DESKTOP-RAAKAQJ",
+    "evidence_policy": "Ghidra analysis of exact Gen5 provider ELFs only; no Kyty or other emulator-derived source, contracts, or implementations.",
+    "log_sha256": "0e440bb3f175f428b5e56ca7910107755bc5bb619d5f87c83284d7de5a122cd1",
+    "plan_sha256": "7b98c992e0d65d55d9743b30b320ad197f0bc52bb803d5654398a701a814d831",
+    "provider_role": "primary",
+    "result_sha256": "c0e0400503c466417e2b4ace8ea599fee80ca5599b1e012648ae94c3394eac4b"
+  },
+  "target_count": 1,
+  "without_functions": []
+}

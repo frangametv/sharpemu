@@ -7,6 +7,7 @@ using System.Collections.Concurrent;
 using System.Linq;
 using System.Text;
 using System.Text.Json;
+using System.Threading;
 using SharpEmu.HLE;
 
 namespace SharpEmu.Libs.Json;
@@ -26,9 +27,40 @@ public static class JsonExports
         ulong GuestBufferAddress = 0,
         int GuestBufferCapacity = 0);
 
+    private readonly record struct JsonReferenceKey(ulong ValueAddress, string Key);
+
+    private sealed record Json2InitializationState(
+        ulong Allocator,
+        ulong AllocatorContext,
+        ulong FileBufferSize,
+        uint Mode);
+
     private static readonly ConcurrentDictionary<ulong, JsonValueState> _values = new();
     private static readonly ConcurrentDictionary<ulong, JsonStringState> _strings = new();
+    private static readonly ConcurrentDictionary<JsonReferenceKey, ulong> _valueReferences = new();
     private static readonly JsonElement _nullElement = CreateNullElement();
+    private static readonly object _globalNullAccessCallbackGate = new();
+    private static Json2InitializationState? _json2InitializationState;
+    private static bool _initializerInitialize2AllocationFailureForTests;
+
+    private const int SceJsonErrorInitializationFailed = unchecked((int)0x80848102);
+    private const int SceJsonErrorNotInitialized = unchecked((int)0x80848110);
+    private const int SceJsonErrorAlreadyInitialized = unchecked((int)0x80848111);
+    private const int SceJsonErrorCallbackAlreadySet = unchecked((int)0x80848112);
+    private const int SceJsonErrorInvalidCallback = unchecked((int)0x80848120);
+
+    private sealed record JsonArrayState(JsonElement Element, long Identity);
+
+    private sealed record JsonArrayIteratorState(
+        JsonArrayState Array,
+        int Position,
+        ulong ValueAddress = 0);
+
+    private static readonly ConcurrentDictionary<ulong, ulong> _valueStrings = new();
+    private static readonly ConcurrentDictionary<ulong, JsonArrayState> _arrays = new();
+    private static readonly ConcurrentDictionary<ulong, JsonArrayIteratorState> _arrayIterators = new();
+    private static readonly JsonElement _emptyArrayElement = CreateEmptyArrayElement();
+    private static long _nextArrayIdentity;
 
     [SysAbiExport(
         Nid = "-hJRce8wn1U",
@@ -63,6 +95,11 @@ public static class JsonExports
     public static int InitializerConstructor(CpuContext ctx)
     {
         var thisAddress = ctx[CpuRegister.Rdi];
+        if (thisAddress == 0 || !ctx.Memory.TryWrite(thisAddress, new byte[] { 0 }))
+        {
+            return SetReturn(ctx, (int)OrbisGen2Result.ORBIS_GEN2_ERROR_MEMORY_FAULT);
+        }
+
         TraceJson("Initializer.ctor", thisAddress, 0);
         ctx[CpuRegister.Rax] = thisAddress;
         return (int)OrbisGen2Result.ORBIS_GEN2_OK;
@@ -81,18 +118,6 @@ public static class JsonExports
     }
 
     [SysAbiExport(
-        Nid = "PR5k1penBLM",
-        ExportName = "_ZN3sce4Json11Initializer9terminateEv",
-        Target = Generation.Gen4 | Generation.Gen5,
-        LibraryName = "libSceJson")]
-    public static int InitializerTerminate(CpuContext ctx)
-    {
-        TraceJson("Initializer.terminate", ctx[CpuRegister.Rdi], 0);
-        ctx[CpuRegister.Rax] = 0;
-        return (int)OrbisGen2Result.ORBIS_GEN2_OK;
-    }
-
-    [SysAbiExport(
         Nid = "Cxwy7wHq4J0",
         ExportName = "_ZN3sce4Json11Initializer10initializeEPKNS0_13InitParameterE",
         Target = Generation.Gen4 | Generation.Gen5,
@@ -101,15 +126,52 @@ public static class JsonExports
     {
         var thisAddress = ctx[CpuRegister.Rdi];
         var initParameterAddress = ctx[CpuRegister.Rsi];
-        if (thisAddress == 0)
+        Span<byte> initialized = stackalloc byte[1];
+        if (thisAddress == 0 || !ctx.Memory.TryRead(thisAddress, initialized))
         {
-            ctx[CpuRegister.Rax] = unchecked((ulong)(int)OrbisGen2Result.ORBIS_GEN2_ERROR_INVALID_ARGUMENT);
-            return (int)OrbisGen2Result.ORBIS_GEN2_ERROR_INVALID_ARGUMENT;
+            return SetReturn(ctx, SceJsonErrorAlreadyInitialized);
+        }
+
+        lock (_globalNullAccessCallbackGate)
+        {
+            if (_json2InitializationState is not null || initialized[0] != 0)
+            {
+                return SetReturn(ctx, SceJsonErrorAlreadyInitialized);
+            }
+
+            if (initParameterAddress == 0)
+            {
+                return SetReturn(ctx, SceJsonErrorInvalidCallback);
+            }
+
+            Span<byte> initParameters = stackalloc byte[0x18];
+            if (!ctx.Memory.TryRead(initParameterAddress, initParameters))
+            {
+                return SetReturn(ctx, SceJsonErrorInitializationFailed);
+            }
+
+            var allocator = BinaryPrimitives.ReadUInt64LittleEndian(initParameters);
+            if (allocator == 0)
+            {
+                return SetReturn(ctx, SceJsonErrorInitializationFailed);
+            }
+
+            if (!ctx.Memory.TryWrite(thisAddress, new byte[] { 1 }))
+            {
+                return SetReturn(ctx, (int)OrbisGen2Result.ORBIS_GEN2_ERROR_MEMORY_FAULT);
+            }
+
+            // Retain the guest allocator contract for lifecycle fidelity. Calling
+            // its guest vtable remains an explicit HLE boundary.
+            _json2InitializationState = new Json2InitializationState(
+                allocator,
+                BinaryPrimitives.ReadUInt64LittleEndian(initParameters[0x08..]),
+                BinaryPrimitives.ReadUInt64LittleEndian(initParameters[0x10..]),
+                Mode: 0);
         }
 
         TraceJson("Initializer.initialize", thisAddress, initParameterAddress);
-        ctx[CpuRegister.Rax] = 0;
-        return (int)OrbisGen2Result.ORBIS_GEN2_OK;
+        return SetReturn(ctx, 0);
     }
 
     [SysAbiExport(
@@ -125,22 +187,58 @@ public static class JsonExports
             return SetReturn(ctx, (int)OrbisGen2Result.ORBIS_GEN2_ERROR_INVALID_ARGUMENT);
         }
 
-        JsonObjectHeap.GlobalNullAccessCallback = ctx[CpuRegister.Rsi];
-        JsonObjectHeap.GlobalNullAccessCallbackContext = ctx[CpuRegister.Rdx];
+        lock (_globalNullAccessCallbackGate)
+        {
+            JsonObjectHeap.GlobalNullAccessCallback = ctx[CpuRegister.Rsi];
+            JsonObjectHeap.GlobalNullAccessCallbackContext = ctx[CpuRegister.Rdx];
+        }
         TraceJson("Initializer.setGlobalNullAccessCallback", thisAddress, ctx[CpuRegister.Rsi]);
         return SetReturn(ctx, 0);
     }
 
     // Catalog alias NID for the same callback setter.
     #pragma warning disable SHEM004
+    #pragma warning restore SHEM004
+
+    // Kept as a direct helper for tests and JSON2 lifecycle emulation. The
+    // shared NID is exported once by the catalog-backed libSceJson alias above.
     [SysAbiExport(
         Nid = "00oCq0RwSAY",
-        ExportName = "_ZN3sce4Json11Initializer27setGlobalNullAccessCallbackEPFRKNS0_5ValueENS0_9ValueTypeEPS3_PvES7_",
-        Target = Generation.Gen4 | Generation.Gen5,
-        LibraryName = "libSceJson")]
-    public static int InitializerSetGlobalNullAccessCallbackAlt(CpuContext ctx) =>
-        InitializerSetGlobalNullAccessCallback(ctx);
-    #pragma warning restore SHEM004
+        ExportName = "_ZN3sce4Json11Initializer27setGlobalNullAccessCallBackEPFRKNS0_5ValueENS0_9ValueTypeEPS3_PvES7_",
+        Target = Generation.Gen5,
+        LibraryName = "libSceJson2")]
+    public static int InitializerSetGlobalNullAccessCallBack(CpuContext ctx)
+    {
+        var thisAddress = ctx[CpuRegister.Rdi];
+        var callback = ctx[CpuRegister.Rsi];
+        lock (_globalNullAccessCallbackGate)
+        {
+            Span<byte> initialized = stackalloc byte[1];
+            if (_json2InitializationState is null ||
+                thisAddress == 0 ||
+                !ctx.Memory.TryRead(thisAddress, initialized) ||
+                initialized[0] == 0)
+            {
+                return SetReturn(ctx, SceJsonErrorNotInitialized);
+            }
+
+            if (callback == 0)
+            {
+                return SetReturn(ctx, SceJsonErrorInvalidCallback);
+            }
+
+            if (JsonObjectHeap.GlobalNullAccessCallback != 0)
+            {
+                return SetReturn(ctx, SceJsonErrorCallbackAlreadySet);
+            }
+
+            JsonObjectHeap.GlobalNullAccessCallback = callback;
+            JsonObjectHeap.GlobalNullAccessCallbackContext = ctx[CpuRegister.Rdx];
+        }
+
+        TraceJson("Initializer.setGlobalNullAccessCallBack", thisAddress, callback);
+        return SetReturn(ctx, 0);
+    }
 
     [SysAbiExport(
         Nid = "WSOuge5IsCg",
@@ -215,19 +313,107 @@ public static class JsonExports
         Nid = "IXW-z8pggfg",
         ExportName = "_ZN3sce4Json11Initializer10initializeEPKNS0_14InitParameter2E",
         Target = Generation.Gen5,
-        LibraryName = "libSceJson")]
+        LibraryName = "libSceJson2")]
     public static int InitializerInitialize2(CpuContext ctx)
     {
         var thisAddress = ctx[CpuRegister.Rdi];
         var initParameterAddress = ctx[CpuRegister.Rsi];
-        if (thisAddress == 0 || initParameterAddress == 0)
+        Span<byte> initialized = stackalloc byte[1];
+        if (thisAddress == 0 || !ctx.Memory.TryRead(thisAddress, initialized))
         {
-            return SetReturn(ctx, (int)OrbisGen2Result.ORBIS_GEN2_ERROR_INVALID_ARGUMENT);
+            return SetReturn(ctx, SceJsonErrorAlreadyInitialized);
+        }
+
+        lock (_globalNullAccessCallbackGate)
+        {
+            if (_json2InitializationState is not null || initialized[0] != 0)
+            {
+                return SetReturn(ctx, SceJsonErrorAlreadyInitialized);
+            }
+
+            Span<byte> initParameters = stackalloc byte[0x28];
+            if (initParameterAddress == 0 ||
+                !ctx.Memory.TryRead(initParameterAddress, initParameters))
+            {
+                return SetReturn(ctx, SceJsonErrorInvalidCallback);
+            }
+
+            var allocator = BinaryPrimitives.ReadUInt64LittleEndian(initParameters);
+            var mode = BinaryPrimitives.ReadUInt32LittleEndian(initParameters[0x18..]);
+            if (allocator == 0 || mode >= 3)
+            {
+                return SetReturn(ctx, SceJsonErrorInvalidCallback);
+            }
+
+            if (_initializerInitialize2AllocationFailureForTests)
+            {
+                return SetReturn(ctx, SceJsonErrorInitializationFailed);
+            }
+
+            if (!ctx.Memory.TryWrite(thisAddress, new byte[] { 1 }))
+            {
+                return SetReturn(ctx, (int)OrbisGen2Result.ORBIS_GEN2_ERROR_MEMORY_FAULT);
+            }
+
+            // Retain the guest allocator contract for lifecycle fidelity. Calling
+            // its guest vtable remains an explicit HLE boundary.
+            _json2InitializationState = new Json2InitializationState(
+                allocator,
+                BinaryPrimitives.ReadUInt64LittleEndian(initParameters[0x08..]),
+                BinaryPrimitives.ReadUInt64LittleEndian(initParameters[0x10..]),
+                mode);
         }
 
         TraceJson("Initializer.initialize2", thisAddress, initParameterAddress);
         return SetReturn(ctx, 0);
     }
+
+    [SysAbiExport(
+        Nid = "PR5k1penBLM",
+        ExportName = "_ZN3sce4Json11Initializer9terminateEv",
+        Target = Generation.Gen5,
+        LibraryName = "libSceJson2",
+        PreferLle = true)]
+    public static int InitializerTerminate(CpuContext ctx)
+    {
+        var thisAddress = ctx[CpuRegister.Rdi];
+        Span<byte> initialized = stackalloc byte[1];
+
+        lock (_globalNullAccessCallbackGate)
+        {
+            // The Gen5 provider requires both its global allocator state and
+            // the one-byte Initializer state before it tears down the heaps.
+            if (_json2InitializationState is null ||
+                thisAddress == 0 ||
+                !ctx.Memory.TryRead(thisAddress, initialized) ||
+                initialized[0] == 0)
+            {
+                return SetReturn(ctx, SceJsonErrorNotInitialized);
+            }
+
+            if (!ctx.Memory.TryWrite(thisAddress, new byte[] { 0 }))
+            {
+                return SetReturn(ctx, (int)OrbisGen2Result.ORBIS_GEN2_ERROR_MEMORY_FAULT);
+            }
+
+            _json2InitializationState = null;
+            JsonObjectHeap.GlobalNullAccessCallback = 0;
+            JsonObjectHeap.GlobalNullAccessCallbackContext = 0;
+            JsonObjectHeap.Values.Clear();
+            JsonObjectHeap.Strings.Clear();
+            _values.Clear();
+            _strings.Clear();
+            _valueStrings.Clear();
+            _arrays.Clear();
+            _arrayIterators.Clear();
+            _valueReferences.Clear();
+            Interlocked.Exchange(ref _nextArrayIdentity, 0);
+        }
+
+        TraceJson("Initializer.terminate", thisAddress, 0);
+        return SetReturn(ctx, 0);
+    }
+
     public static int ValueConstructor(CpuContext ctx)
     {
         _ = ConstructValue(ctx);
@@ -324,37 +510,6 @@ public static class JsonExports
     }
 
     [SysAbiExport(
-        Nid = "wLsJlmgEIaI",
-        ExportName = "_ZN3sce4Json5Value10referValueERKNS0_6StringE",
-        Target = Generation.Gen4 | Generation.Gen5,
-        LibraryName = "libSceJson")]
-    public static int ValueReferValue(CpuContext ctx)
-    {
-        var thisAddress = ctx[CpuRegister.Rdi];
-        var keyStringAddress = ctx[CpuRegister.Rsi];
-
-        if (thisAddress == 0 ||
-            !_strings.TryGetValue(keyStringAddress, out var keyState) ||
-            !TryAllocateGuestObject(ctx, ValueObjectSize, out var childAddress))
-        {
-            ctx[CpuRegister.Rax] = 0;
-            return 0;
-        }
-
-        var parent = GetValue(thisAddress);
-
-        var child = parent.ValueKind == System.Text.Json.JsonValueKind.Object &&
-                    parent.TryGetProperty(keyState.Value, out var property)
-                    ? property.Clone() : _nullElement;
-
-        StoreValue(ctx, childAddress, child);
-
-        ctx[CpuRegister.Rax] = childAddress;
-        TraceJsonText("Value.referValue", thisAddress, keyState.Value);
-        return 0;
-    }
-
-    [SysAbiExport(
         Nid = "zTwZdI8AZ5Y",
         ExportName = "_ZNK3sce4Json5Value10getBooleanEv",
         Target = Generation.Gen4 | Generation.Gen5,
@@ -391,21 +546,45 @@ public static class JsonExports
     {
         var valueAddress = ctx[CpuRegister.Rdi];
         var keyAddress = ctx[CpuRegister.Rsi];
-        if (!TryReadUtf8CString(ctx, keyAddress, 4096, out var key) ||
-            !TryAllocateGuestObject(ctx, ValueObjectSize, out var childAddress))
+        if (!TryReadUtf8CString(ctx, keyAddress, 4096, out var key))
         {
             ctx[CpuRegister.Rax] = 0;
             return 0;
         }
 
+        return ReturnNamedValue(ctx, key);
+    }
+
+    [SysAbiExport(
+        Nid = "wLsJlmgEIaI",
+        ExportName = "_ZN3sce4Json5Value10referValueERKNS0_6StringE",
+        Target = Generation.Gen4 | Generation.Gen5,
+        LibraryName = "libSceJson")]
+    public static int ValueReferValueByString(CpuContext ctx)
+    {
+        var valueAddress = ctx[CpuRegister.Rdi];
+        var stringAddress = ctx[CpuRegister.Rsi];
+        if (!TryGetStringValue(ctx, stringAddress, out var key))
+        {
+            ctx[CpuRegister.Rax] = 0;
+            TraceJsonReference(valueAddress, string.Empty, 0, 0);
+            return 0;
+        }
+
         var parent = GetValue(valueAddress);
-        var child = parent.ValueKind == System.Text.Json.JsonValueKind.Object &&
-            parent.TryGetProperty(key, out var property)
-            ? property.Clone()
-            : _nullElement;
+        if (parent.ValueKind != System.Text.Json.JsonValueKind.Object ||
+            !parent.TryGetProperty(key, out var property) ||
+            !TryGetOrAllocateValueReference(ctx, new JsonReferenceKey(valueAddress, key), out var childAddress))
+        {
+            ctx[CpuRegister.Rax] = 0;
+            TraceJsonReference(valueAddress, key, 0, 0);
+            return 0;
+        }
+
+        var child = property.Clone();
         StoreValue(ctx, childAddress, child);
         ctx[CpuRegister.Rax] = childAddress;
-        TraceJsonText("Value.index", valueAddress, key);
+        TraceJsonReference(valueAddress, key, childAddress, GetValueType(child));
         return 0;
     }
 
@@ -422,6 +601,192 @@ public static class JsonExports
         Target = Generation.Gen4 | Generation.Gen5,
         LibraryName = "libSceJson")]
     public static int ValueGetPosition(CpuContext ctx) => ReturnIndexedValue(ctx);
+
+    [SysAbiExport(
+        Nid = "fSb2oQTNrgA",
+        ExportName = "_ZN3sce4Json5ValueC1ERKS1_",
+        Target = Generation.Gen4 | Generation.Gen5,
+        LibraryName = "libSceJson")]
+    public static int ValueCopyConstructor(CpuContext ctx)
+    {
+        var destinationAddress = ctx[CpuRegister.Rdi];
+        if (destinationAddress != 0)
+        {
+            StoreValue(ctx, destinationAddress, GetValue(ctx[CpuRegister.Rsi]));
+        }
+
+        ctx[CpuRegister.Rax] = destinationAddress;
+        return (int)OrbisGen2Result.ORBIS_GEN2_OK;
+    }
+
+    [SysAbiExport(
+        Nid = "MsMOdxWfbwQ",
+        ExportName = "_ZNK3sce4Json5Value8getValueERKNS0_6StringE",
+        Target = Generation.Gen4 | Generation.Gen5,
+        LibraryName = "libSceJson")]
+    public static int ValueGetStringKey(CpuContext ctx)
+    {
+        var key = JsonObjectHeap.GetStringOrEmpty(ctx[CpuRegister.Rsi]);
+        return ReturnNamedValue(ctx, key);
+    }
+
+    [SysAbiExport(
+        Nid = "epJ6x2LV0kU",
+        ExportName = "_ZNK3sce4Json5Value9getStringEv",
+        Target = Generation.Gen4 | Generation.Gen5,
+        LibraryName = "libSceJson")]
+    public static int ValueGetString(CpuContext ctx)
+    {
+        var valueAddress = ctx[CpuRegister.Rdi];
+        var element = GetValue(valueAddress);
+        var text = element.ValueKind == System.Text.Json.JsonValueKind.String
+            ? element.GetString() ?? string.Empty
+            : string.Empty;
+
+        if (!_valueStrings.TryGetValue(valueAddress, out var stringAddress))
+        {
+            if (!TryAllocateGuestObject(ctx, StringObjectSize, out stringAddress))
+            {
+                ctx[CpuRegister.Rax] = 0;
+                return (int)OrbisGen2Result.ORBIS_GEN2_OK;
+            }
+
+            _valueStrings[valueAddress] = stringAddress;
+            ctx.TryWriteUInt64(stringAddress, 0);
+        }
+
+        _strings.AddOrUpdate(
+            stringAddress,
+            _ => new JsonStringState(text),
+            (_, state) => state with { Value = text });
+        ctx[CpuRegister.Rax] = stringAddress;
+        return (int)OrbisGen2Result.ORBIS_GEN2_OK;
+    }
+
+    [SysAbiExport(
+        Nid = "ONT8As5R1ug",
+        ExportName = "_ZNK3sce4Json5Value8getArrayEv",
+        Target = Generation.Gen4 | Generation.Gen5,
+        LibraryName = "libSceJson")]
+    public static int ValueGetArray(CpuContext ctx)
+    {
+        var valueAddress = ctx[CpuRegister.Rdi];
+        if (valueAddress == 0)
+        {
+            ctx[CpuRegister.Rax] = 0;
+            return (int)OrbisGen2Result.ORBIS_GEN2_OK;
+        }
+
+        _arrays[valueAddress] = CreateArrayState(GetValue(valueAddress));
+        ctx[CpuRegister.Rax] = valueAddress;
+        return (int)OrbisGen2Result.ORBIS_GEN2_OK;
+    }
+
+    [SysAbiExport(
+        Nid = "bI5AGFMydrA",
+        ExportName = "_ZN3sce4Json5ArrayC1ERKS1_",
+        Target = Generation.Gen4 | Generation.Gen5,
+        LibraryName = "libSceJson")]
+    public static int ArrayCopyConstructor(CpuContext ctx)
+    {
+        var destinationAddress = ctx[CpuRegister.Rdi];
+        if (destinationAddress != 0)
+        {
+            _arrays[destinationAddress] = GetArrayState(ctx[CpuRegister.Rsi]);
+        }
+
+        ctx[CpuRegister.Rax] = destinationAddress;
+        return (int)OrbisGen2Result.ORBIS_GEN2_OK;
+    }
+
+    [SysAbiExport(
+        Nid = "HJ8GpRT1aiw",
+        ExportName = "_ZN3sce4Json5ArrayD1Ev",
+        Target = Generation.Gen4 | Generation.Gen5,
+        LibraryName = "libSceJson")]
+    public static int ArrayDestructor(CpuContext ctx)
+    {
+        _arrays.TryRemove(ctx[CpuRegister.Rdi], out _);
+        ctx[CpuRegister.Rax] = 0;
+        return (int)OrbisGen2Result.ORBIS_GEN2_OK;
+    }
+
+    [SysAbiExport(
+        Nid = "bcH5EnFE2xY",
+        ExportName = "_ZNK3sce4Json5Array5beginEv",
+        Target = Generation.Gen4 | Generation.Gen5,
+        LibraryName = "libSceJson")]
+    public static int ArrayBegin(CpuContext ctx) => ConstructArrayIterator(ctx, atEnd: false);
+
+    [SysAbiExport(
+        Nid = "WXF2ihRF+B8",
+        ExportName = "_ZNK3sce4Json5Array3endEv",
+        Target = Generation.Gen4 | Generation.Gen5,
+        LibraryName = "libSceJson")]
+    public static int ArrayEnd(CpuContext ctx) => ConstructArrayIterator(ctx, atEnd: true);
+
+    [SysAbiExport(
+        Nid = "5AZPp99ogrc",
+        ExportName = "_ZNK3sce4Json5Array8iteratorneERKS2_",
+        Target = Generation.Gen4 | Generation.Gen5,
+        LibraryName = "libSceJson")]
+    public static int ArrayIteratorNotEqual(CpuContext ctx)
+    {
+        var different =
+            _arrayIterators.TryGetValue(ctx[CpuRegister.Rdi], out var left) &&
+            _arrayIterators.TryGetValue(ctx[CpuRegister.Rsi], out var right) &&
+            (left.Array.Identity != right.Array.Identity || left.Position != right.Position);
+        ctx[CpuRegister.Rax] = different ? 1UL : 0;
+        return (int)OrbisGen2Result.ORBIS_GEN2_OK;
+    }
+
+    [SysAbiExport(
+        Nid = "wcgr5mte7T8",
+        ExportName = "_ZNK3sce4Json5Array8iteratordeEv",
+        Target = Generation.Gen4 | Generation.Gen5,
+        LibraryName = "libSceJson")]
+    public static int ArrayIteratorDereference(CpuContext ctx) => ReturnArrayIteratorValue(ctx);
+
+    [SysAbiExport(
+        Nid = "iAIYn4oAWvI",
+        ExportName = "_ZNK3sce4Json5Array8iteratorptEv",
+        Target = Generation.Gen4 | Generation.Gen5,
+        LibraryName = "libSceJson")]
+    public static int ArrayIteratorPointer(CpuContext ctx) => ReturnArrayIteratorValue(ctx);
+
+    [SysAbiExport(
+        Nid = "w5+VCznos5E",
+        ExportName = "_ZN3sce4Json5Array8iteratorppEv",
+        Target = Generation.Gen4 | Generation.Gen5,
+        LibraryName = "libSceJson")]
+    public static int ArrayIteratorIncrement(CpuContext ctx)
+    {
+        var iteratorAddress = ctx[CpuRegister.Rdi];
+        if (_arrayIterators.TryGetValue(iteratorAddress, out var iterator))
+        {
+            var length = iterator.Array.Element.GetArrayLength();
+            _arrayIterators[iteratorAddress] = iterator with
+            {
+                Position = Math.Min(iterator.Position + 1, length),
+                ValueAddress = 0,
+            };
+        }
+
+        ctx[CpuRegister.Rax] = iteratorAddress;
+        return (int)OrbisGen2Result.ORBIS_GEN2_OK;
+    }
+
+    [SysAbiExport(
+        Nid = "9yLjn46Ypfs",
+        ExportName = "_ZN3sce4Json5Array8iteratorD1Ev",
+        Target = Generation.Gen4 | Generation.Gen5,
+        LibraryName = "libSceJson")]
+    public static int ArrayIteratorDestructor(CpuContext ctx)
+    {
+        _arrayIterators.TryRemove(ctx[CpuRegister.Rdi], out _);
+        ctx[CpuRegister.Rax] = 0;
+        return (int)OrbisGen2Result.ORBIS_GEN2_OK;
+    }
 
     [SysAbiExport(
         Nid = "4zrm6VrgIAw",
@@ -561,6 +926,89 @@ public static class JsonExports
         return 0;
     }
 
+    private static int ReturnNamedValue(CpuContext ctx, string key)
+    {
+        var valueAddress = ctx[CpuRegister.Rdi];
+        if (!TryAllocateGuestObject(ctx, ValueObjectSize, out var childAddress))
+        {
+            ctx[CpuRegister.Rax] = 0;
+            return (int)OrbisGen2Result.ORBIS_GEN2_OK;
+        }
+
+        var parent = GetValue(valueAddress);
+        var child = parent.ValueKind == System.Text.Json.JsonValueKind.Object &&
+            parent.TryGetProperty(key, out var property)
+            ? property.Clone()
+            : _nullElement;
+        StoreValue(ctx, childAddress, child);
+        ctx[CpuRegister.Rax] = childAddress;
+        TraceJsonText("Value.get", valueAddress, key);
+        return (int)OrbisGen2Result.ORBIS_GEN2_OK;
+    }
+
+    private static int ConstructArrayIterator(CpuContext ctx, bool atEnd)
+    {
+        // Array::begin/end return an eight-byte iterator by value. The Itanium C++ ABI passes
+        // its hidden return-storage pointer in RDI and the Array `this` pointer in RSI.
+        var iteratorAddress = ctx[CpuRegister.Rdi];
+        var array = GetArrayState(ctx[CpuRegister.Rsi]);
+        if (iteratorAddress != 0)
+        {
+            _arrayIterators[iteratorAddress] = new JsonArrayIteratorState(
+                array,
+                atEnd ? array.Element.GetArrayLength() : 0);
+        }
+
+        ctx[CpuRegister.Rax] = iteratorAddress;
+        return (int)OrbisGen2Result.ORBIS_GEN2_OK;
+    }
+
+    private static int ReturnArrayIteratorValue(CpuContext ctx)
+    {
+        var iteratorAddress = ctx[CpuRegister.Rdi];
+        if (!_arrayIterators.TryGetValue(iteratorAddress, out var iterator) ||
+            iterator.Position < 0 ||
+            iterator.Position >= iterator.Array.Element.GetArrayLength())
+        {
+            ctx[CpuRegister.Rax] = 0;
+            return (int)OrbisGen2Result.ORBIS_GEN2_OK;
+        }
+
+        var valueAddress = iterator.ValueAddress;
+        if (valueAddress == 0)
+        {
+            if (!TryAllocateGuestObject(ctx, ValueObjectSize, out valueAddress))
+            {
+                ctx[CpuRegister.Rax] = 0;
+                return (int)OrbisGen2Result.ORBIS_GEN2_OK;
+            }
+
+            StoreValue(ctx, valueAddress, iterator.Array.Element[iterator.Position]);
+            _arrayIterators[iteratorAddress] = iterator with { ValueAddress = valueAddress };
+        }
+
+        ctx[CpuRegister.Rax] = valueAddress;
+        return (int)OrbisGen2Result.ORBIS_GEN2_OK;
+    }
+
+    private static JsonArrayState GetArrayState(ulong address)
+    {
+        if (address != 0 && _arrays.TryGetValue(address, out var state))
+        {
+            return state;
+        }
+
+        return CreateArrayState(GetValue(address));
+    }
+
+    private static JsonArrayState CreateArrayState(JsonElement element)
+    {
+        var array = element.ValueKind == System.Text.Json.JsonValueKind.Array
+            ? element.Clone()
+            : _emptyArrayElement;
+        return new JsonArrayState(array, Interlocked.Increment(ref _nextArrayIdentity));
+    }
+
     private static int ReturnValueStorage(CpuContext ctx)
     {
         var thisAddress = ctx[CpuRegister.Rdi];
@@ -571,7 +1019,9 @@ public static class JsonExports
     private static int DestroyValue(CpuContext ctx)
     {
         var thisAddress = ctx[CpuRegister.Rdi];
-        _values.TryRemove(thisAddress, out _);
+        RemoveCompleteValueShadow(ctx, thisAddress);
+        _arrays.TryRemove(thisAddress, out _);
+        _valueStrings.TryRemove(thisAddress, out _);
         if (thisAddress != 0)
         {
             Span<byte> empty = stackalloc byte[ValueObjectSize];
@@ -600,7 +1050,7 @@ public static class JsonExports
     private static int DestroyString(CpuContext ctx)
     {
         var thisAddress = ctx[CpuRegister.Rdi];
-        _strings.TryRemove(thisAddress, out _);
+        RemoveCompleteStringShadow(ctx, thisAddress);
         if (thisAddress != 0)
         {
             ctx.TryWriteUInt64(thisAddress, 0);
@@ -613,6 +1063,12 @@ public static class JsonExports
     private static JsonElement CreateNullElement()
     {
         using var document = JsonDocument.Parse("null");
+        return document.RootElement.Clone();
+    }
+
+    private static JsonElement CreateEmptyArrayElement()
+    {
+        using var document = JsonDocument.Parse("[]");
         return document.RootElement.Clone();
     }
 
@@ -630,11 +1086,14 @@ public static class JsonExports
 
         var clone = element.Clone();
         _values[address] = new JsonValueState(clone);
+        _arrays.TryRemove(address, out _);
+        _valueStrings.TryRemove(address, out _);
 
         Span<byte> mirror = stackalloc byte[ValueObjectSize];
         mirror.Clear();
         var type = GetValueType(clone);
-        BinaryPrimitives.WriteInt32LittleEndian(mirror[0x1C..], type);
+        var typeOffset = ctx.TargetGeneration == Generation.Gen4 ? 0x18 : 0x1C;
+        BinaryPrimitives.WriteInt32LittleEndian(mirror[typeOffset..], type);
         switch (clone.ValueKind)
         {
             case System.Text.Json.JsonValueKind.True:
@@ -676,6 +1135,110 @@ public static class JsonExports
             allocator.TryAllocateGuestMemory((ulong)size, 0x10, out address);
     }
 
+    private static bool TryGetOrAllocateValueReference(
+        CpuContext ctx,
+        JsonReferenceKey key,
+        out ulong address)
+    {
+        if (_valueReferences.TryGetValue(key, out address))
+        {
+            return true;
+        }
+
+        if (!TryAllocateGuestObject(ctx, ValueObjectSize, out var allocatedAddress))
+        {
+            address = 0;
+            return false;
+        }
+
+        address = _valueReferences.GetOrAdd(key, allocatedAddress);
+        if (address != allocatedAddress && ctx.Memory is IGuestMemoryAllocator allocator)
+        {
+            allocator.TryFreeGuestMemory(allocatedAddress);
+        }
+
+        return true;
+    }
+
+    internal static void RemoveCompleteValueShadow(CpuContext ctx, ulong address)
+    {
+        _values.TryRemove(address, out _);
+        foreach (var reference in _valueReferences.Where(entry => entry.Key.ValueAddress == address).ToArray())
+        {
+            if (!_valueReferences.TryRemove(reference.Key, out var childAddress))
+            {
+                continue;
+            }
+
+            _values.TryRemove(childAddress, out _);
+            if (ctx.Memory is IGuestMemoryAllocator allocator)
+            {
+                allocator.TryFreeGuestMemory(childAddress);
+            }
+        }
+    }
+
+    internal static void RemoveCompleteStringShadow(CpuContext ctx, ulong address)
+    {
+        if (!_strings.TryRemove(address, out var state) ||
+            state.GuestBufferAddress == 0 ||
+            ctx.Memory is not IGuestMemoryAllocator allocator)
+        {
+            return;
+        }
+
+        allocator.TryFreeGuestMemory(state.GuestBufferAddress);
+    }
+
+    internal static void ResetForTests()
+    {
+        _values.Clear();
+        _strings.Clear();
+        _valueStrings.Clear();
+        _arrays.Clear();
+        _arrayIterators.Clear();
+        _valueReferences.Clear();
+        Interlocked.Exchange(ref _nextArrayIdentity, 0);
+        lock (_globalNullAccessCallbackGate)
+        {
+            _json2InitializationState = null;
+            _initializerInitialize2AllocationFailureForTests = false;
+        }
+    }
+
+    internal static bool TryGetJson2InitializationStateForTests(
+        out ulong allocator,
+        out ulong allocatorContext,
+        out ulong fileBufferSize,
+        out uint mode)
+    {
+        lock (_globalNullAccessCallbackGate)
+        {
+            if (_json2InitializationState is { } state)
+            {
+                allocator = state.Allocator;
+                allocatorContext = state.AllocatorContext;
+                fileBufferSize = state.FileBufferSize;
+                mode = state.Mode;
+                return true;
+            }
+        }
+
+        allocator = 0;
+        allocatorContext = 0;
+        fileBufferSize = 0;
+        mode = 0;
+        return false;
+    }
+
+    internal static void SetInitializerInitialize2AllocationFailureForTests(bool fail)
+    {
+        lock (_globalNullAccessCallbackGate)
+        {
+            _initializerInitialize2AllocationFailureForTests = fail;
+        }
+    }
+
     private static bool TryReadUtf8CString(
         CpuContext ctx,
         ulong address,
@@ -709,6 +1272,30 @@ public static class JsonExports
         return false;
     }
 
+    private static bool TryGetStringValue(CpuContext ctx, ulong address, out string value)
+    {
+        value = string.Empty;
+        if (address == 0)
+        {
+            return false;
+        }
+
+        if (_strings.TryGetValue(address, out var stringState))
+        {
+            value = stringState.Value;
+            return true;
+        }
+
+        if (JsonObjectHeap.Strings.TryGetValue(address, out var heapValue))
+        {
+            value = heapValue;
+            return true;
+        }
+
+        return ctx.TryReadUInt64(address, out var bufferAddress) &&
+            TryReadUtf8CString(ctx, bufferAddress, 4096, out value);
+    }
+
     private static int SetReturn(CpuContext ctx, int result)
     {
         ctx[CpuRegister.Rax] = unchecked((ulong)result);
@@ -736,5 +1323,22 @@ public static class JsonExports
         var preview = value.Length <= 128 ? value : value[..128];
         Console.Error.WriteLine(
             $"[LOADER][TRACE] json.{operation} this=0x{thisAddress:X16} value={preview}");
+    }
+
+    private static void TraceJsonReference(
+        ulong valueAddress,
+        string key,
+        ulong childAddress,
+        int childType)
+    {
+        if (!string.Equals(Environment.GetEnvironmentVariable("SHARPEMU_LOG_JSON"), "1", StringComparison.Ordinal))
+        {
+            return;
+        }
+
+        var preview = key.Length <= 128 ? key : key[..128];
+        Console.Error.WriteLine(
+            $"[LOADER][TRACE] json.Value.refer this=0x{valueAddress:X16} key={preview} " +
+            $"child=0x{childAddress:X16} type={childType}");
     }
 }

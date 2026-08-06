@@ -6,6 +6,7 @@ using SharpEmu.Libs.Fiber;
 using System.Buffers.Binary;
 using System.Collections.Generic;
 using System.Diagnostics;
+using System.Globalization;
 using System.IO;
 using System.Runtime.InteropServices;
 using System.Runtime.Intrinsics.X86;
@@ -35,6 +36,9 @@ public static class KernelRuntimeCompatExports
     private const ulong ModuleInfoNameOffset = 0x08;
     private const ulong ModuleInfoExHandleOffset = 0x108;
     private const ulong ModuleInfoExInitProcOffset = 0x128;
+    private const ulong ModuleInfoExEhFrameHeaderOffset = 0x148;
+    private const ulong ModuleInfoExEhFrameOffset = 0x150;
+    private const ulong ModuleInfoExEhFrameSizeOffset = 0x15C;
     private const ulong ModuleInfoExSegmentsOffset = 0x160;
     private const ulong ModuleInfoExSegmentCountOffset = 0x1A0;
     private const int ModuleInfoSegmentSize = 16;
@@ -44,6 +48,11 @@ public static class KernelRuntimeCompatExports
     private const int MapFlagFixed = 0x10;
     private const ulong DefaultVirtualRangeAlignment = 0x4000UL;
     private const int AioInitParamSize = 0x3C;
+    private const int Efault = 14;
+    private const int Einval = 22;
+    // Orbis libc uses the POSIX nine-int tm layout. Unlike FreeBSD's host ABI,
+    // the guest structure does not append tm_gmtoff/tm_zone.
+    private const int PosixTmSize = 9 * sizeof(int);
     private const uint MemCommit = 0x1000;
     private const uint MemReserve = 0x2000;
     private const uint PageExecuteReadWrite = 0x40;
@@ -70,9 +79,23 @@ public static class KernelRuntimeCompatExports
         string.Equals(Environment.GetEnvironmentVariable("SHARPEMU_LOG_USLEEP"), "1", StringComparison.Ordinal);
     private static readonly bool _traceGuestThreads =
         string.Equals(Environment.GetEnvironmentVariable("SHARPEMU_LOG_GUEST_THREADS"), "1", StringComparison.Ordinal);
+    private static readonly bool _traceTimeCompat =
+        string.Equals(Environment.GetEnvironmentVariable("SHARPEMU_LOG_TIME_COMPAT"), "1", StringComparison.Ordinal);
+    private static readonly bool _traceStrtokReentrant =
+        string.Equals(Environment.GetEnvironmentVariable("SHARPEMU_LOG_STRTOK_R"), "1", StringComparison.Ordinal);
+    private static int _mktimeTraceCount;
+    private static int _localtimeTraceCount;
+    private static int _difftimeTraceCount;
+    private static long _strtokReentrantTraceCount;
 
     [ThreadStatic]
     private static int _shortUsleepCount;
+
+    [ThreadStatic]
+    private static nint _gmtimeStorage;
+
+    [ThreadStatic]
+    private static nint _localtimeStorage;
 
     private static readonly bool _stopwatchTicksAreNanoseconds =
         Stopwatch.Frequency == 1_000_000_000L;
@@ -81,6 +104,42 @@ public static class KernelRuntimeCompatExports
 
     [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
     private delegate ulong RdtscDelegate();
+
+    [SysAbiExport(
+        Nid = "6XG4B33N09g",
+        ExportName = "sched_yield",
+        Target = Generation.Gen4 | Generation.Gen5,
+        LibraryName = "libKernel")]
+    public static int PosixSchedYield(CpuContext ctx)
+    {
+        _ = Thread.Yield();
+        ctx[CpuRegister.Rax] = 0;
+        return 0;
+    }
+
+    [SysAbiExport(
+        Nid = "-ZR+hG7aDHw",
+        ExportName = "sceKernelSleep",
+        Target = Generation.Gen4 | Generation.Gen5,
+        LibraryName = "libKernel")]
+    public static int KernelSleep(CpuContext ctx)
+    {
+        var seconds = ctx[CpuRegister.Rdi];
+        if (seconds == 0)
+        {
+            Thread.Yield();
+        }
+        else
+        {
+            var milliseconds = seconds > (ulong)int.MaxValue / 1000UL
+                ? (ulong)int.MaxValue
+                : seconds * 1000UL;
+            Thread.Sleep(unchecked((int)milliseconds));
+        }
+
+        ctx[CpuRegister.Rax] = 0;
+        return (int)OrbisGen2Result.ORBIS_GEN2_OK;
+    }
 
     [SysAbiExport(
         Nid = "1jfXLRVzisc",
@@ -96,8 +155,6 @@ public static class KernelRuntimeCompatExports
             ctx[CpuRegister.Rax] = 0;
             return (int)OrbisGen2Result.ORBIS_GEN2_OK;
         }
-
-        GuestThreadExecution.Scheduler?.Pump(ctx, "sceKernelUsleep");
 
         if (micros < 1000)
         {
@@ -295,6 +352,595 @@ public static class KernelRuntimeCompatExports
         ctx[CpuRegister.Rax] = 0;
         return 0;
     }
+
+    [SysAbiExport(
+        Nid = "n7AepwR0s34",
+        ExportName = "mktime",
+        Target = Generation.Gen5,
+        LibraryName = "libc")]
+    public static int LibcMktime(CpuContext ctx)
+    {
+        var tmAddress = ctx[CpuRegister.Rdi];
+        if (!TryReadPosixTm(ctx, tmAddress, out var tm) ||
+            !TryNormalizeLocalTm(tm, out var localTime, out var utcOffset))
+        {
+            ctx[CpuRegister.Rax] = ulong.MaxValue;
+            return (int)OrbisGen2Result.ORBIS_GEN2_OK;
+        }
+
+        long unixSeconds;
+        try
+        {
+            unixSeconds = new DateTimeOffset(localTime, utcOffset).ToUnixTimeSeconds();
+        }
+        catch (ArgumentOutOfRangeException)
+        {
+            ctx[CpuRegister.Rax] = ulong.MaxValue;
+            return (int)OrbisGen2Result.ORBIS_GEN2_OK;
+        }
+
+        var normalized = ToPosixTm(
+            localTime,
+            isDaylightSavingTime: TimeZoneInfo.Local.IsDaylightSavingTime(localTime),
+            gmtOffsetSeconds: unchecked((long)utcOffset.TotalSeconds),
+            zoneAddress: tm.ZoneAddress);
+        if (!TryWritePosixTm(ctx, tmAddress, normalized))
+        {
+            ctx[CpuRegister.Rax] = ulong.MaxValue;
+            return (int)OrbisGen2Result.ORBIS_GEN2_OK;
+        }
+
+        ctx[CpuRegister.Rax] = unchecked((ulong)unixSeconds);
+        if (_traceTimeCompat && Interlocked.Increment(ref _mktimeTraceCount) <= 24)
+        {
+            Console.Error.WriteLine(
+                $"[TIME][MKTIME] {tm.Year + 1900:D4}-{tm.Month + 1:D2}-{tm.MonthDay:D2} " +
+                $"{tm.Hour:D2}:{tm.Minute:D2}:{tm.Second:D2} isdst={tm.IsDaylightSavingTime} " +
+                $"offset={utcOffset.TotalSeconds:0} -> {unixSeconds}");
+        }
+        return (int)OrbisGen2Result.ORBIS_GEN2_OK;
+    }
+
+    [SysAbiExport(
+        Nid = "1mecP7RgI2A",
+        ExportName = "gmtime",
+        Target = Generation.Gen5,
+        LibraryName = "libc")]
+    public static int LibcGmtime(CpuContext ctx)
+    {
+        var timeAddress = ctx[CpuRegister.Rdi];
+        if (timeAddress == 0 || !ctx.TryReadUInt64(timeAddress, out var rawSeconds))
+        {
+            ctx[CpuRegister.Rax] = 0;
+            return (int)OrbisGen2Result.ORBIS_GEN2_OK;
+        }
+
+        DateTime utcTime;
+        try
+        {
+            utcTime = DateTimeOffset.FromUnixTimeSeconds(unchecked((long)rawSeconds)).UtcDateTime;
+        }
+        catch (ArgumentOutOfRangeException)
+        {
+            ctx[CpuRegister.Rax] = 0;
+            return (int)OrbisGen2Result.ORBIS_GEN2_OK;
+        }
+
+        if (_gmtimeStorage == 0)
+        {
+            _gmtimeStorage = Marshal.AllocHGlobal(PosixTmSize);
+        }
+
+        var tm = ToPosixTm(utcTime, isDaylightSavingTime: false, gmtOffsetSeconds: 0, zoneAddress: 0);
+        WritePosixTm(_gmtimeStorage, tm);
+        ctx[CpuRegister.Rax] = unchecked((ulong)_gmtimeStorage);
+        return (int)OrbisGen2Result.ORBIS_GEN2_OK;
+    }
+
+    [SysAbiExport(
+        Nid = "efhK-YSUYYQ",
+        ExportName = "localtime",
+        Target = Generation.Gen5,
+        LibraryName = "libc")]
+    public static int LibcLocaltime(CpuContext ctx)
+    {
+        var timeAddress = ctx[CpuRegister.Rdi];
+        if (timeAddress == 0 || !ctx.TryReadUInt64(timeAddress, out var rawSeconds))
+        {
+            ctx[CpuRegister.Rax] = 0;
+            return (int)OrbisGen2Result.ORBIS_GEN2_OK;
+        }
+
+        DateTimeOffset localTime;
+        try
+        {
+            var instant = DateTimeOffset.FromUnixTimeSeconds(unchecked((long)rawSeconds));
+            localTime = TimeZoneInfo.ConvertTime(instant, TimeZoneInfo.Local);
+        }
+        catch (ArgumentOutOfRangeException)
+        {
+            ctx[CpuRegister.Rax] = 0;
+            return (int)OrbisGen2Result.ORBIS_GEN2_OK;
+        }
+
+        if (_localtimeStorage == 0)
+        {
+            _localtimeStorage = Marshal.AllocHGlobal(PosixTmSize);
+        }
+
+        var wallClock = localTime.DateTime;
+        var tm = ToPosixTm(
+            wallClock,
+            isDaylightSavingTime: TimeZoneInfo.Local.IsDaylightSavingTime(wallClock),
+            gmtOffsetSeconds: unchecked((long)localTime.Offset.TotalSeconds),
+            zoneAddress: 0);
+        WritePosixTm(_localtimeStorage, tm);
+        ctx[CpuRegister.Rax] = unchecked((ulong)_localtimeStorage);
+        if (_traceTimeCompat && Interlocked.Increment(ref _localtimeTraceCount) <= 16)
+        {
+            Console.Error.WriteLine(
+                $"[TIME][LOCALTIME] {unchecked((long)rawSeconds)} -> " +
+                $"{tm.Year + 1900:D4}-{tm.Month + 1:D2}-{tm.MonthDay:D2} " +
+                $"{tm.Hour:D2}:{tm.Minute:D2}:{tm.Second:D2} isdst={tm.IsDaylightSavingTime} " +
+                $"gmtoff={tm.GmtOffsetSeconds}");
+        }
+        return (int)OrbisGen2Result.ORBIS_GEN2_OK;
+    }
+
+    [SysAbiExport(
+        Nid = "-VVn74ZyhEs",
+        ExportName = "difftime",
+        Target = Generation.Gen5,
+        LibraryName = "libc")]
+    public static int LibcDifftime(CpuContext ctx)
+    {
+        var later = (double)unchecked((long)ctx[CpuRegister.Rdi]);
+        var earlier = (double)unchecked((long)ctx[CpuRegister.Rsi]);
+        var difference = later - earlier;
+        ctx.SetXmmRegister(
+            0,
+            unchecked((ulong)BitConverter.DoubleToInt64Bits(difference)),
+            0);
+        ctx[CpuRegister.Rax] = 0;
+        var traceIndex = _traceTimeCompat
+            ? Interlocked.Increment(ref _difftimeTraceCount)
+            : 0;
+        if (_traceTimeCompat && traceIndex <= 64)
+        {
+            Console.Error.WriteLine(
+                $"[TIME][DIFFTIME] later={later:R} earlier={earlier:R} " +
+                $"difference={difference:R} suspicious={Math.Abs(difference) > 14d * 60 * 60} " +
+                $"bits=0x{BitConverter.DoubleToInt64Bits(difference):X16}");
+        }
+        return (int)OrbisGen2Result.ORBIS_GEN2_OK;
+    }
+
+    [SysAbiExport(
+        Nid = "9LCjpWyQ5Zc",
+        ExportName = "pow",
+        Target = Generation.Gen4 | Generation.Gen5,
+        LibraryName = "libc")]
+    public static int LibcPow(CpuContext ctx)
+    {
+        ctx.GetXmmRegister(0, out var baseBits, out _);
+        ctx.GetXmmRegister(1, out var exponentBits, out _);
+        var value = BitConverter.Int64BitsToDouble(unchecked((long)baseBits));
+        var exponent = BitConverter.Int64BitsToDouble(unchecked((long)exponentBits));
+        var result = Math.Pow(value, exponent);
+        ctx.SetXmmRegister(
+            0,
+            unchecked((ulong)BitConverter.DoubleToInt64Bits(result)),
+            0);
+        ctx[CpuRegister.Rax] = 0;
+        return (int)OrbisGen2Result.ORBIS_GEN2_OK;
+    }
+
+    [SysAbiExport(
+        Nid = "QI-x0SL8jhw",
+        ExportName = "acosf",
+        Target = Generation.Gen4 | Generation.Gen5,
+        LibraryName = "libc")]
+    public static int LibcAcosf(CpuContext ctx)
+    {
+        ctx.GetXmmRegister(0, out var inputBits, out _);
+        var input = BitConverter.Int32BitsToSingle(unchecked((int)(uint)inputBits));
+        var result = MathF.Acos(input);
+        ctx.SetXmmRegister(
+            0,
+            unchecked((uint)BitConverter.SingleToInt32Bits(result)),
+            0);
+        ctx[CpuRegister.Rax] = 0;
+        return (int)OrbisGen2Result.ORBIS_GEN2_OK;
+    }
+
+    [SysAbiExport(
+        Nid = "pztV4AF18iI",
+        ExportName = "sincosf",
+        Target = Generation.Gen4 | Generation.Gen5,
+        LibraryName = "libc")]
+    public static int LibcSincosf(CpuContext ctx)
+    {
+        ctx.GetXmmRegister(0, out var inputBits, out _);
+        var input = BitConverter.Int32BitsToSingle(unchecked((int)(uint)inputBits));
+        var sinAddress = ctx[CpuRegister.Rdi];
+        var cosAddress = ctx[CpuRegister.Rsi];
+        if (sinAddress == 0 || cosAddress == 0 ||
+            !KernelMemoryCompatExports.TryWriteUInt32Compat(
+                ctx,
+                sinAddress,
+                unchecked((uint)BitConverter.SingleToInt32Bits(MathF.Sin(input)))) ||
+            !KernelMemoryCompatExports.TryWriteUInt32Compat(
+                ctx,
+                cosAddress,
+                unchecked((uint)BitConverter.SingleToInt32Bits(MathF.Cos(input)))))
+        {
+            return (int)OrbisGen2Result.ORBIS_GEN2_ERROR_MEMORY_FAULT;
+        }
+
+        ctx[CpuRegister.Rax] = 0;
+        return (int)OrbisGen2Result.ORBIS_GEN2_OK;
+    }
+
+    [SysAbiExport(
+        Nid = "Cj+Fw5q1tUo",
+        ExportName = "_Xtime_get_ticks",
+        Target = Generation.Gen5,
+        LibraryName = "libc")]
+    public static int LibcXtimeGetTicks(CpuContext ctx)
+    {
+        // Microsoft STL's clock helper uses 100-nanosecond intervals since the
+        // Unix epoch. DateTime ticks use the same interval but a different epoch.
+        var ticks = DateTime.UtcNow.Ticks - DateTime.UnixEpoch.Ticks;
+        ctx[CpuRegister.Rax] = unchecked((ulong)ticks);
+        return (int)OrbisGen2Result.ORBIS_GEN2_OK;
+    }
+
+    [SysAbiExport(
+        Nid = "Av3zjWi64Kw",
+        ExportName = "strftime",
+        Target = Generation.Gen5,
+        LibraryName = "libc")]
+    public static int LibcStrftime(CpuContext ctx)
+    {
+        var destinationAddress = ctx[CpuRegister.Rdi];
+        var destinationSize = ctx[CpuRegister.Rsi];
+        var formatAddress = ctx[CpuRegister.Rdx];
+        var tmAddress = ctx[CpuRegister.Rcx];
+        if (destinationAddress == 0 || destinationSize == 0 || destinationSize > int.MaxValue ||
+            !TryReadUtf8CString(ctx, formatAddress, 256, out var format) ||
+            !TryReadPosixTm(ctx, tmAddress, out var tm))
+        {
+            ctx[CpuRegister.Rax] = 0;
+            return (int)OrbisGen2Result.ORBIS_GEN2_OK;
+        }
+
+        var rendered = FormatPosixTime(format, tm);
+        var encoded = Encoding.UTF8.GetBytes(rendered);
+        if ((ulong)encoded.Length + 1 > destinationSize)
+        {
+            ctx[CpuRegister.Rax] = 0;
+            return (int)OrbisGen2Result.ORBIS_GEN2_OK;
+        }
+
+        var terminated = new byte[encoded.Length + 1];
+        encoded.CopyTo(terminated, 0);
+        if (!ctx.Memory.TryWrite(destinationAddress, terminated))
+        {
+            ctx[CpuRegister.Rax] = 0;
+            return (int)OrbisGen2Result.ORBIS_GEN2_OK;
+        }
+
+        ctx[CpuRegister.Rax] = (ulong)encoded.Length;
+        return (int)OrbisGen2Result.ORBIS_GEN2_OK;
+    }
+
+    private static string FormatPosixTime(string format, PosixTm tm)
+    {
+        string[] abbreviatedWeekDays = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+        string[] weekDays = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
+        string[] abbreviatedMonths = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+        string[] months = [
+            "January", "February", "March", "April", "May", "June",
+            "July", "August", "September", "October", "November", "December"
+        ];
+
+        var weekDay = PositiveModulo(tm.WeekDay, abbreviatedWeekDays.Length);
+        var month = tm.Month is >= 0 and < 12 ? tm.Month : 0;
+        var year = tm.Year + 1900;
+        var hour12 = tm.Hour % 12;
+        if (hour12 <= 0)
+        {
+            hour12 += 12;
+        }
+
+        var builder = new StringBuilder(format.Length + 32);
+        for (var index = 0; index < format.Length; index++)
+        {
+            var character = format[index];
+            if (character != '%' || index + 1 >= format.Length)
+            {
+                builder.Append(character);
+                continue;
+            }
+
+            var specifier = format[++index];
+            if ((specifier == 'E' || specifier == 'O') && index + 1 < format.Length)
+            {
+                specifier = format[++index];
+            }
+
+            switch (specifier)
+            {
+                case '%': builder.Append('%'); break;
+                case 'a': builder.Append(abbreviatedWeekDays[weekDay]); break;
+                case 'A': builder.Append(weekDays[weekDay]); break;
+                case 'b':
+                case 'h': builder.Append(abbreviatedMonths[month]); break;
+                case 'B': builder.Append(months[month]); break;
+                case 'c':
+                    builder.Append(abbreviatedWeekDays[weekDay]).Append(' ')
+                        .Append(abbreviatedMonths[month]).Append(' ')
+                        .Append(tm.MonthDay.ToString("D2", CultureInfo.InvariantCulture)).Append(' ')
+                        .Append(FormatClock(tm)).Append(' ')
+                        .Append(year.ToString("D4", CultureInfo.InvariantCulture));
+                    break;
+                case 'C': builder.Append(Math.DivRem(year, 100, out _).ToString("D2", CultureInfo.InvariantCulture)); break;
+                case 'd': builder.Append(tm.MonthDay.ToString("D2", CultureInfo.InvariantCulture)); break;
+                case 'D':
+                    builder.Append((tm.Month + 1).ToString("D2", CultureInfo.InvariantCulture)).Append('/')
+                        .Append(tm.MonthDay.ToString("D2", CultureInfo.InvariantCulture)).Append('/')
+                        .Append(PositiveModulo(year, 100).ToString("D2", CultureInfo.InvariantCulture));
+                    break;
+                case 'e':
+                    builder.Append(tm.MonthDay < 10 ? " " : string.Empty)
+                        .Append(tm.MonthDay.ToString(CultureInfo.InvariantCulture));
+                    break;
+                case 'F':
+                    builder.Append(year.ToString("D4", CultureInfo.InvariantCulture)).Append('-')
+                        .Append((tm.Month + 1).ToString("D2", CultureInfo.InvariantCulture)).Append('-')
+                        .Append(tm.MonthDay.ToString("D2", CultureInfo.InvariantCulture));
+                    break;
+                case 'H': builder.Append(tm.Hour.ToString("D2", CultureInfo.InvariantCulture)); break;
+                case 'I': builder.Append(hour12.ToString("D2", CultureInfo.InvariantCulture)); break;
+                case 'j': builder.Append((tm.YearDay + 1).ToString("D3", CultureInfo.InvariantCulture)); break;
+                case 'm': builder.Append((tm.Month + 1).ToString("D2", CultureInfo.InvariantCulture)); break;
+                case 'M': builder.Append(tm.Minute.ToString("D2", CultureInfo.InvariantCulture)); break;
+                case 'n': builder.Append('\n'); break;
+                case 'p': builder.Append(tm.Hour < 12 ? "AM" : "PM"); break;
+                case 'r':
+                    builder.Append(hour12.ToString("D2", CultureInfo.InvariantCulture)).Append(':')
+                        .Append(tm.Minute.ToString("D2", CultureInfo.InvariantCulture)).Append(':')
+                        .Append(tm.Second.ToString("D2", CultureInfo.InvariantCulture)).Append(' ')
+                        .Append(tm.Hour < 12 ? "AM" : "PM");
+                    break;
+                case 'R':
+                    builder.Append(tm.Hour.ToString("D2", CultureInfo.InvariantCulture)).Append(':')
+                        .Append(tm.Minute.ToString("D2", CultureInfo.InvariantCulture));
+                    break;
+                case 'S': builder.Append(tm.Second.ToString("D2", CultureInfo.InvariantCulture)); break;
+                case 't': builder.Append('\t'); break;
+                case 'T': builder.Append(FormatClock(tm)); break;
+                case 'u': builder.Append(weekDay == 0 ? 7 : weekDay); break;
+                case 'U': builder.Append(((tm.YearDay + 7 - weekDay) / 7).ToString("D2", CultureInfo.InvariantCulture)); break;
+                case 'w': builder.Append(weekDay); break;
+                case 'W':
+                    builder.Append(((tm.YearDay + 7 - PositiveModulo(weekDay - 1, 7)) / 7)
+                        .ToString("D2", CultureInfo.InvariantCulture));
+                    break;
+                case 'x':
+                    builder.Append((tm.Month + 1).ToString("D2", CultureInfo.InvariantCulture)).Append('/')
+                        .Append(tm.MonthDay.ToString("D2", CultureInfo.InvariantCulture)).Append('/')
+                        .Append(PositiveModulo(year, 100).ToString("D2", CultureInfo.InvariantCulture));
+                    break;
+                case 'X': builder.Append(FormatClock(tm)); break;
+                case 'y': builder.Append(PositiveModulo(year, 100).ToString("D2", CultureInfo.InvariantCulture)); break;
+                case 'Y': builder.Append(year.ToString("D4", CultureInfo.InvariantCulture)); break;
+                case 'z': builder.Append(FormatPosixUtcOffset(ResolvePosixUtcOffsetSeconds(tm))); break;
+                case 'Z': builder.Append(ResolvePosixZoneName(tm)); break;
+                default: builder.Append('%').Append(specifier); break;
+            }
+        }
+
+        return builder.ToString();
+    }
+
+    private static string FormatClock(PosixTm tm) => string.Create(
+        CultureInfo.InvariantCulture,
+        $"{tm.Hour:D2}:{tm.Minute:D2}:{tm.Second:D2}");
+
+    private static string FormatPosixUtcOffset(long offsetSeconds)
+    {
+        var clamped = Math.Clamp(offsetSeconds, -7L * 24 * 60 * 60, 7L * 24 * 60 * 60);
+        var sign = clamped < 0 ? '-' : '+';
+        var absolute = Math.Abs(clamped);
+        return string.Create(
+            CultureInfo.InvariantCulture,
+            $"{sign}{absolute / 3600:D2}{absolute % 3600 / 60:D2}");
+    }
+
+    private static long ResolvePosixUtcOffsetSeconds(PosixTm tm)
+    {
+        if (TryNormalizeLocalTm(tm, out _, out var utcOffset))
+        {
+            return unchecked((long)utcOffset.TotalSeconds);
+        }
+
+        return tm.GmtOffsetSeconds;
+    }
+
+    private static string ResolvePosixZoneName(PosixTm tm)
+    {
+        var timeZone = TimeZoneInfo.Local;
+        var name = tm.IsDaylightSavingTime > 0 ? timeZone.DaylightName : timeZone.StandardName;
+        if (string.IsNullOrWhiteSpace(name))
+        {
+            return tm.GmtOffsetSeconds == 0 ? "UTC" : FormatPosixUtcOffset(tm.GmtOffsetSeconds);
+        }
+
+        if (name.Length <= 8 && name.All(char.IsLetter))
+        {
+            return name;
+        }
+
+        var initials = new string(name
+            .Split([' ', '-', '_'], StringSplitOptions.RemoveEmptyEntries)
+            .Where(static part => part.Length != 0)
+            .Select(static part => char.ToUpperInvariant(part[0]))
+            .ToArray());
+        if (initials == "CUT" && tm.GmtOffsetSeconds == 0)
+        {
+            return "UTC";
+        }
+
+        return initials.Length is >= 2 and <= 8 ? initials : name;
+    }
+
+    private static int PositiveModulo(int value, int divisor)
+    {
+        var remainder = value % divisor;
+        return remainder < 0 ? remainder + divisor : remainder;
+    }
+
+    private static bool TryNormalizeLocalTm(PosixTm tm, out DateTime localTime, out TimeSpan utcOffset)
+    {
+        localTime = default;
+        utcOffset = default;
+        var year = (long)tm.Year + 1900;
+        if (year is < 1 or > 9999)
+        {
+            return false;
+        }
+
+        try
+        {
+            localTime = new DateTime((int)year, 1, 1, 0, 0, 0, DateTimeKind.Unspecified)
+                .AddMonths(tm.Month)
+                .AddDays(tm.MonthDay - 1L)
+                .AddHours(tm.Hour)
+                .AddMinutes(tm.Minute)
+                .AddSeconds(tm.Second);
+        }
+        catch (ArgumentOutOfRangeException)
+        {
+            return false;
+        }
+
+        var timeZone = TimeZoneInfo.Local;
+        if (timeZone.IsInvalidTime(localTime))
+        {
+            return false;
+        }
+
+        if (timeZone.IsAmbiguousTime(localTime) && tm.IsDaylightSavingTime >= 0)
+        {
+            var offsets = timeZone.GetAmbiguousTimeOffsets(localTime);
+            utcOffset = tm.IsDaylightSavingTime > 0
+                ? offsets.Max()
+                : offsets.Min();
+        }
+        else
+        {
+            utcOffset = timeZone.GetUtcOffset(localTime);
+        }
+
+        return true;
+    }
+
+    private static PosixTm ToPosixTm(
+        DateTime time,
+        bool isDaylightSavingTime,
+        long gmtOffsetSeconds,
+        ulong zoneAddress)
+    {
+        return new PosixTm(
+            time.Second,
+            time.Minute,
+            time.Hour,
+            time.Day,
+            time.Month - 1,
+            time.Year - 1900,
+            (int)time.DayOfWeek,
+            time.DayOfYear - 1,
+            isDaylightSavingTime ? 1 : 0,
+            gmtOffsetSeconds,
+            zoneAddress);
+    }
+
+    private static bool TryReadPosixTm(CpuContext ctx, ulong address, out PosixTm tm)
+    {
+        tm = default;
+        if (address == 0)
+        {
+            return false;
+        }
+
+        Span<byte> bytes = stackalloc byte[PosixTmSize];
+        if (!ctx.Memory.TryRead(address, bytes))
+        {
+            return false;
+        }
+
+        tm = new PosixTm(
+            BinaryPrimitives.ReadInt32LittleEndian(bytes[0..]),
+            BinaryPrimitives.ReadInt32LittleEndian(bytes[4..]),
+            BinaryPrimitives.ReadInt32LittleEndian(bytes[8..]),
+            BinaryPrimitives.ReadInt32LittleEndian(bytes[12..]),
+            BinaryPrimitives.ReadInt32LittleEndian(bytes[16..]),
+            BinaryPrimitives.ReadInt32LittleEndian(bytes[20..]),
+            BinaryPrimitives.ReadInt32LittleEndian(bytes[24..]),
+            BinaryPrimitives.ReadInt32LittleEndian(bytes[28..]),
+            BinaryPrimitives.ReadInt32LittleEndian(bytes[32..]),
+            0,
+            0);
+        return true;
+    }
+
+    private static bool TryWritePosixTm(CpuContext ctx, ulong address, PosixTm tm)
+    {
+        Span<byte> bytes = stackalloc byte[PosixTmSize];
+        WritePosixTm(bytes, tm);
+        return ctx.Memory.TryWrite(address, bytes);
+    }
+
+    private static void WritePosixTm(nint address, PosixTm tm)
+    {
+        Marshal.WriteInt32(address, 0, tm.Second);
+        Marshal.WriteInt32(address, 4, tm.Minute);
+        Marshal.WriteInt32(address, 8, tm.Hour);
+        Marshal.WriteInt32(address, 12, tm.MonthDay);
+        Marshal.WriteInt32(address, 16, tm.Month);
+        Marshal.WriteInt32(address, 20, tm.Year);
+        Marshal.WriteInt32(address, 24, tm.WeekDay);
+        Marshal.WriteInt32(address, 28, tm.YearDay);
+        Marshal.WriteInt32(address, 32, tm.IsDaylightSavingTime);
+    }
+
+    private static void WritePosixTm(Span<byte> bytes, PosixTm tm)
+    {
+        bytes.Clear();
+        BinaryPrimitives.WriteInt32LittleEndian(bytes[0..], tm.Second);
+        BinaryPrimitives.WriteInt32LittleEndian(bytes[4..], tm.Minute);
+        BinaryPrimitives.WriteInt32LittleEndian(bytes[8..], tm.Hour);
+        BinaryPrimitives.WriteInt32LittleEndian(bytes[12..], tm.MonthDay);
+        BinaryPrimitives.WriteInt32LittleEndian(bytes[16..], tm.Month);
+        BinaryPrimitives.WriteInt32LittleEndian(bytes[20..], tm.Year);
+        BinaryPrimitives.WriteInt32LittleEndian(bytes[24..], tm.WeekDay);
+        BinaryPrimitives.WriteInt32LittleEndian(bytes[28..], tm.YearDay);
+        BinaryPrimitives.WriteInt32LittleEndian(bytes[32..], tm.IsDaylightSavingTime);
+    }
+
+    private readonly record struct PosixTm(
+        int Second,
+        int Minute,
+        int Hour,
+        int MonthDay,
+        int Month,
+        int Year,
+        int WeekDay,
+        int YearDay,
+        int IsDaylightSavingTime,
+        long GmtOffsetSeconds,
+        ulong ZoneAddress);
 
     [SysAbiExport(
         Nid = "-2IRUCO--PM",
@@ -499,19 +1145,35 @@ public static class KernelRuntimeCompatExports
         }
     }
 
-    private static bool TryReadUtf8CString(CpuContext ctx, ulong address, int maxBytes, out string value)
+    private static bool TryReadUtf8CString(
+        CpuContext ctx,
+        ulong address,
+        int maxBytes,
+        out string value,
+        int minimumPrintableCharacters = 4)
     {
         value = string.Empty;
-        var buffer = GC.AllocateUninitializedArray<byte>(maxBytes);
-        if (!ctx.Memory.TryRead(address, buffer))
+        if (address == 0 || maxBytes <= 0)
         {
             return false;
         }
 
-        var length = Array.IndexOf(buffer, (byte)0);
-        if (length < 0)
+        var buffer = GC.AllocateUninitializedArray<byte>(maxBytes);
+        Span<byte> current = stackalloc byte[1];
+        var length = 0;
+        while (length < maxBytes)
         {
-            length = maxBytes;
+            if (!ctx.Memory.TryRead(address + unchecked((ulong)length), current))
+            {
+                return false;
+            }
+
+            if (current[0] == 0)
+            {
+                break;
+            }
+
+            buffer[length++] = current[0];
         }
 
         if (length == 0)
@@ -520,7 +1182,7 @@ public static class KernelRuntimeCompatExports
         }
 
         var text = Encoding.UTF8.GetString(buffer, 0, length);
-        if (!IsMostlyPrintable(text))
+        if (!IsMostlyPrintable(text, minimumPrintableCharacters))
         {
             return false;
         }
@@ -564,7 +1226,7 @@ public static class KernelRuntimeCompatExports
         return true;
     }
 
-    private static bool IsMostlyPrintable(string text)
+    private static bool IsMostlyPrintable(string text, int minimumPrintableCharacters = 4)
     {
         if (string.IsNullOrWhiteSpace(text))
         {
@@ -586,7 +1248,7 @@ public static class KernelRuntimeCompatExports
             }
         }
 
-        return printable >= Math.Max(4, text.Length * 3 / 4);
+        return printable >= Math.Max(minimumPrintableCharacters, text.Length * 3 / 4);
     }
 
     private static void TraceProcParamEmbeddedPointers(CpuContext ctx, ulong baseAddress, ReadOnlySpan<byte> data)
@@ -942,29 +1604,36 @@ public static class KernelRuntimeCompatExports
             return (int)OrbisGen2Result.ORBIS_GEN2_ERROR_INVALID_ARGUMENT;
         }
 
-        if (flags is < 0 or >= 3)
-        {
-            return (int)OrbisGen2Result.ORBIS_GEN2_ERROR_INVALID_ARGUMENT;
-        }
-
-        if (!ctx.TryReadUInt64(outInfoAddress, out var callerSize))
-        {
-            return (int)OrbisGen2Result.ORBIS_GEN2_ERROR_MEMORY_FAULT;
-        }
-
-        if (callerSize != ModuleInfoExSize)
+        // The 12.70 libkernel wrapper accepts the executable/data lookup modes
+        // (1 and 2), initializes the complete 0x1A8-byte output itself, and
+        // does not inspect a caller-provided size. Mono deliberately passes an
+        // uninitialized stack buffer here while discovering AOT unwind data.
+        if (flags is < 1 or > 2)
         {
             return (int)OrbisGen2Result.ORBIS_GEN2_ERROR_INVALID_ARGUMENT;
         }
 
         if (!KernelModuleRegistry.TryGetModuleByAddress(queriedAddress, out var module))
         {
+            if (string.Equals(Environment.GetEnvironmentVariable("SHARPEMU_LOG_MODULE_LOAD"), "1", StringComparison.Ordinal))
+            {
+                Console.Error.WriteLine(
+                    $"[LOADER][TRACE] sceKernelGetModuleInfoFromAddr address=0x{queriedAddress:X16} flags={flags} -> not_found");
+            }
             return (int)OrbisGen2Result.ORBIS_GEN2_ERROR_NOT_FOUND;
         }
 
         if (!TryWriteModuleInfoEx(ctx, outInfoAddress, module))
         {
             return (int)OrbisGen2Result.ORBIS_GEN2_ERROR_MEMORY_FAULT;
+        }
+
+        if (string.Equals(Environment.GetEnvironmentVariable("SHARPEMU_LOG_MODULE_LOAD"), "1", StringComparison.Ordinal))
+        {
+            Console.Error.WriteLine(
+                $"[LOADER][TRACE] sceKernelGetModuleInfoFromAddr address=0x{queriedAddress:X16} flags={flags} " +
+                $"-> handle=0x{module.Handle:X} name='{module.Name}' eh_frame_hdr=0x{module.EhFrameHeaderAddress:X16} " +
+                $"eh_frame=0x{module.EhFrameAddress:X16} eh_frame_size=0x{module.EhFrameSize:X}");
         }
 
         ctx[CpuRegister.Rax] = 0;
@@ -1201,6 +1870,11 @@ public static class KernelRuntimeCompatExports
         LibraryName = "libKernel")]
     public static int KernelStopUnloadModule(CpuContext ctx)
     {
+        if (string.Equals(Environment.GetEnvironmentVariable("SHARPEMU_LOG_MODULE_LOAD"), "1", StringComparison.Ordinal))
+        {
+            Console.Error.WriteLine(
+                $"[LOADER][TRACE] sceKernelStopUnloadModule handle=0x{ctx[CpuRegister.Rdi]:X}");
+        }
         var resultAddress = ctx[CpuRegister.R9];
         if (resultAddress != 0 && !TryWriteInt32(ctx, resultAddress, 0))
         {
@@ -1248,6 +1922,23 @@ public static class KernelRuntimeCompatExports
             handle = KernelModuleRegistry.RegisterSyntheticModule("module.sprx", isSystemModule: false);
         }
 
+        if (string.Equals(Environment.GetEnvironmentVariable("SHARPEMU_LOG_MODULE_LOAD"), "1", StringComparison.Ordinal))
+        {
+            Console.Error.WriteLine(
+                $"[LOADER][TRACE] sceKernelLoadStartModule path='{modulePath}' -> handle=0x{handle:X}");
+            if (modulePath.Contains('\uFFFD'))
+            {
+                Span<byte> pathPreview = stackalloc byte[64];
+                var preview = ctx.Memory.TryRead(modulePathAddress, pathPreview)
+                    ? Convert.ToHexString(pathPreview)
+                    : "<unreadable>";
+                Console.Error.WriteLine(
+                    $"[LOADER][TRACE] malformed module path address=0x{modulePathAddress:X16} bytes={preview}");
+                Console.Error.WriteLine(
+                    $"[LOADER][TRACE] module args rsi=0x{ctx[CpuRegister.Rsi]:X16} rdx=0x{ctx[CpuRegister.Rdx]:X16} rcx=0x{ctx[CpuRegister.Rcx]:X16} r8=0x{ctx[CpuRegister.R8]:X16} r9=0x{ctx[CpuRegister.R9]:X16}");
+            }
+        }
+
         if (KernelModuleRegistry.TryBeginModuleStart(handle, out var moduleToStart))
         {
             var scheduler = GuestThreadExecution.Scheduler;
@@ -1287,6 +1978,20 @@ public static class KernelRuntimeCompatExports
     }
 
     [SysAbiExport(
+        Nid = "Y1nEpkCieOY",
+        ExportName = "sceKernelLoadStartModuleInternalForMono",
+        Target = Generation.Gen5,
+        LibraryName = "libKernel")]
+    public static int KernelLoadStartModuleInternalForMono(CpuContext ctx)
+    {
+        // The PSM Mono loader uses the same six-argument ABI as
+        // sceKernelLoadStartModule, but requests an internal load mode. The
+        // firmware AOT assemblies are preloaded beside libScePsm so their
+        // exported dll_start/dll_size symbols are already available to dlsym.
+        return KernelLoadStartModule(ctx);
+    }
+
+    [SysAbiExport(
         Nid = "g8cM39EUZ6o",
         ExportName = "sceSysmoduleLoadModule",
         Target = Generation.Gen4 | Generation.Gen5,
@@ -1298,6 +2003,772 @@ public static class KernelRuntimeCompatExports
         lock (_stateGate)
         {
             _loadedSysmodules.Add(moduleId);
+        }
+
+        ctx[CpuRegister.Rax] = 0;
+        return (int)OrbisGen2Result.ORBIS_GEN2_OK;
+    }
+
+    // Same (pc, flags, out-info) contract as sceKernelGetModuleInfoForUnwind,
+    // surfaced through libSceSysmodule on Gen5; the unwinder threads whichever
+    // one the module's libc was linked against.
+    [SysAbiExport(
+        Nid = "4fU5yvOkVG4",
+        ExportName = "sceSysmoduleGetModuleInfoForUnwind",
+        Target = Generation.Gen4 | Generation.Gen5,
+        LibraryName = "libSceSysmodule",
+        PreferLle = true)]
+    public static int SysmoduleGetModuleInfoForUnwind(CpuContext ctx) => KernelGetModuleInfoForUnwind(ctx);
+
+    [SysAbiExport(
+        Nid = "39iV5E1HoCk",
+        ExportName = "sceSysmoduleLoadModuleInternal",
+        Target = Generation.Gen5,
+        LibraryName = "libSceSysmodule")]
+    public static int SysmoduleLoadModuleInternal(CpuContext ctx) => SysmoduleLoadModule(ctx);
+
+    [SysAbiExport(
+        Nid = "ynFKQ5bfGks",
+        ExportName = "sceSysmoduleIsLoadedInternal",
+        Target = Generation.Gen5,
+        LibraryName = "libSceSysmodule")]
+    public static int SysmoduleIsLoadedInternal(CpuContext ctx) => SysmoduleIsLoaded(ctx);
+
+    [SysAbiExport(
+        Nid = "mkawd0NA9ts",
+        ExportName = "sysconf",
+        Target = Generation.Gen5,
+        LibraryName = "libKernel")]
+    public static int PosixSysconf(CpuContext ctx)
+    {
+        // FreeBSD _SC_PAGESIZE is 47. Mono uses it to size the optional shared
+        // metadata area and expects Prospero's 16 KiB user page size.
+        if (unchecked((int)ctx[CpuRegister.Rdi]) == 47)
+        {
+            ctx[CpuRegister.Rax] = 0x4000;
+            return (int)OrbisGen2Result.ORBIS_GEN2_OK;
+        }
+
+        TrySetErrno(ctx, Einval);
+        ctx[CpuRegister.Rax] = ulong.MaxValue;
+        return (int)OrbisGen2Result.ORBIS_GEN2_OK;
+    }
+
+    [SysAbiExport(
+        Nid = "DFmMT80xcNI",
+        ExportName = "sysctl",
+        Target = Generation.Gen5,
+        LibraryName = "libKernel")]
+    public static int PosixSysctl(CpuContext ctx)
+    {
+        var oldLengthAddress = ctx[CpuRegister.Rcx];
+        if (oldLengthAddress == 0 || !ctx.TryWriteUInt64(oldLengthAddress, 0))
+        {
+            TrySetErrno(ctx, Efault);
+            ctx[CpuRegister.Rax] = ulong.MaxValue;
+            return (int)OrbisGen2Result.ORBIS_GEN2_OK;
+        }
+
+        // The Mono startup query enumerates process records only to discover
+        // other runtimes sharing its optional metadata area. Returning an empty
+        // result preserves the ABI while keeping this emulated process isolated.
+        ctx[CpuRegister.Rax] = 0;
+        return (int)OrbisGen2Result.ORBIS_GEN2_OK;
+    }
+
+    [SysAbiExport(
+        Nid = "MhC53TKmjVA",
+        ExportName = "sysctlbyname",
+        Target = Generation.Gen5,
+        LibraryName = "libKernel")]
+    public static int PosixSysctlByName(CpuContext ctx)
+    {
+        const int enoent = 2;
+        var nameAddress = ctx[CpuRegister.Rdi];
+        var oldAddress = ctx[CpuRegister.Rsi];
+        var oldLengthAddress = ctx[CpuRegister.Rdx];
+
+        if (nameAddress == 0 ||
+            oldLengthAddress == 0 ||
+            !TryReadUtf8CString(ctx, nameAddress, 256, out var name) ||
+            !ctx.TryReadUInt64(oldLengthAddress, out var requestedLength))
+        {
+            TrySetErrno(ctx, Efault);
+            ctx[CpuRegister.Rax] = ulong.MaxValue;
+            return (int)OrbisGen2Result.ORBIS_GEN2_OK;
+        }
+
+        if (!string.Equals(name, "kern.rng_pseudo", StringComparison.Ordinal))
+        {
+            TrySetErrno(ctx, enoent);
+            ctx[CpuRegister.Rax] = ulong.MaxValue;
+            return (int)OrbisGen2Result.ORBIS_GEN2_OK;
+        }
+
+        if (oldAddress == 0)
+        {
+            // The random sysctl is caller-sized. A length-only query therefore
+            // preserves the requested size and succeeds.
+            ctx[CpuRegister.Rax] = 0;
+            return (int)OrbisGen2Result.ORBIS_GEN2_OK;
+        }
+
+        if (requestedLength > 1024 * 1024)
+        {
+            TrySetErrno(ctx, Einval);
+            ctx[CpuRegister.Rax] = ulong.MaxValue;
+            return (int)OrbisGen2Result.ORBIS_GEN2_OK;
+        }
+
+        var randomBytes = new byte[(int)requestedLength];
+        RandomNumberGenerator.Fill(randomBytes);
+        if (!ctx.Memory.TryWrite(oldAddress, randomBytes) ||
+            !ctx.TryWriteUInt64(oldLengthAddress, requestedLength))
+        {
+            TrySetErrno(ctx, Efault);
+            ctx[CpuRegister.Rax] = ulong.MaxValue;
+            return (int)OrbisGen2Result.ORBIS_GEN2_OK;
+        }
+
+        ctx[CpuRegister.Rax] = 0;
+        return (int)OrbisGen2Result.ORBIS_GEN2_OK;
+    }
+
+    [SysAbiExport(
+        Nid = "QuJYZ2KVGGQ",
+        ExportName = "shm_open",
+        Target = Generation.Gen5,
+        LibraryName = "libKernel")]
+    public static int PosixSharedMemoryOpen(CpuContext ctx)
+    {
+        // POSIX shared objects are optional for Mono's shared metadata area. A
+        // normal ENOSYS response selects its fully supported private allocation
+        // path and avoids exposing host shared-memory namespaces to the guest.
+        const int enosys = 78;
+        TrySetErrno(ctx, enosys);
+        ctx[CpuRegister.Rax] = ulong.MaxValue;
+        return (int)OrbisGen2Result.ORBIS_GEN2_OK;
+    }
+
+    [SysAbiExport(
+        Nid = "tPWsbOUGO8k",
+        ExportName = "shm_unlink",
+        Target = Generation.Gen5,
+        LibraryName = "libKernel")]
+    public static int PosixSharedMemoryUnlink(CpuContext ctx)
+    {
+        ctx[CpuRegister.Rax] = 0;
+        return (int)OrbisGen2Result.ORBIS_GEN2_OK;
+    }
+
+    [SysAbiExport(
+        Nid = "BPE9s9vQQXo",
+        ExportName = "mmap",
+        Target = Generation.Gen5,
+        LibraryName = "libc")]
+    public static int LibcMmap(CpuContext ctx)
+    {
+        var requestedSize = ctx[CpuRegister.Rsi];
+        if (requestedSize == 0 ||
+            ctx.Memory is not IGuestMemoryAllocator allocator ||
+            !allocator.TryAllocateGuestMemory(requestedSize, alignment: 0x4000, out var mappedAddress))
+        {
+            ctx[CpuRegister.Rax] = ulong.MaxValue;
+            return (int)OrbisGen2Result.ORBIS_GEN2_OK;
+        }
+
+        ctx[CpuRegister.Rax] = mappedAddress;
+        return (int)OrbisGen2Result.ORBIS_GEN2_OK;
+    }
+
+    [SysAbiExport(
+        Nid = "SfQIZcqvvms",
+        ExportName = "strlcpy",
+        Target = Generation.Gen5,
+        LibraryName = "libc")]
+    public static int LibcStrncpy(CpuContext ctx)
+    {
+        var destinationAddress = ctx[CpuRegister.Rdi];
+        var sourceAddress = ctx[CpuRegister.Rsi];
+        var count = ctx[CpuRegister.Rdx];
+        if (destinationAddress == 0 || sourceAddress == 0 || count > int.MaxValue)
+        {
+            return ctx.SetReturn(OrbisGen2Result.ORBIS_GEN2_ERROR_INVALID_ARGUMENT);
+        }
+
+        var copied = new byte[(int)count];
+        if (count != 0)
+        {
+            var source = GC.AllocateUninitializedArray<byte>((int)count);
+            if (!ctx.Memory.TryRead(sourceAddress, source))
+            {
+                return ctx.SetReturn(OrbisGen2Result.ORBIS_GEN2_ERROR_MEMORY_FAULT);
+            }
+
+            var terminator = Array.IndexOf(source, (byte)0);
+            var copyLength = terminator < 0 ? source.Length : terminator;
+            source.AsSpan(0, copyLength).CopyTo(copied);
+            if (!ctx.Memory.TryWrite(destinationAddress, copied))
+            {
+                return ctx.SetReturn(OrbisGen2Result.ORBIS_GEN2_ERROR_MEMORY_FAULT);
+            }
+        }
+
+        ctx[CpuRegister.Rax] = destinationAddress;
+        return (int)OrbisGen2Result.ORBIS_GEN2_OK;
+    }
+
+    [SysAbiExport(
+        Nid = "YNzNkJzYqEg",
+        ExportName = "strncpy_s",
+        Target = Generation.Gen5,
+        LibraryName = "libc")]
+    public static int LibcStrncpySecure(CpuContext ctx)
+    {
+        var destinationAddress = ctx[CpuRegister.Rdi];
+        var destinationSize = ctx[CpuRegister.Rsi];
+        var sourceAddress = ctx[CpuRegister.Rdx];
+        var count = ctx[CpuRegister.Rcx];
+        if (destinationAddress == 0 || destinationSize == 0 || sourceAddress == 0 ||
+            destinationSize > int.MaxValue || count > int.MaxValue)
+        {
+            ctx[CpuRegister.Rax] = Einval;
+            return (int)OrbisGen2Result.ORBIS_GEN2_OK;
+        }
+
+        var capacity = checked((int)destinationSize);
+        var sourceLimit = checked((int)Math.Min(count, destinationSize - 1));
+        var source = GC.AllocateUninitializedArray<byte>(sourceLimit + 1);
+        if (!ctx.Memory.TryRead(sourceAddress, source))
+        {
+            ctx[CpuRegister.Rax] = Efault;
+            return (int)OrbisGen2Result.ORBIS_GEN2_OK;
+        }
+
+        var terminator = Array.IndexOf(source, (byte)0, 0, sourceLimit);
+        var copyLength = terminator < 0 ? sourceLimit : terminator;
+        var destination = new byte[capacity];
+        source.AsSpan(0, copyLength).CopyTo(destination);
+        if (!ctx.Memory.TryWrite(destinationAddress, destination))
+        {
+            ctx[CpuRegister.Rax] = Efault;
+            return (int)OrbisGen2Result.ORBIS_GEN2_OK;
+        }
+
+        ctx[CpuRegister.Rax] = 0;
+        return (int)OrbisGen2Result.ORBIS_GEN2_OK;
+    }
+
+    [SysAbiExport(
+        Nid = "enqPGLfmVNU",
+        ExportName = "strtok_r",
+        Target = Generation.Gen5,
+        LibraryName = "libc")]
+    public static int LibcStrtokReentrant(CpuContext ctx)
+    {
+        var argumentAddress = ctx[CpuRegister.Rdi];
+        var currentAddress = argumentAddress;
+        var delimiterAddress = ctx[CpuRegister.Rsi];
+        var savePointerAddress = ctx[CpuRegister.Rdx];
+        var traceIndex = _traceStrtokReentrant
+            ? Interlocked.Increment(ref _strtokReentrantTraceCount)
+            : 0;
+        var returnRip = GuestThreadExecution.TryGetCurrentImportCallFrame(out var frame)
+            ? frame.ReturnRip
+            : 0UL;
+        if (delimiterAddress == 0 || savePointerAddress == 0 ||
+            !TryReadUtf8CString(
+                ctx,
+                delimiterAddress,
+                64,
+                out var delimiters,
+                minimumPrintableCharacters: 1))
+        {
+            TraceStrtokReentrant(
+                ctx,
+                traceIndex,
+                returnRip,
+                argumentAddress,
+                currentAddress,
+                delimiterAddress,
+                savePointerAddress,
+                0,
+                "invalid-arguments");
+            ctx[CpuRegister.Rax] = 0;
+            return (int)OrbisGen2Result.ORBIS_GEN2_OK;
+        }
+
+        if (currentAddress == 0 && !ctx.TryReadUInt64(savePointerAddress, out currentAddress))
+        {
+            TraceStrtokReentrant(
+                ctx,
+                traceIndex,
+                returnRip,
+                argumentAddress,
+                currentAddress,
+                delimiterAddress,
+                savePointerAddress,
+                0,
+                "unreadable-saveptr");
+            return ctx.SetReturn(OrbisGen2Result.ORBIS_GEN2_ERROR_MEMORY_FAULT);
+        }
+
+        if (currentAddress == 0)
+        {
+            TraceStrtokReentrant(
+                ctx,
+                traceIndex,
+                returnRip,
+                argumentAddress,
+                currentAddress,
+                delimiterAddress,
+                savePointerAddress,
+                0,
+                "end-of-sequence");
+            ctx[CpuRegister.Rax] = 0;
+            return (int)OrbisGen2Result.ORBIS_GEN2_OK;
+        }
+
+        TraceStrtokReentrant(
+            ctx,
+            traceIndex,
+            returnRip,
+            argumentAddress,
+            currentAddress,
+            delimiterAddress,
+            savePointerAddress,
+            0,
+            "entry");
+
+        Span<byte> value = stackalloc byte[1];
+        var examined = 0;
+        while (currentAddress != 0 && examined++ < 4096)
+        {
+            if (!ctx.Memory.TryRead(currentAddress, value))
+            {
+                return ctx.SetReturn(OrbisGen2Result.ORBIS_GEN2_ERROR_MEMORY_FAULT);
+            }
+
+            if (value[0] == 0)
+            {
+                _ = ctx.TryWriteUInt64(savePointerAddress, currentAddress);
+                TraceStrtokReentrant(
+                    ctx,
+                    traceIndex,
+                    returnRip,
+                    argumentAddress,
+                    currentAddress,
+                    delimiterAddress,
+                    savePointerAddress,
+                    0,
+                    "no-token");
+                ctx[CpuRegister.Rax] = 0;
+                return (int)OrbisGen2Result.ORBIS_GEN2_OK;
+            }
+
+            if (delimiters.IndexOf((char)value[0]) < 0)
+            {
+                break;
+            }
+
+            currentAddress++;
+        }
+
+        var tokenAddress = currentAddress;
+        while (examined++ < 4096)
+        {
+            if (!ctx.Memory.TryRead(currentAddress, value))
+            {
+                return ctx.SetReturn(OrbisGen2Result.ORBIS_GEN2_ERROR_MEMORY_FAULT);
+            }
+
+            if (value[0] == 0)
+            {
+                if (!ctx.TryWriteUInt64(savePointerAddress, currentAddress))
+                {
+                    return ctx.SetReturn(OrbisGen2Result.ORBIS_GEN2_ERROR_MEMORY_FAULT);
+                }
+
+                TraceStrtokReentrant(
+                    ctx,
+                    traceIndex,
+                    returnRip,
+                    argumentAddress,
+                    currentAddress,
+                    delimiterAddress,
+                    savePointerAddress,
+                    tokenAddress,
+                    "token-at-end");
+                ctx[CpuRegister.Rax] = tokenAddress;
+                return (int)OrbisGen2Result.ORBIS_GEN2_OK;
+            }
+
+            if (delimiters.IndexOf((char)value[0]) >= 0)
+            {
+                value[0] = 0;
+                if (!ctx.Memory.TryWrite(currentAddress, value) ||
+                    !ctx.TryWriteUInt64(savePointerAddress, currentAddress + 1))
+                {
+                    return ctx.SetReturn(OrbisGen2Result.ORBIS_GEN2_ERROR_MEMORY_FAULT);
+                }
+
+                TraceStrtokReentrant(
+                    ctx,
+                    traceIndex,
+                    returnRip,
+                    argumentAddress,
+                    currentAddress,
+                    delimiterAddress,
+                    savePointerAddress,
+                    tokenAddress,
+                    "token-before-delimiter");
+                ctx[CpuRegister.Rax] = tokenAddress;
+                return (int)OrbisGen2Result.ORBIS_GEN2_OK;
+            }
+
+            currentAddress++;
+        }
+
+        ctx[CpuRegister.Rax] = 0;
+        return (int)OrbisGen2Result.ORBIS_GEN2_OK;
+    }
+
+    private static void TraceStrtokReentrant(
+        CpuContext ctx,
+        long traceIndex,
+        ulong returnRip,
+        ulong argumentAddress,
+        ulong currentAddress,
+        ulong delimiterAddress,
+        ulong savePointerAddress,
+        ulong tokenAddress,
+        string outcome)
+    {
+        if (!_traceStrtokReentrant)
+        {
+            return;
+        }
+
+        var savedCursorText = "unreadable";
+        var savedCursor = 0UL;
+        if (savePointerAddress != 0 && ctx.TryReadUInt64(savePointerAddress, out savedCursor))
+        {
+            savedCursorText = $"0x{savedCursor:X16}:{DescribeGuestCString(ctx, savedCursor, 256)}";
+        }
+
+        Console.Error.WriteLine(
+            $"[LIBC][STRTOK_R] #{traceIndex} outcome={outcome} ret=0x{returnRip:X16} " +
+            $"thread=0x{GuestThreadExecution.CurrentGuestThreadHandle:X16} " +
+            $"arg=0x{argumentAddress:X16} current=0x{currentAddress:X16}:{DescribeGuestCString(ctx, currentAddress, 256)} " +
+            $"delim=0x{delimiterAddress:X16}:{DescribeGuestCString(ctx, delimiterAddress, 64)} " +
+            $"saveptr=0x{savePointerAddress:X16}->{savedCursorText} " +
+            $"token=0x{tokenAddress:X16}:{DescribeGuestCString(ctx, tokenAddress, 256)}");
+    }
+
+    private static string DescribeGuestCString(CpuContext ctx, ulong address, int maxBytes)
+    {
+        if (address == 0)
+        {
+            return "<null>";
+        }
+
+        var text = new StringBuilder(Math.Min(maxBytes, 256) + 16);
+        Span<byte> value = stackalloc byte[1];
+        for (var offset = 0; offset < maxBytes; offset++)
+        {
+            if (!ctx.Memory.TryRead(address + unchecked((ulong)offset), value))
+            {
+                return text.Length == 0
+                    ? "<unreadable>"
+                    : $"\"{text}\"<unreadable>";
+            }
+
+            if (value[0] == 0)
+            {
+                return $"\"{text}\"";
+            }
+
+            switch (value[0])
+            {
+                case (byte)'\\':
+                    text.Append("\\\\");
+                    break;
+                case (byte)'\"':
+                    text.Append("\\\"");
+                    break;
+                case >= 0x20 and <= 0x7E:
+                    text.Append((char)value[0]);
+                    break;
+                default:
+                    text.Append($"\\x{value[0]:X2}");
+                    break;
+            }
+        }
+
+        return $"\"{text}\"<truncated>";
+    }
+
+    [SysAbiExport(
+        Nid = "mXlxhmLNMPg",
+        ExportName = "strtol",
+        Target = Generation.Gen5,
+        LibraryName = "libc")]
+    public static int LibcStrtol(CpuContext ctx)
+    {
+        var inputAddress = ctx[CpuRegister.Rdi];
+        var endPointerAddress = ctx[CpuRegister.Rsi];
+        var numberBase = unchecked((int)ctx[CpuRegister.Rdx]);
+        if (inputAddress == 0 || (numberBase != 0 && (numberBase < 2 || numberBase > 36)))
+        {
+            ctx[CpuRegister.Rax] = 0;
+            return (int)OrbisGen2Result.ORBIS_GEN2_OK;
+        }
+
+        var buffer = GC.AllocateUninitializedArray<byte>(256);
+        if (!ctx.Memory.TryRead(inputAddress, buffer))
+        {
+            return ctx.SetReturn(OrbisGen2Result.ORBIS_GEN2_ERROR_MEMORY_FAULT);
+        }
+
+        var length = Array.IndexOf(buffer, (byte)0);
+        if (length < 0)
+        {
+            length = buffer.Length;
+        }
+
+        var index = 0;
+        while (index < length && buffer[index] is (byte)' ' or (byte)'\t' or (byte)'\n' or (byte)'\r' or (byte)'\v' or (byte)'\f')
+        {
+            index++;
+        }
+
+        var negative = false;
+        if (index < length && buffer[index] is (byte)'+' or (byte)'-')
+        {
+            negative = buffer[index] == (byte)'-';
+            index++;
+        }
+
+        if (numberBase == 0)
+        {
+            numberBase = index + 1 < length && buffer[index] == (byte)'0' &&
+                         buffer[index + 1] is (byte)'x' or (byte)'X'
+                ? 16
+                : index < length && buffer[index] == (byte)'0' ? 8 : 10;
+        }
+
+        if (numberBase == 16 && index + 1 < length && buffer[index] == (byte)'0' &&
+            buffer[index + 1] is (byte)'x' or (byte)'X')
+        {
+            index += 2;
+        }
+
+        var digitStart = index;
+        ulong magnitude = 0;
+        while (index < length)
+        {
+            var c = buffer[index];
+            var digit = c is >= (byte)'0' and <= (byte)'9'
+                ? c - (byte)'0'
+                : c is >= (byte)'a' and <= (byte)'z'
+                    ? c - (byte)'a' + 10
+                    : c is >= (byte)'A' and <= (byte)'Z'
+                        ? c - (byte)'A' + 10
+                        : 0xFF;
+            if (digit >= numberBase)
+            {
+                break;
+            }
+
+            magnitude = unchecked((magnitude * (uint)numberBase) + (uint)digit);
+            index++;
+        }
+
+        if (index == digitStart)
+        {
+            index = 0;
+            magnitude = 0;
+        }
+
+        if (endPointerAddress != 0 &&
+            !KernelMemoryCompatExports.TryWriteUInt64Compat(ctx, endPointerAddress, inputAddress + (ulong)index))
+        {
+            return ctx.SetReturn(OrbisGen2Result.ORBIS_GEN2_ERROR_MEMORY_FAULT);
+        }
+
+        var result = negative ? unchecked(0UL - magnitude) : magnitude;
+        ctx[CpuRegister.Rax] = result;
+        return (int)OrbisGen2Result.ORBIS_GEN2_OK;
+    }
+
+    [SysAbiExport(
+        Nid = "VOBg+iNwB-4",
+        ExportName = "strtoll",
+        Target = Generation.Gen5,
+        LibraryName = "libc")]
+    public static int LibcStrtoll(CpuContext ctx)
+    {
+        // The Gen5 userspace ABI is LP64, so both strtol and strtoll return a
+        // signed 64-bit value and have identical parsing/end-pointer behavior.
+        // 12.70 libScePsm uses strtoll while parsing PUI numeric resources.
+        return LibcStrtol(ctx);
+    }
+
+    [SysAbiExport(
+        Nid = "m5wN+SwZOR4",
+        ExportName = "putchar",
+        Target = Generation.Gen5,
+        LibraryName = "libc")]
+    public static int LibcPutchar(CpuContext ctx)
+    {
+        var value = unchecked((byte)ctx[CpuRegister.Rdi]);
+        if (string.Equals(Environment.GetEnvironmentVariable("SHARPEMU_LOG_FPRINTF"), "1", StringComparison.Ordinal))
+        {
+            Console.Error.Write((char)value);
+        }
+
+        ctx[CpuRegister.Rax] = value;
+        return (int)OrbisGen2Result.ORBIS_GEN2_OK;
+    }
+
+    [SysAbiExport(
+        Nid = "m0iS6jNsXds",
+        ExportName = "sched_get_priority_min",
+        Target = Generation.Gen5,
+        LibraryName = "libKernel")]
+    public static int SchedGetPriorityMin(CpuContext ctx)
+    {
+        ctx[CpuRegister.Rax] = 1;
+        return 1;
+    }
+
+    [SysAbiExport(
+        Nid = "CBNtXOoef-E",
+        ExportName = "sched_get_priority_max",
+        Target = Generation.Gen5,
+        LibraryName = "libKernel")]
+    public static int SchedGetPriorityMax(CpuContext ctx)
+    {
+        ctx[CpuRegister.Rax] = 99;
+        return 99;
+    }
+
+    [SysAbiExport(
+        Nid = "nTxZBp8YNGc",
+        ExportName = "pthread_mutex_setname_np",
+        Target = Generation.Gen5,
+        LibraryName = "libKernel")]
+    public static int PthreadMutexSetName(CpuContext ctx)
+    {
+        // Mutex names are diagnostic metadata and do not affect synchronization.
+        ctx[CpuRegister.Rax] = 0;
+        return (int)OrbisGen2Result.ORBIS_GEN2_OK;
+    }
+
+    [SysAbiExport(
+        Nid = "EZ8h70dtFLg",
+        ExportName = "pthread_cond_setname_np",
+        Target = Generation.Gen5,
+        LibraryName = "libKernel")]
+    public static int PthreadCondSetName(CpuContext ctx)
+    {
+        ctx[CpuRegister.Rax] = 0;
+        return (int)OrbisGen2Result.ORBIS_GEN2_OK;
+    }
+
+    [SysAbiExport(
+        Nid = "smbQukfxYJM",
+        ExportName = "getenv",
+        Target = Generation.Gen5,
+        LibraryName = "libc")]
+    public static int LibcGetEnvironmentVariable(CpuContext ctx)
+    {
+        // Console environment variables are not inherited from the host.
+        ctx[CpuRegister.Rax] = 0;
+        return (int)OrbisGen2Result.ORBIS_GEN2_OK;
+    }
+
+    [SysAbiExport(
+        Nid = "UtO0OHMCgmI",
+        ExportName = "sceKernelIsDevelopmentMode",
+        Target = Generation.Gen5,
+        LibraryName = "libKernel")]
+    public static int KernelIsDevelopmentMode(CpuContext ctx)
+    {
+        ctx[CpuRegister.Rax] = 0;
+        return (int)OrbisGen2Result.ORBIS_GEN2_OK;
+    }
+
+    [SysAbiExport(
+        Nid = "cHlIo6CoRTA",
+        ExportName = "sceKernelGetNamedMemoryDomainCompat1270",
+        Target = Generation.Gen5,
+        LibraryName = "libKernel")]
+    public static int KernelGetNamedMemoryDomainCompat1270(CpuContext ctx)
+    {
+        // libmonosgen 12.70 queries the named "monoGc" memory domain and maps
+        // the returned selector to its flexible-memory call. SharpEmu's guest
+        // arena is not partitioned into domains, so the default selector is 0.
+        ctx[CpuRegister.Rax] = 0;
+        return (int)OrbisGen2Result.ORBIS_GEN2_OK;
+    }
+
+    [SysAbiExport(
+        Nid = "KiJEPEWRyUY",
+        ExportName = "sigaction",
+        Target = Generation.Gen5,
+        LibraryName = "libKernel")]
+    public static int LibcSigaction(CpuContext ctx)
+    {
+        var previousActionAddress = ctx[CpuRegister.Rdx];
+        if (previousActionAddress != 0)
+        {
+            // The runtime first queries dispositions to select an unused
+            // realtime signal. Expose the default disposition; actual native
+            // fault delivery remains owned by SharpEmu's signal bridge.
+            Span<byte> defaultAction = stackalloc byte[0x20];
+            defaultAction.Clear();
+            if (!ctx.Memory.TryWrite(previousActionAddress, defaultAction))
+            {
+                return ctx.SetReturn(OrbisGen2Result.ORBIS_GEN2_ERROR_MEMORY_FAULT);
+            }
+        }
+
+        ctx[CpuRegister.Rax] = 0;
+        return (int)OrbisGen2Result.ORBIS_GEN2_OK;
+    }
+
+    [SysAbiExport(
+        Nid = "CU8m+Qs+HN4",
+        ExportName = "sceSysmoduleLoadModuleByNameInternal",
+        Target = Generation.Gen5,
+        LibraryName = "libSceSysmodule")]
+    public static int SysmoduleLoadModuleByNameInternal(CpuContext ctx)
+    {
+        var nameAddress = ctx[CpuRegister.Rdi];
+        if (nameAddress == 0 || !TryReadUtf8CString(ctx, nameAddress, 512, out var moduleName))
+        {
+            return (int)OrbisGen2Result.ORBIS_GEN2_ERROR_INVALID_ARGUMENT;
+        }
+
+        _ = KernelModuleRegistry.RegisterSyntheticModule(moduleName, isSystemModule: true);
+
+        // The internal-by-name form optionally returns a module initializer
+        // and a loader result through its third and fifth arguments. SharpEmu
+        // has no native system-module initializer to call, so expose an empty
+        // initializer and a successful loader result.
+        var initializerAddress = ctx[CpuRegister.Rdx];
+        if (initializerAddress != 0 &&
+            !KernelMemoryCompatExports.TryWriteUInt64Compat(ctx, initializerAddress, 0))
+        {
+            return (int)OrbisGen2Result.ORBIS_GEN2_ERROR_MEMORY_FAULT;
+        }
+
+        var resultAddress = ctx[CpuRegister.R8];
+        if (resultAddress != 0 &&
+            !KernelMemoryCompatExports.TryWriteUInt32Compat(ctx, resultAddress, 0))
+        {
+            return (int)OrbisGen2Result.ORBIS_GEN2_ERROR_MEMORY_FAULT;
         }
 
         ctx[CpuRegister.Rax] = 0;
@@ -1468,6 +2939,13 @@ public static class KernelRuntimeCompatExports
         ctx[CpuRegister.Rax] = 0;
         return (int)OrbisGen2Result.ORBIS_GEN2_OK;
     }
+
+    [SysAbiExport(
+        Nid = "vXZhrtJxkGc",
+        ExportName = "sceSysmoduleUnloadModuleInternal",
+        Target = Generation.Gen5,
+        LibraryName = "libSceSysmodule")]
+    public static int SysmoduleUnloadModuleInternal(CpuContext ctx) => SysmoduleUnloadModule(ctx);
 
     [SysAbiExport(
         Nid = "hHrGoGoNf+s",
@@ -1677,6 +3155,15 @@ public static class KernelRuntimeCompatExports
         BinaryPrimitives.WriteUInt64LittleEndian(
             payload.AsSpan((int)ModuleInfoExInitProcOffset),
             module.EntryPoint);
+        BinaryPrimitives.WriteUInt64LittleEndian(
+            payload.AsSpan((int)ModuleInfoExEhFrameHeaderOffset),
+            module.EhFrameHeaderAddress);
+        BinaryPrimitives.WriteUInt64LittleEndian(
+            payload.AsSpan((int)ModuleInfoExEhFrameOffset),
+            module.EhFrameAddress);
+        BinaryPrimitives.WriteUInt32LittleEndian(
+            payload.AsSpan((int)ModuleInfoExEhFrameSizeOffset),
+            (uint)Math.Min(module.EhFrameSize, uint.MaxValue));
         WriteModuleSegment(payload, (int)ModuleInfoExSegmentsOffset, module);
         BinaryPrimitives.WriteUInt32LittleEndian(
             payload.AsSpan((int)ModuleInfoExSegmentCountOffset),
@@ -2062,7 +3549,7 @@ public static class KernelRuntimeCompatExports
         Nid = "NhpspxdjEKU",
         ExportName = "_nanosleep",
         Target = Generation.Gen4 | Generation.Gen5,
-        LibraryName = "libKernel")]
+        LibraryName = "libkernel")]
     public static int PosixNanosleepUnderscore(CpuContext ctx) => NanosleepCore(ctx, posix: true);
 
     [SysAbiExport(
@@ -2104,7 +3591,6 @@ public static class KernelRuntimeCompatExports
             return (int)OrbisGen2Result.ORBIS_GEN2_OK;
         }
 
-        GuestThreadExecution.Scheduler?.Pump(ctx, posix ? "nanosleep" : "sceKernelNanosleep");
         var totalTicks = tvSec * TimeSpan.TicksPerSecond + Math.Max(tvNsec / 100L, 1L);
         try
         {
@@ -2159,15 +3645,4 @@ public static class KernelRuntimeCompatExports
         LibraryName = "libKernel")]
     public static int PosixUsleep(CpuContext ctx) => KernelUsleep(ctx);
 
-    [SysAbiExport(
-        Nid = "HoLVWNanBBc",
-        ExportName = "getpid",
-        Target = Generation.Gen4 | Generation.Gen5,
-        LibraryName = "libKernel")]
-    public static int GetProcessId(CpuContext ctx)
-    {
-        var processId = Environment.ProcessId;
-        ctx[CpuRegister.Rax] = unchecked((uint)processId);
-        return processId;
-    }
 }

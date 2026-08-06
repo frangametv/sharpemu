@@ -1,0 +1,55 @@
+{
+  "executable_sha256": "0d91281f1d2cdcf4d8c2f4b920766b645ea086e679bd95074f30510178a706b0",
+  "format": "sharpemu-ghidra-selected-nid-functions-v1",
+  "function_count": 2,
+  "functions": [
+    {
+      "external": false,
+      "function_body_addresses": 150,
+      "function_body_sha256": "b186fb1a983ad96cfc69c4da8babdc4c6865b7ad048d87996b323a17e047fbb9",
+      "function_entry": "00013660",
+      "function_name": "Dbbkj6YHWdo#D#A",
+      "function_present": true,
+      "instruction_count": 43,
+      "log_file": "audit-05-Coredump.log",
+      "nid": "Dbbkj6YHWdo",
+      "result_file": "05-Coredump.result.tsv",
+      "symbol": "Dbbkj6YHWdo#D#A",
+      "symbol_address": "00013660",
+      "thunk": false,
+      "thunk_target": "",
+      "thunk_target_external": null
+    },
+    {
+      "external": false,
+      "function_body_addresses": 82,
+      "function_body_sha256": "08120eb9b34c5fc84e828bea285dd2f8ea4e560ffe90ed555e1102282eb213f6",
+      "function_entry": "00013600",
+      "function_name": "fFkhOgztiCA#D#A",
+      "function_present": true,
+      "instruction_count": 26,
+      "log_file": "audit-05-Coredump.log",
+      "nid": "fFkhOgztiCA",
+      "result_file": "05-Coredump.result.tsv",
+      "symbol": "fFkhOgztiCA#D#A",
+      "symbol_address": "00013600",
+      "thunk": false,
+      "thunk_target": "",
+      "thunk_target_external": null
+    }
+  ],
+  "ghidra_version": "12.1.2_PUBLIC_20260605",
+  "missing": [],
+  "program_name": "libkernel.sprx",
+  "provenance": {
+    "audit_script_sha256": "f946f435e38dc99db306165473b180209d5db7e0581c6c52d3b417510f87dfa9",
+    "computer": "DESKTOP-RAAKAQJ",
+    "evidence_policy": "Ghidra analysis of exact Gen5 provider ELFs only; no Kyty or other emulator-derived source, contracts, or implementations.",
+    "log_sha256": "69beda84bc702d968e364af5330282aa5eef0381ba7a8dd67be7c76aa0946687",
+    "plan_sha256": "7b98c992e0d65d55d9743b30b320ad197f0bc52bb803d5654398a701a814d831",
+    "provider_role": "primary",
+    "result_sha256": "3d3cbb7670c088b5c0e91a569a109258e033e2cd3d07895a6f6028f26b1e3b12"
+  },
+  "target_count": 2,
+  "without_functions": []
+}

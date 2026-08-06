@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 
 using System.Collections.Concurrent;
+using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using System.Threading;
 using SharpEmu.HLE;
@@ -14,6 +15,14 @@ internal static class KernelPthreadState
 
     private static readonly ConcurrentDictionary<ulong, ThreadIdentity> Threads = new();
     private static readonly byte[] ZeroThreadObject = new byte[ThreadObjectSize];
+    // Thread identities are append-only, so a host thread can safely retain the
+    // guest identity it used on its preceding HLE call. This avoids a concurrent
+    // dictionary lookup in hot mutex/TLS exports while still revalidating after
+    // every guest-thread switch. Set to 0 for regression isolation.
+    private static readonly bool GuestIdentityCacheEnabled = !string.Equals(
+        Environment.GetEnvironmentVariable("SHARPEMU_PTHREAD_IDENTITY_CACHE"),
+        "0",
+        StringComparison.OrdinalIgnoreCase);
     private static long _nextUniqueThreadId = 1;
 
     [ThreadStatic]
@@ -21,6 +30,12 @@ internal static class KernelPthreadState
 
     [ThreadStatic]
     private static ulong _currentThreadUniqueId;
+
+    [ThreadStatic]
+    private static ulong _cachedGuestThreadHandle;
+
+    [ThreadStatic]
+    private static ulong _cachedGuestThreadUniqueId;
 
     internal readonly record struct ThreadIdentity(ulong UniqueId, string Name);
 
@@ -32,7 +47,7 @@ internal static class KernelPthreadState
         // thread is bound causes mutex owner mismatches (unlock PERM → hang).
         if (guestThreadHandle != 0)
         {
-            EnsureGuestThreadIdentity(guestThreadHandle);
+            _ = EnsureGuestThreadUniqueId(guestThreadHandle);
             return guestThreadHandle;
         }
 
@@ -45,7 +60,7 @@ internal static class KernelPthreadState
         var guestThreadHandle = GuestThreadExecution.CurrentGuestThreadHandle;
         if (guestThreadHandle != 0)
         {
-            return EnsureGuestThreadIdentity(guestThreadHandle).UniqueId;
+            return EnsureGuestThreadUniqueId(guestThreadHandle);
         }
 
         EnsureCurrentThreadRegistered();
@@ -95,16 +110,30 @@ internal static class KernelPthreadState
         return false;
     }
 
-    private static ThreadIdentity EnsureGuestThreadIdentity(ulong guestThreadHandle)
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static ulong EnsureGuestThreadUniqueId(ulong guestThreadHandle)
     {
-        if (Threads.TryGetValue(guestThreadHandle, out var existing))
+        if (GuestIdentityCacheEnabled &&
+            guestThreadHandle == _cachedGuestThreadHandle &&
+            _cachedGuestThreadUniqueId != 0)
         {
-            return existing;
+            return _cachedGuestThreadUniqueId;
         }
 
-        var uniqueId = unchecked((ulong)Interlocked.Increment(ref _nextUniqueThreadId));
-        var identity = new ThreadIdentity(uniqueId, $"Guest-0x{guestThreadHandle:X}");
-        return Threads.GetOrAdd(guestThreadHandle, identity);
+        if (!Threads.TryGetValue(guestThreadHandle, out var identity))
+        {
+            var uniqueId = unchecked((ulong)Interlocked.Increment(ref _nextUniqueThreadId));
+            identity = Threads.GetOrAdd(
+                guestThreadHandle,
+                new ThreadIdentity(uniqueId, $"Guest-0x{guestThreadHandle:X}"));
+        }
+
+        if (GuestIdentityCacheEnabled)
+        {
+            _cachedGuestThreadHandle = guestThreadHandle;
+            _cachedGuestThreadUniqueId = identity.UniqueId;
+        }
+        return identity.UniqueId;
     }
 
     private static void EnsureCurrentThreadRegistered()

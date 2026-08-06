@@ -198,6 +198,26 @@ public static class AudioOutExports
     }
 
     [SysAbiExport(
+        Nid = "qLpSK75lXI4",
+        ExportName = "sceAudioOutOpenEx",
+        Target = Generation.Gen5,
+        LibraryName = "libSceAudioOut")]
+    public static int AudioOutOpenEx(CpuContext ctx)
+    {
+        // Gen5 OpenEx inserts a modifier before the standard length/frequency
+        // pair and carries the format as its seventh SysV argument.
+        if (!ctx.TryReadUInt64(ctx[CpuRegister.Rsp] + sizeof(ulong), out var format))
+        {
+            return ctx.SetReturn((int)OrbisGen2Result.ORBIS_GEN2_ERROR_MEMORY_FAULT);
+        }
+
+        ctx[CpuRegister.Rcx] = ctx[CpuRegister.R8];
+        ctx[CpuRegister.R8] = ctx[CpuRegister.R9];
+        ctx[CpuRegister.R9] = format;
+        return AudioOutOpen(ctx);
+    }
+
+    [SysAbiExport(
         Nid = "s1--uE9mBFw",
         ExportName = "sceAudioOutClose",
         Target = Generation.Gen4 | Generation.Gen5,

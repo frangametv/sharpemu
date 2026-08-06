@@ -1,0 +1,38 @@
+{
+  "executable_sha256": "fa81a4a54680504dbed9abe582c5a2b36d4279d4fd5d85e118018e1305c96106",
+  "format": "sharpemu-ghidra-selected-nid-functions-v1",
+  "function_count": 1,
+  "functions": [
+    {
+      "external": false,
+      "function_body_addresses": 739,
+      "function_body_sha256": "2ef5d335ef10fea1b164401ff5449d28e6da667273d21a5251cab3ca10f5060a",
+      "function_entry": "00001970",
+      "function_name": "EwNylPdWUTM#F#A",
+      "function_present": true,
+      "instruction_count": 176,
+      "log_file": "audit-08-NpTrophy2.log",
+      "nid": "EwNylPdWUTM",
+      "result_file": "08-NpTrophy2.result.tsv",
+      "symbol": "EwNylPdWUTM#F#A",
+      "symbol_address": "00001970",
+      "thunk": false,
+      "thunk_target": "",
+      "thunk_target_external": null
+    }
+  ],
+  "ghidra_version": "12.1.2_PUBLIC_20260605",
+  "missing": [],
+  "program_name": "libSceNpTrophy2.sprx",
+  "provenance": {
+    "audit_script_sha256": "f946f435e38dc99db306165473b180209d5db7e0581c6c52d3b417510f87dfa9",
+    "computer": "DESKTOP-RAAKAQJ",
+    "evidence_policy": "Ghidra analysis of exact Gen5 provider ELFs only; no Kyty or other emulator-derived source, contracts, or implementations.",
+    "log_sha256": "a4964050a04a2002307c3411d59f5910a6ceee7fd1fb5ceefd8e369a700d0588",
+    "plan_sha256": "7b98c992e0d65d55d9743b30b320ad197f0bc52bb803d5654398a701a814d831",
+    "provider_role": "primary",
+    "result_sha256": "c4c090cd6cc15230b840cd12338b0d25fed285d6fd87ff71cfc213f1e94899a4"
+  },
+  "target_count": 1,
+  "without_functions": []
+}

@@ -10,26 +10,29 @@ namespace SharpEmu.Libs.Tests.Agc;
 
 public sealed class AgcResourceOwnerTests
 {
+    private const int ProviderError = unchecked((int)0x8A6C9018);
     private const ulong BaseAddress = 0x1_0000_0000;
     private const ulong OwnerAddress = BaseAddress + 0x100;
     private const ulong NameAddress = BaseAddress + 0x200;
     private const ulong RegistrationMemoryAddress = BaseAddress + 0x400;
 
     [Fact]
-    public void RegisterOwner_DoesNotRequireOptionalResourceRegistryMemory()
+    public void RegisterOwner_ReturnsRecoveredProviderErrorWithoutWritingOwner()
     {
         var memory = new FakeCpuMemory(BaseAddress, 0x2000);
         var ctx = new CpuContext(memory, Generation.Gen5);
+        WriteUInt32(memory, OwnerAddress, 0xA5A5_A5A5);
         memory.WriteCString(NameAddress, "GIRender");
         ctx[CpuRegister.Rdi] = OwnerAddress;
         ctx[CpuRegister.Rsi] = NameAddress;
 
-        Assert.Equal((int)OrbisGen2Result.ORBIS_GEN2_OK, AgcExports.DriverRegisterOwner(ctx));
-        Assert.NotEqual(0u, ReadUInt32(memory, OwnerAddress));
+        Assert.Equal(ProviderError, AgcExports.DriverRegisterOwner(ctx));
+        Assert.Equal(unchecked((ulong)ProviderError), ctx[CpuRegister.Rax]);
+        Assert.Equal(0xA5A5_A5A5u, ReadUInt32(memory, OwnerAddress));
     }
 
     [Fact]
-    public void RegisterOwner_RespectsExplicitRegistryCapacity()
+    public void RegisterOwner_DoesNotConsultInitializedResourceRegistry()
     {
         var memory = new FakeCpuMemory(BaseAddress, 0x2000);
         var ctx = new CpuContext(memory, Generation.Gen5);
@@ -40,16 +43,13 @@ public sealed class AgcResourceOwnerTests
             (int)OrbisGen2Result.ORBIS_GEN2_OK,
             AgcExports.DriverInitResourceRegistration(ctx));
 
-        memory.WriteCString(NameAddress, "First");
+        WriteUInt32(memory, OwnerAddress, 0x5A5A_5A5A);
+        memory.WriteCString(NameAddress, "Owner");
         ctx[CpuRegister.Rdi] = OwnerAddress;
         ctx[CpuRegister.Rsi] = NameAddress;
-        Assert.Equal((int)OrbisGen2Result.ORBIS_GEN2_OK, AgcExports.DriverRegisterOwner(ctx));
 
-        memory.WriteCString(NameAddress, "Second");
-        ctx[CpuRegister.Rdi] = OwnerAddress + 4;
-        Assert.Equal(
-            (int)OrbisGen2Result.ORBIS_GEN2_ERROR_INVALID_ARGUMENT,
-            AgcExports.DriverRegisterOwner(ctx));
+        Assert.Equal(ProviderError, AgcExports.DriverRegisterOwner(ctx));
+        Assert.Equal(0x5A5A_5A5Au, ReadUInt32(memory, OwnerAddress));
     }
 
     private static uint ReadUInt32(FakeCpuMemory memory, ulong address)
@@ -57,5 +57,12 @@ public sealed class AgcResourceOwnerTests
         Span<byte> buffer = stackalloc byte[4];
         Assert.True(memory.TryRead(address, buffer));
         return BinaryPrimitives.ReadUInt32LittleEndian(buffer);
+    }
+
+    private static void WriteUInt32(FakeCpuMemory memory, ulong address, uint value)
+    {
+        Span<byte> buffer = stackalloc byte[sizeof(uint)];
+        BinaryPrimitives.WriteUInt32LittleEndian(buffer, value);
+        Assert.True(memory.TryWrite(address, buffer));
     }
 }

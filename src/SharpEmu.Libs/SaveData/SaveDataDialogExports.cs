@@ -17,7 +17,6 @@ public static class SaveDataDialogExports
     private const int ErrorNotInitialized = unchecked((int)0x80B80003);
     private const int ErrorAlreadyInitialized = unchecked((int)0x80B80004);
     private const int ErrorNotFinished = unchecked((int)0x80B80005);
-    private const int ErrorNotRunning = unchecked((int)0x80B8000B);
     private const int ErrorArgNull = unchecked((int)0x80B8000D);
 
     private const int ResultSize = 0x48;
@@ -147,11 +146,11 @@ public static class SaveDataDialogExports
         LibraryName = "libSceSaveDataDialog")]
     public static int SaveDataDialogClose(CpuContext ctx)
     {
-        if (Interlocked.CompareExchange(ref _status, StatusFinished, StatusRunning) != StatusRunning)
-        {
-            return ctx.SetReturn(ErrorNotRunning);
-        }
-
+        // PollStatus auto-finishes a headless dialog, and another guest
+        // cleanup path can terminate the process-global service before a
+        // concurrent owner reaches Close. There is no host window or resource
+        // to release, so every late/duplicate close is safely idempotent.
+        Interlocked.CompareExchange(ref _status, StatusFinished, StatusRunning);
         return ctx.SetReturn(ErrorOk);
     }
 
@@ -162,10 +161,10 @@ public static class SaveDataDialogExports
         LibraryName = "libSceSaveDataDialog")]
     public static int SaveDataDialogTerminate(CpuContext ctx)
     {
-        if (Interlocked.Exchange(ref _status, StatusNone) == StatusNone)
-        {
-            return ctx.SetReturn(ErrorNotInitialized);
-        }
+        // The headless service owns no host resources. Cleanup can arrive
+        // from overlapping guest utility paths, so duplicate termination is
+        // deliberately idempotent instead of surfacing a false fatal error.
+        Interlocked.Exchange(ref _status, StatusNone);
 
         _lastMode = 0;
         _lastUserData = 0;

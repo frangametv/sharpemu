@@ -31,6 +31,33 @@ public static class KernelExports
     }
 
     [SysAbiExport(
+        Nid = "sp+h-CJV1Ns",
+        ExportName = "sceKernelGetCompiledSdkVersionCompat1270",
+        Target = Generation.Gen5,
+        LibraryName = "libKernel")]
+    public static int KernelGetCompiledSdkVersionCompat1270(CpuContext ctx)
+    {
+        // Firmware 12.70's libkernel implements this export with the same
+        // one-pointer ABI as sceKernelGetCompiledSdkVersion. It obtains the
+        // value through sysctl(CTL_KERN, KERN_PROC, 0x24, getpid()).
+        return KernelGetCompiledSdkVersion(ctx);
+    }
+
+    [SysAbiExport(
+        Nid = "Yrwoq3bti3c",
+        ExportName = "sceKernelRngPseudoSysctlGateCompat1270",
+        Target = Generation.Gen5,
+        LibraryName = "libKernel")]
+    public static int KernelRngPseudoSysctlGateCompat1270(CpuContext ctx)
+    {
+        // This 12.70 libkernel compatibility gate probes the four-integer
+        // sysctl MIB { CTL_KERN, KERN_PROC, 0x37, -1 }. Returning zero selects
+        // ShellCore's current kern.rng_pseudo path instead of /dev/rng.
+        ctx[CpuRegister.Rax] = 0;
+        return (int)OrbisGen2Result.ORBIS_GEN2_OK;
+    }
+
+    [SysAbiExport(
         Nid = "8zLSfEfW5AU",
         ExportName = "sceCoredumpRegisterCoredumpHandler",
         Target = Generation.Gen4 | Generation.Gen5,
@@ -197,6 +224,60 @@ public static class KernelExports
     public static int PthreadCreate(CpuContext ctx)
         => PthreadCreateCore(ctx, ctx[CpuRegister.R8]);
 
+    [SysAbiExport(
+        Nid = "cPGKQ8XPkf8",
+        ExportName = "__sharpemu_gen5_thrd_start_with_name",
+        Target = Generation.Gen5,
+        LibraryName = "libc")]
+    public static int Gen5ThrdStartWithName(CpuContext ctx)
+    {
+        // Gen5 libc uses (threadOut, entry, argument, name), while the kernel
+        // pthread entry point uses (threadOut, attr, entry, argument, name).
+        var entryAddress = ctx[CpuRegister.Rsi];
+        var argument = ctx[CpuRegister.Rdx];
+        var nameAddress = ctx[CpuRegister.Rcx];
+        ctx[CpuRegister.Rsi] = 0;
+        ctx[CpuRegister.Rdx] = entryAddress;
+        ctx[CpuRegister.Rcx] = argument;
+        return PthreadCreateCore(ctx, nameAddress);
+    }
+
+    [SysAbiExport(
+        Nid = "2cXiHqvKFUM",
+        ExportName = "__sharpemu_gen5_thrd_start",
+        Target = Generation.Gen5,
+        LibraryName = "libc")]
+    public static int Gen5ThrdStart(CpuContext ctx)
+    {
+        // Observed Gen5 libc ABI: (threadOut, entry, argument).
+        var entryAddress = ctx[CpuRegister.Rsi];
+        var argument = ctx[CpuRegister.Rdx];
+        ctx[CpuRegister.Rsi] = 0;
+        ctx[CpuRegister.Rdx] = entryAddress;
+        ctx[CpuRegister.Rcx] = argument;
+        return PthreadCreateCore(ctx, nameAddress: 0);
+    }
+
+    [SysAbiExport(
+        Nid = "kuI8yo7-b4w",
+        ExportName = "__sharpemu_gen5_thrd_start_with_name_attr",
+        Target = Generation.Gen5,
+        LibraryName = "libc")]
+    public static int Gen5ThrdStartWithNameAndAttr(CpuContext ctx)
+    {
+        // Observed Gen5 libc ABI: (threadOut, entry, argument, name, attr).
+        // Reorder it to the kernel pthread ABI consumed by the common thread
+        // scheduler: (threadOut, attr, entry, argument, name).
+        var entryAddress = ctx[CpuRegister.Rsi];
+        var argument = ctx[CpuRegister.Rdx];
+        var nameAddress = ctx[CpuRegister.Rcx];
+        var attrAddress = ctx[CpuRegister.R8];
+        ctx[CpuRegister.Rsi] = attrAddress;
+        ctx[CpuRegister.Rdx] = entryAddress;
+        ctx[CpuRegister.Rcx] = argument;
+        return PthreadCreateCore(ctx, nameAddress);
+    }
+
     private static int PthreadCreateCore(CpuContext ctx, ulong nameAddress)
     {
         var threadIdAddress = ctx[CpuRegister.Rdi];
@@ -215,7 +296,8 @@ public static class KernelExports
             name,
             priority,
             affinityMask);
-        if (threadIdAddress != 0 && !ctx.TryWriteUInt64(threadIdAddress, threadHandle))
+        if (threadIdAddress != 0 &&
+            !KernelMemoryCompatExports.TryWriteUInt64Compat(ctx, threadIdAddress, threadHandle))
         {
             return (int)OrbisGen2Result.ORBIS_GEN2_ERROR_MEMORY_FAULT;
         }
@@ -257,20 +339,14 @@ public static class KernelExports
         ExportName = "pthread_create",
         Target = Generation.Gen4 | Generation.Gen5,
         LibraryName = "libKernel")]
-    public static int PosixPthreadCreate(CpuContext ctx)
-    {
-        return PthreadCreateCore(ctx, nameAddress: 0);
-    }
+    public static int PosixPthreadCreate(CpuContext ctx) => PthreadCreateCore(ctx, nameAddress: 0);
 
     [SysAbiExport(
         Nid = "Jmi+9w9u0E4",
         ExportName = "pthread_create_name_np",
         Target = Generation.Gen4 | Generation.Gen5,
         LibraryName = "libKernel")]
-    public static int PosixPthreadCreateNameNp(CpuContext ctx)
-    {
-        return PthreadCreateCore(ctx, ctx[CpuRegister.R8]);
-    }
+    public static int PosixPthreadCreateNameNp(CpuContext ctx) => PthreadCreateCore(ctx, ctx[CpuRegister.R8]);
 
     [SysAbiExport(
         Nid = "3kg7rT0NQIs",
@@ -336,7 +412,7 @@ public static class KernelExports
         }
 
         if (returnValueAddress != 0 &&
-            !ctx.TryWriteUInt64(returnValueAddress, returnValue))
+            !KernelMemoryCompatExports.TryWriteUInt64Compat(ctx, returnValueAddress, returnValue))
         {
             ctx[CpuRegister.Rax] =
                 unchecked((ulong)(int)OrbisGen2Result.ORBIS_GEN2_ERROR_MEMORY_FAULT);
@@ -356,6 +432,13 @@ public static class KernelExports
     {
         return PthreadJoin(ctx);
     }
+
+    [SysAbiExport(
+        Nid = "qnYxp6VUtbI",
+        ExportName = "__sharpemu_gen5_thrd_join",
+        Target = Generation.Gen5,
+        LibraryName = "libc")]
+    public static int Gen5ThrdJoin(CpuContext ctx) => PthreadJoin(ctx);
 
     [SysAbiExport(
         Nid = "wuCroIGjt2g",
@@ -434,7 +517,7 @@ public static class KernelExports
         var len = 0;
         while (len < buf.Length)
         {
-            if (!ctx.Memory.TryRead(address + (ulong)len, one))
+            if (!KernelMemoryCompatExports.TryReadCompat(ctx, address + (ulong)len, one))
                 return len == 0 ? $"<unreadable 0x{address:X16}>" : System.Text.Encoding.UTF8.GetString(buf[..len]);
 
             if (one[0] == 0)

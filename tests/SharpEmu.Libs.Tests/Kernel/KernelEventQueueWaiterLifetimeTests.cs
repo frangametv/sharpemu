@@ -16,20 +16,20 @@ public sealed class KernelEventQueueWaiterLifetimeTests
     private const ulong OutCountAddress = BaseAddress + 0x300;
 
     [Fact]
-    public void DeleteEqueue_CompletesStagedWaiterAsDeleted()
+    public async Task DeleteEqueue_CompletesStagedWaiterAsDeleted()
     {
         var (memory, ctx, handle) = CreateEqueue();
-        var waiter = StageGuestWait(ctx, handle, threadHandle: 0x701);
+        var waiter = StartGuestWait(memory, handle, threadHandle: 0x701);
+        WaitUntilBlocked(0x701);
 
         ctx[CpuRegister.Rdi] = handle;
         Assert.Equal(
             (int)OrbisGen2Result.ORBIS_GEN2_OK,
             KernelEventQueueCompatExports.KernelDeleteEqueue(ctx));
 
-        Assert.True(waiter.TryWake());
         Assert.Equal(
             (int)OrbisGen2Result.ORBIS_GEN2_ERROR_DELETED,
-            waiter.Resume());
+            await waiter.WaitAsync(TimeSpan.FromSeconds(5)));
         Assert.Equal(0u, ReadUInt32(memory, OutCountAddress));
         Assert.False(KernelEventQueueCompatExports.IsValidEqueue(handle));
 
@@ -40,10 +40,11 @@ public sealed class KernelEventQueueWaiterLifetimeTests
     }
 
     [Fact]
-    public void DeletedGenerationWaiter_CannotConsumeNewQueueEvent()
+    public async Task DeletedGenerationWaiter_CannotConsumeNewQueueEvent()
     {
         var (memory, ctx, oldHandle) = CreateEqueue();
-        var oldWaiter = StageGuestWait(ctx, oldHandle, threadHandle: 0x702);
+        var oldWaiter = StartGuestWait(memory, oldHandle, threadHandle: 0x702);
+        WaitUntilBlocked(0x702);
 
         ctx[CpuRegister.Rdi] = oldHandle;
         Assert.Equal(
@@ -63,10 +64,9 @@ public sealed class KernelEventQueueWaiterLifetimeTests
             newHandle,
             expected));
 
-        Assert.True(oldWaiter.TryWake());
         Assert.Equal(
             (int)OrbisGen2Result.ORBIS_GEN2_ERROR_DELETED,
-            oldWaiter.Resume());
+            await oldWaiter.WaitAsync(TimeSpan.FromSeconds(5)));
         Assert.True(
             KernelEventQueueCompatExports.TryReservePendingEventForTest(
                 newHandle,
@@ -96,43 +96,36 @@ public sealed class KernelEventQueueWaiterLifetimeTests
         return ReadUInt64(memory, HandleAddress);
     }
 
-    private static IGuestThreadBlockWaiter StageGuestWait(
-        CpuContext ctx,
+    private static Task<int> StartGuestWait(
+        FakeCpuMemory memory,
         ulong handle,
         ulong threadHandle)
     {
-        var previousThread = GuestThreadExecution.EnterGuestThread(threadHandle);
-        var previousFrame = GuestThreadExecution.EnterImportCallFrame(
-            returnRip: 0x1_0000 + threadHandle,
-            resumeRsp: 0x2_0000 + threadHandle,
-            returnSlotAddress: 0x3_0000 + threadHandle);
-        try
+        return Task.Run(() =>
         {
+            var ctx = new CpuContext(memory, Generation.Gen5);
+            var previousThread = GuestThreadExecution.EnterGuestThread(threadHandle);
             ctx[CpuRegister.Rdi] = handle;
             ctx[CpuRegister.Rsi] = EventsAddress;
             ctx[CpuRegister.Rdx] = 1;
             ctx[CpuRegister.Rcx] = OutCountAddress;
             ctx[CpuRegister.R8] = 0;
-            Assert.Equal(
-                (int)OrbisGen2Result.ORBIS_GEN2_OK,
-                KernelEventQueueCompatExports.KernelWaitEqueue(ctx));
+            try
+            {
+                return KernelEventQueueCompatExports.KernelWaitEqueue(ctx);
+            }
+            finally
+            {
+                GuestThreadExecution.RestoreGuestThread(previousThread);
+            }
+        });
+    }
 
-            Assert.True(GuestThreadExecution.TryConsumeCurrentThreadBlock(
-                out var reason,
-                out _,
-                out var hasContinuation,
-                out _,
-                out var waiter,
-                out _));
-            Assert.Equal("sceKernelWaitEqueue", reason);
-            Assert.True(hasContinuation);
-            return Assert.IsAssignableFrom<IGuestThreadBlockWaiter>(waiter);
-        }
-        finally
-        {
-            GuestThreadExecution.RestoreImportCallFrame(previousFrame);
-            GuestThreadExecution.RestoreGuestThread(previousThread);
-        }
+    private static void WaitUntilBlocked(ulong threadHandle)
+    {
+        Assert.True(SpinWait.SpinUntil(
+            () => GuestThreadBlocking.DescribeBlock(threadHandle) is not null,
+            TimeSpan.FromSeconds(5)));
     }
 
     private static uint ReadUInt32(FakeCpuMemory memory, ulong address)

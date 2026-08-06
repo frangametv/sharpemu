@@ -4,6 +4,8 @@
 using SharpEmu.HLE;
 using System.Buffers;
 using System.Buffers.Binary;
+using System.Collections.Concurrent;
+using System.Globalization;
 using System.Runtime.CompilerServices;
 using System.Threading;
 
@@ -137,7 +139,7 @@ public static class KernelEventQueueCompatExports
                 return false;
             }
 
-            for (var i = index; i + 1 < Count; i++)
+            for (var i = index; i < Count - 1; i++)
             {
                 this[i] = this[i + 1];
             }
@@ -145,105 +147,7 @@ public static class KernelEventQueueCompatExports
             Count--;
             return true;
         }
-    }
 
-    private sealed class EqueueWaiter : IGuestThreadBlockWaiter
-    {
-        private enum WaitCompletion
-        {
-            Waiting,
-            Reserved,
-            TimedOut,
-            Deleted,
-        }
-
-        private KernelQueuedEvent[]? _reservedEvents;
-        private int _reservedCount;
-        private WaitCompletion _completion;
-
-        public required CpuContext Ctx { get; init; }
-        public required EventQueueState State { get; init; }
-        public required ulong EventsAddress { get; init; }
-        public required int EventCapacity { get; init; }
-        public required ulong OutCountAddress { get; init; }
-        public required long WaiterId { get; init; }
-
-        public int Resume()
-        {
-            KernelQueuedEvent[]? reservedEvents;
-            int reservedCount;
-            WaitCompletion completion;
-            lock (this)
-            {
-                if (_completion == WaitCompletion.Waiting)
-                {
-                    _completion = WaitCompletion.TimedOut;
-                }
-
-                completion = _completion;
-                reservedEvents = _reservedEvents;
-                reservedCount = _reservedCount;
-                _reservedEvents = null;
-                _reservedCount = 0;
-            }
-
-            var result = completion switch
-            {
-                WaitCompletion.Reserved when reservedEvents is not null =>
-                    DeliverReservedEvents(
-                        Ctx,
-                        reservedEvents,
-                        reservedCount,
-                        EventsAddress,
-                        OutCountAddress),
-                WaitCompletion.Deleted =>
-                    (int)OrbisGen2Result.ORBIS_GEN2_ERROR_DELETED,
-                _ => (int)OrbisGen2Result.ORBIS_GEN2_ERROR_TIMED_OUT,
-            };
-
-            if (_logEqueue)
-            {
-                TraceEventQueue(
-                    Ctx,
-                    "wait-resume",
-                    State.Handle,
-                    $"generation={State.Generation} waiter={WaiterId} " +
-                    $"capacity={EventCapacity} result=0x{unchecked((uint)result):X8}");
-            }
-            return result;
-        }
-
-        public bool TryWake()
-        {
-            lock (this)
-            {
-                if (_completion != WaitCompletion.Waiting)
-                {
-                    return true;
-                }
-
-                if (!TryReserveEvents(
-                        State,
-                        EventCapacity,
-                        out var events,
-                        out var count,
-                        out var deleted))
-                {
-                    if (deleted)
-                    {
-                        _completion = WaitCompletion.Deleted;
-                        return true;
-                    }
-
-                    return false;
-                }
-
-                _reservedEvents = events;
-                _reservedCount = count;
-                _completion = WaitCompletion.Reserved;
-                return true;
-            }
-        }
     }
 
     [SysAbiExport(
@@ -276,16 +180,15 @@ public static class KernelEventQueueCompatExports
             _registeredEvents[handle] = new Dictionary<(ulong Ident, short Filter), KernelEventRegistration>();
         }
 
-        if (!ctx.TryWriteUInt64(outAddress, handle))
+        if (!KernelMemoryCompatExports.TryWriteUInt64Compat(ctx, outAddress, handle))
         {
             lock (_eventQueueGate)
             {
-                state.Deleted = true;
                 _eventQueues.Remove(handle);
                 _pendingEvents.Remove(handle);
                 _registeredEvents.Remove(handle);
-                Monitor.PulseAll(_eventQueueGate);
             }
+
             return (int)OrbisGen2Result.ORBIS_GEN2_ERROR_MEMORY_FAULT;
         }
 
@@ -312,17 +215,11 @@ public static class KernelEventQueueCompatExports
             state.Deleted = true;
             _pendingEvents.Remove(handle);
             _registeredEvents.Remove(handle);
+            // Wake any thread parked on this queue so it observes the deletion.
             Monitor.PulseAll(_eventQueueGate);
         }
 
-        WakeEventQueue(
-            state,
-            _logEqueue ? $"source=delete generation={state.Generation}" : null);
-        TraceEventQueue(
-            ctx,
-            "delete",
-            handle,
-            $"generation={state.Generation}");
+        TraceEventQueue(ctx, "delete", handle);
         return (int)OrbisGen2Result.ORBIS_GEN2_OK;
     }
 
@@ -592,126 +489,30 @@ public static class KernelEventQueueCompatExports
             return (int)OrbisGen2Result.ORBIS_GEN2_OK;
         }
 
-        lock (_eventQueueGate)
-        {
-            if (!IsLiveEventQueueLocked(state))
-            {
-                return (int)OrbisGen2Result.ORBIS_GEN2_ERROR_DELETED;
-            }
-        }
-
-        if (IsSynchronousPoll(timeoutAddress, timeoutUsec))
-        {
-            if (_logEqueue)
-            {
-                TraceEventQueue(
-                    ctx,
-                    "wait-poll-timeout",
-                    handle,
-                    $"capacity={eventCapacity}");
-            }
-            return (int)OrbisGen2Result.ORBIS_GEN2_ERROR_TIMED_OUT;
-        }
-
         var waiterId = Interlocked.Increment(ref _nextEventQueueWaiterId);
-        if (timeoutAddress == 0)
+
+        // Host wait primitives only provide millisecond scheduling granularity.
+        // Treat shorter guest deadlines as cooperative polls once the queue has
+        // been checked: rounding (for example) a 1-us render-queue wait up to
+        // Monitor.Wait(1) slows it by three orders of magnitude and serializes
+        // the guest frame. A single yield for a non-zero deadline prevents a
+        // render thread from hot-polling millions of imports while allowing an
+        // event producer to run before the final check.
+        if (timeoutAddress != 0 && IsSubMillisecondPoll(timeoutUsec))
         {
-            var requestedBlock = GuestThreadExecution.RequestCurrentThreadBlock(
-                ctx,
-                "sceKernelWaitEqueue",
-                state.WakeKey,
-                new EqueueWaiter
-                {
-                    Ctx = ctx,
-                    State = state,
-                    EventsAddress = eventsAddress,
-                    EventCapacity = eventCapacity,
-                    OutCountAddress = outCountAddress,
-                    WaiterId = waiterId,
-                });
-            if (requestedBlock)
+            if (timeoutUsec != 0)
             {
-                var wakeAfterRegistration = false;
-                lock (_eventQueueGate)
+                Thread.Yield();
+                deliveredCount = DequeueEvents(ctx, state, eventsAddress, eventCapacity);
+                if (outCountAddress != 0 && !TryWriteUInt32(ctx, outCountAddress, (uint)deliveredCount))
                 {
-                    wakeAfterRegistration =
-                        !IsLiveEventQueueLocked(state) ||
-                        HasPendingEventsLocked(state.Handle);
+                    return (int)OrbisGen2Result.ORBIS_GEN2_ERROR_MEMORY_FAULT;
                 }
-
-                if (wakeAfterRegistration)
+                if (deliveredCount > 0)
                 {
-                    WakeEventQueue(
-                        state,
-                        _logEqueue
-                            ? "source=post-registration-state-check"
-                            : null);
+                    TraceEventQueue(ctx, "wait-deliver", handle);
+                    return (int)OrbisGen2Result.ORBIS_GEN2_OK;
                 }
-
-                if (_logEqueue)
-                {
-                    TraceEventQueue(
-                        ctx,
-                        "wait-block",
-                        handle,
-                        $"generation={state.Generation} waiter={waiterId} " +
-                        $"capacity={eventCapacity} timeout=infinite " +
-                        $"events=0x{eventsAddress:X16} out_count=0x{outCountAddress:X16}");
-                }
-                return (int)OrbisGen2Result.ORBIS_GEN2_OK;
-            }
-        }
-
-        if (timeoutAddress != 0)
-        {
-            var deadline = Environment.TickCount64 +
-                Math.Max(
-                    1L,
-                    (long)Math.Min(
-                        ((ulong)timeoutUsec + 999UL) / 1000UL,
-                        int.MaxValue));
-            lock (_eventQueueGate)
-            {
-                while (IsLiveEventQueueLocked(state) &&
-                       !HasPendingEventsLocked(handle))
-                {
-                    var remaining = deadline - Environment.TickCount64;
-                    if (remaining <= 0)
-                    {
-                        break;
-                    }
-
-                    Monitor.Wait(_eventQueueGate, (int)Math.Min(remaining, 100));
-                }
-
-                if (!IsLiveEventQueueLocked(state))
-                {
-                    return (int)OrbisGen2Result.ORBIS_GEN2_ERROR_DELETED;
-                }
-            }
-
-            deliveredCount = DequeueEvents(
-                ctx,
-                state,
-                eventsAddress,
-                eventCapacity);
-            if (outCountAddress != 0 && !TryWriteUInt32(ctx, outCountAddress, (uint)deliveredCount))
-            {
-                return (int)OrbisGen2Result.ORBIS_GEN2_ERROR_MEMORY_FAULT;
-            }
-
-            if (deliveredCount > 0)
-            {
-                if (_logEqueue)
-                {
-                    TraceEventQueue(
-                        ctx,
-                        "wait-timed-deliver",
-                        handle,
-                        $"waiter={waiterId} delivered={deliveredCount} capacity={eventCapacity} " +
-                        $"timeout_usec={timeoutUsec}");
-                }
-                return (int)OrbisGen2Result.ORBIS_GEN2_OK;
             }
 
             if (_logEqueue)
@@ -725,16 +526,95 @@ public static class KernelEventQueueCompatExports
             return (int)OrbisGen2Result.ORBIS_GEN2_ERROR_TIMED_OUT;
         }
 
-        if (_logEqueue)
+        // No events ready: block this host thread in place on the queue gate.
+        // Monitor.Wait releases the gate and parks atomically, so an
+        // EnqueueEvent/TriggerDisplayEvent PulseAll issued the instant after
+        // the emptiness check cannot be lost. kqueue/kevent semantics: sleep
+        // until an event matching a registration is delivered or the timeout
+        // (usec, infinite when the arg pointer is null) lapses; a zero timeout
+        // degrades to an instant poll.
+        long deadline;
+        if (timeoutAddress == 0)
         {
-            TraceEventQueue(
-                ctx,
-                "wait",
-                handle,
-                $"waiter={waiterId} capacity={eventCapacity} timeout_usec={timeoutUsec}");
+            deadline = long.MaxValue;
         }
+        else if (timeoutUsec == 0)
+        {
+            deadline = 0;
+        }
+        else
+        {
+            deadline = Environment.TickCount64 + Math.Max(1L, timeoutUsec / 1000L);
+        }
+
+        TraceEventQueue(ctx, "wait-block", handle);
+        var guestThreadHandle = GuestThreadExecution.CurrentGuestThreadHandle;
+        GuestThreadBlocking.NoteBlocked(
+            guestThreadHandle,
+            $"sceKernelWaitEqueue handle=0x{handle:X16} capacity={eventCapacity} " +
+            $"timeout={(timeoutAddress == 0 ? "infinite" : $"{timeoutUsec}us")}");
+        try
+        {
+            lock (_eventQueueGate)
+            {
+                while (true)
+                {
+                    if ((_pendingEvents.TryGetValue(handle, out var queue) && queue.Count != 0) ||
+                        !_eventQueues.ContainsKey(handle) ||
+                        GuestThreadBlocking.ShutdownRequested)
+                    {
+                        break;
+                    }
+
+                    var remaining = deadline - Environment.TickCount64;
+                    if (timeoutAddress != 0 && remaining <= 0)
+                    {
+                        break;
+                    }
+
+                    var slice = timeoutAddress == 0
+                        ? GuestThreadBlocking.WaitSliceMilliseconds
+                        : (int)Math.Min(remaining, GuestThreadBlocking.WaitSliceMilliseconds);
+                    GuestThreadBlocking.Checkpoint(guestThreadHandle, _eventQueueGate);
+                    _ = Monitor.Wait(_eventQueueGate, slice);
+                }
+            }
+        }
+        finally
+        {
+            GuestThreadBlocking.NoteUnblocked(guestThreadHandle);
+        }
+
+        deliveredCount = DequeueEvents(ctx, state, eventsAddress, eventCapacity);
+        if (outCountAddress != 0 && !TryWriteUInt32(ctx, outCountAddress, (uint)deliveredCount))
+        {
+            return (int)OrbisGen2Result.ORBIS_GEN2_ERROR_MEMORY_FAULT;
+        }
+
+        if (deliveredCount > 0)
+        {
+            TraceEventQueue(ctx, "wait-deliver", handle);
+            return (int)OrbisGen2Result.ORBIS_GEN2_OK;
+        }
+
+        if (state.Deleted)
+        {
+            TraceEventQueue(ctx, "wait-deleted", handle);
+            return (int)OrbisGen2Result.ORBIS_GEN2_ERROR_DELETED;
+        }
+
+        if (timeoutAddress != 0)
+        {
+            TraceEventQueue(ctx, "wait-timeout", handle);
+            return (int)OrbisGen2Result.ORBIS_GEN2_ERROR_TIMED_OUT;
+        }
+
+        // Reached only on queue deletion or teardown; the guest sees zero events.
+        TraceEventQueue(ctx, "wait", handle);
         return (int)OrbisGen2Result.ORBIS_GEN2_OK;
     }
+
+    internal static bool IsSubMillisecondPoll(uint timeoutUsec) => timeoutUsec < 1_000;
 
     public static bool IsValidEqueue(ulong handle)
     {
@@ -784,6 +664,8 @@ public static class KernelEventQueueCompatExports
 
     public static bool EnqueueEvent(ulong handle, KernelQueuedEvent queuedEvent)
     {
+        var queued = false;
+        var pendingCount = 0;
         EventQueueState state;
         lock (_eventQueueGate)
         {
@@ -800,15 +682,15 @@ public static class KernelEventQueueCompatExports
             }
 
             queue.AddLast(queuedEvent);
-            Monitor.PulseAll(_eventQueueGate);
+            queued = true;
+            pendingCount = queue.Count;
         }
 
-        WakeEventQueue(
-            state,
-            _logEqueue
-                ? $"source=enqueue ident=0x{queuedEvent.Ident:X16} " +
-                  $"filter={queuedEvent.Filter} data=0x{queuedEvent.Data:X16}"
-                : null);
+        if (queued)
+        {
+            TraceTargetedProducer(handle, "enqueue", queuedEvent, pendingCount);
+            WakeEventQueue(state);
+        }
 
         return true;
     }
@@ -986,8 +868,9 @@ public static class KernelEventQueueCompatExports
         short filter,
         ulong data)
     {
-        List<EventQueueState>? wakeQueues = null;
+        var shouldWake = false;
         var triggeredCount = 0;
+        List<(ulong Handle, KernelQueuedEvent Event, int PendingCount)>? tracedEvents = null;
         lock (_eventQueueGate)
         {
             foreach (var (handle, registrations) in _registeredEvents)
@@ -1005,30 +888,33 @@ public static class KernelEventQueueCompatExports
                     _pendingEvents[handle] = queue;
                 }
 
-                QueueOrUpdateEvent(
-                    queue,
-                    new KernelQueuedEvent(
-                        registration.Ident,
-                        registration.Filter,
-                        registration.Flags,
-                        1,
-                        data,
-                        registration.UserData));
-                (wakeQueues ??= []).Add(state);
+                var queuedEvent = new KernelQueuedEvent(
+                    registration.Ident,
+                    registration.Filter,
+                    0,
+                    1,
+                    data,
+                    registration.UserData);
+                QueueOrUpdateEvent(queue, queuedEvent);
+                CaptureTargetedProducer(
+                    ref tracedEvents,
+                    handle,
+                    queuedEvent,
+                    queue.Count);
+                shouldWake = true;
                 triggeredCount++;
             }
         }
 
-        if (wakeQueues is not null)
+        TraceTargetedProducers("registered_exact", tracedEvents);
+
+        if (shouldWake)
         {
-            foreach (var state in wakeQueues)
-            {
-                WakeEventQueue(
-                    state,
-                    _logEqueue
-                        ? $"source=trigger ident=0x{ident:X16} filter={filter} data=0x{data:X16}"
-                        : null);
-            }
+            // Every queue waiter shares _eventQueueGate and WakeEventQueue
+            // pulses that single monitor. One pulse-all wakes all matching
+            // queues; repeating it once per handle only creates lock and
+            // scheduler contention under dense GPU EVENT_WRITE traffic.
+            WakeEventQueue(0);
         }
 
         return triggeredCount;
@@ -1045,8 +931,9 @@ public static class KernelEventQueueCompatExports
         short filter,
         ulong data)
     {
-        List<EventQueueState>? wakeQueues = null;
+        var shouldWake = false;
         var triggeredCount = 0;
+        List<(ulong Handle, KernelQueuedEvent Event, int PendingCount)>? tracedEvents = null;
         lock (_eventQueueGate)
         {
             foreach (var (handle, registrations) in _registeredEvents)
@@ -1070,16 +957,20 @@ public static class KernelEventQueueCompatExports
                         _pendingEvents[handle] = queue;
                     }
 
-                    QueueOrUpdateEvent(
-                        queue,
-                        new KernelQueuedEvent(
-                            registration.Ident,
-                            registration.Filter,
-                            registration.Flags,
-                            1,
-                            data,
-                            registration.UserData));
-                    (wakeQueues ??= []).Add(state);
+                    var queuedEvent = new KernelQueuedEvent(
+                        registration.Ident,
+                        registration.Filter,
+                        registration.Flags,
+                        1,
+                        data,
+                        registration.UserData);
+                    QueueOrUpdateEvent(queue, queuedEvent);
+                    CaptureTargetedProducer(
+                        ref tracedEvents,
+                        handle,
+                        queuedEvent,
+                        queue.Count);
+                    shouldWake = true;
                     triggeredCount++;
 
                     // A single queue only needs to be woken once, even if multiple
@@ -1089,16 +980,11 @@ public static class KernelEventQueueCompatExports
             }
         }
 
-        if (wakeQueues is not null)
+        TraceTargetedProducers("registered_filter", tracedEvents);
+
+        if (shouldWake)
         {
-            foreach (var state in wakeQueues)
-            {
-                WakeEventQueue(
-                    state,
-                    _logEqueue
-                        ? $"source=trigger-filter filter={filter} data=0x{data:X16}"
-                        : null);
-            }
+            WakeEventQueue(0);
         }
 
         return triggeredCount;
@@ -1113,8 +999,9 @@ public static class KernelEventQueueCompatExports
     /// </summary>
     public static int TriggerRegisteredEventsDistinct(short filter)
     {
-        HashSet<EventQueueState>? wakeQueues = null;
+        var shouldWake = false;
         var triggeredCount = 0;
+        List<(ulong Handle, KernelQueuedEvent Event, int PendingCount)>? tracedEvents = null;
         lock (_eventQueueGate)
         {
             foreach (var (handle, registrations) in _registeredEvents)
@@ -1138,29 +1025,30 @@ public static class KernelEventQueueCompatExports
                         _pendingEvents[handle] = queue;
                     }
 
-                    QueueOrUpdateEvent(
-                        queue,
-                        new KernelQueuedEvent(
-                            registration.Ident,
-                            registration.Filter,
-                            registration.Flags,
-                            1,
-                            registration.Ident,
-                            registration.UserData));
-                    (wakeQueues ??= []).Add(state);
+                    var queuedEvent = new KernelQueuedEvent(
+                        registration.Ident,
+                        registration.Filter,
+                        0,
+                        1,
+                        registration.Ident,
+                        registration.UserData);
+                    QueueOrUpdateEvent(queue, queuedEvent);
+                    CaptureTargetedProducer(
+                        ref tracedEvents,
+                        handle,
+                        queuedEvent,
+                        queue.Count);
+                    shouldWake = true;
                     triggeredCount++;
                 }
             }
         }
 
-        if (wakeQueues is not null)
+        TraceTargetedProducers("registered_distinct", tracedEvents);
+
+        if (shouldWake)
         {
-            foreach (var state in wakeQueues)
-            {
-                WakeEventQueue(
-                    state,
-                    _logEqueue ? $"source=trigger-distinct filter={filter}" : null);
-            }
+            WakeEventQueue(0);
         }
 
         return triggeredCount;
@@ -1172,6 +1060,8 @@ public static class KernelEventQueueCompatExports
         short filter,
         ulong userData)
     {
+        KernelQueuedEvent queuedEvent;
+        var pendingCount = 0;
         EventQueueState state;
         lock (_eventQueueGate)
         {
@@ -1189,23 +1079,19 @@ public static class KernelEventQueueCompatExports
                 _pendingEvents[handle] = queue;
             }
 
-            QueueOrUpdateEvent(
-                queue,
-                new KernelQueuedEvent(
-                    registration.Ident,
-                    registration.Filter,
-                    registration.Flags,
-                    0,
-                    0,
-                    userData));
+            queuedEvent = new KernelQueuedEvent(
+                registration.Ident,
+                registration.Filter,
+                registration.Flags,
+                0,
+                0,
+                userData);
+            QueueOrUpdateEvent(queue, queuedEvent);
+            pendingCount = queue.Count;
         }
 
-        WakeEventQueue(
-            state,
-            _logEqueue
-                ? $"source=trigger-one ident=0x{ident:X16} filter={filter} " +
-                  $"user_data=0x{userData:X16}"
-                : null);
+        TraceTargetedProducer(handle, "registered_direct", queuedEvent, pendingCount);
+        WakeEventQueue(state);
         return true;
     }
 
@@ -1216,6 +1102,9 @@ public static class KernelEventQueueCompatExports
         ulong eventHint,
         ulong userData)
     {
+        var triggered = false;
+        var triggeredEvent = default(KernelQueuedEvent);
+        var pendingCount = 0;
         EventQueueState state;
         lock (_eventQueueGate)
         {
@@ -1240,7 +1129,7 @@ public static class KernelEventQueueCompatExports
 
             var timeBits = unchecked((ulong)Environment.TickCount64) & 0xFFFUL;
             var eventData = timeBits | (count << 12) | (eventHint & 0xFFFF_FFFF_FFFF_0000UL);
-            var triggeredEvent = new KernelQueuedEvent(
+            triggeredEvent = new KernelQueuedEvent(
                 ident,
                 filter,
                 0x20,
@@ -1256,52 +1145,18 @@ public static class KernelEventQueueCompatExports
             {
                 events.AddLast(triggeredEvent);
             }
+
+            triggered = true;
+            pendingCount = events.Count;
         }
 
-        WakeEventQueue(
-            state,
-            _logEqueue
-                ? $"source=display ident=0x{ident:X16} filter={filter} hint=0x{eventHint:X16}"
-                : null);
+        if (triggered)
+        {
+            TraceTargetedProducer(handle, "display", triggeredEvent, pendingCount);
+            WakeEventQueue(state);
+        }
 
         return true;
-    }
-
-    private static int DeliverReservedEvents(
-        CpuContext ctx,
-        KernelQueuedEvent[] events,
-        int count,
-        ulong eventsAddress,
-        ulong outCountAddress)
-    {
-        var deliveredCount = 0;
-        try
-        {
-            for (; deliveredCount < count; deliveredCount++)
-            {
-                if (!WriteKernelEvent(
-                        ctx,
-                        eventsAddress + ((ulong)deliveredCount * KernelEventSize),
-                        events[deliveredCount]))
-                {
-                    return (int)OrbisGen2Result.ORBIS_GEN2_ERROR_MEMORY_FAULT;
-                }
-            }
-
-            if (outCountAddress != 0 &&
-                !TryWriteUInt32(ctx, outCountAddress, (uint)deliveredCount))
-            {
-                return (int)OrbisGen2Result.ORBIS_GEN2_ERROR_MEMORY_FAULT;
-            }
-
-            return deliveredCount > 0
-                ? (int)OrbisGen2Result.ORBIS_GEN2_OK
-                : (int)OrbisGen2Result.ORBIS_GEN2_ERROR_TIMED_OUT;
-        }
-        finally
-        {
-            ArrayPool<KernelQueuedEvent>.Shared.Return(events);
-        }
     }
 
     private static void QueueOrUpdateEvent(
@@ -1323,9 +1178,19 @@ public static class KernelEventQueueCompatExports
         };
     }
 
-    private static void WakeEventQueue(
-        EventQueueState state,
-        string? detail = null)
+    // Wake threads parked in-place on the queue gate; each re-checks for a
+    // matching pending event. The handle is unused (all queues share one gate)
+    // but kept in the signature so call sites read intent-fully.
+    private static void WakeEventQueue(ulong handle)
+    {
+        _ = handle;
+        lock (_eventQueueGate)
+        {
+            Monitor.PulseAll(_eventQueueGate);
+        }
+    }
+
+    private static void WakeEventQueue(EventQueueState state, string? detail = null)
     {
         if (_logEqueue)
         {
@@ -1335,7 +1200,8 @@ public static class KernelEventQueueCompatExports
                 $"generation={state.Generation}" +
                 (detail is null ? string.Empty : $" {detail}"));
         }
-        _ = GuestThreadExecution.Scheduler?.WakeBlockedThreads(state.WakeKey);
+
+        WakeEventQueue(state.Handle);
     }
 
     private static int DequeueEvents(
@@ -1371,6 +1237,8 @@ public static class KernelEventQueueCompatExports
                 {
                     break;
                 }
+
+                TraceTargetedDelivery(state.Handle, events[deliveredCount], count);
             }
         }
         finally
@@ -1494,8 +1362,72 @@ public static class KernelEventQueueCompatExports
     private static readonly bool _logEqueue =
         string.Equals(Environment.GetEnvironmentVariable("SHARPEMU_LOG_EQUEUE"), "1", StringComparison.Ordinal);
 
+    // Sample one hot guest call site without turning a sub-microsecond equeue
+    // poll into an unbounded log stream. Set the guest return RIP in hex; once
+    // matched, producer and delivery traces follow the resolved queue handle.
+    private static readonly ulong _traceEqueueReturnRip = ParseTraceEqueueReturnRip();
+    private static readonly ulong _traceEqueueHandleFilter = ParseTraceEqueueHandle();
+    private static long _traceEqueueHandle = unchecked((long)_traceEqueueHandleFilter);
+    private static long _traceEqueueWaitCount;
+    private static long _traceEqueueProducerCount;
+    private static long _traceEqueueDeliveryCount;
+
     private static void TraceEventQueue(
         CpuContext ctx,
+        string operation,
+        ulong handle,
+        string? detail = null)
+    {
+        if (!_logEqueue && _traceEqueueReturnRip == 0)
+        {
+            return;
+        }
+
+        var returnRip = 0UL;
+        _ = ctx.TryReadUInt64(ctx[CpuRegister.Rsp], out returnRip);
+        var targeted = _traceEqueueReturnRip != 0 &&
+            returnRip == _traceEqueueReturnRip &&
+            (_traceEqueueHandleFilter == 0 || handle == _traceEqueueHandleFilter);
+        if (!targeted && !_logEqueue)
+        {
+            return;
+        }
+
+        var sampleCount = 0L;
+        if (targeted)
+        {
+            Interlocked.CompareExchange(ref _traceEqueueHandle, unchecked((long)handle), 0);
+            sampleCount = Interlocked.Increment(ref _traceEqueueWaitCount);
+            if (!_logEqueue && !ShouldSampleHotTrace(sampleCount))
+            {
+                return;
+            }
+        }
+
+        var timeoutAddress = ctx[CpuRegister.R8];
+        var timeoutDescription = timeoutAddress == 0
+            ? "infinite"
+            : TryReadUInt32(ctx, timeoutAddress, out var timeoutUsec)
+                ? $"{timeoutUsec}us"
+                : "unreadable";
+        var guestThreadHandle = GuestThreadExecution.CurrentGuestThreadHandle;
+        var guestThreadName = KernelPthreadState.TryGetThreadIdentity(
+            guestThreadHandle,
+            out var guestIdentity)
+            ? guestIdentity.Name
+            : "<unregistered>";
+        Console.Error.WriteLine(
+            $"[LOADER][TRACE] equeue.{operation}: handle=0x{handle:X16} " +
+            $"sample={sampleCount} ticks={Environment.TickCount64} " +
+            $"rsi=0x{ctx[CpuRegister.Rsi]:X16} rdx=0x{ctx[CpuRegister.Rdx]:X16} " +
+            $"r8=0x{timeoutAddress:X16} timeout={timeoutDescription} " +
+            $"guest=0x{guestThreadHandle:X16} name=\"{guestThreadName}\" " +
+            $"host={Environment.CurrentManagedThreadId} ret=0x{returnRip:X16} " +
+            (string.IsNullOrWhiteSpace(detail) ? string.Empty : $"{detail} ") +
+            $"{DescribeEventQueue(handle)}");
+    }
+
+    private static void TraceEventQueueHost(
         string operation,
         ulong handle,
         string? detail = null)
@@ -1505,40 +1437,160 @@ public static class KernelEventQueueCompatExports
             return;
         }
 
-        var suffix = string.IsNullOrWhiteSpace(detail) ? string.Empty : $" {detail}";
         Console.Error.WriteLine(
             $"[LOADER][TRACE] equeue.{operation}: handle=0x{handle:X16} " +
-            $"depth={GetPendingEventCount(handle)} registrations={GetRegistrationCount(handle)}" +
-            $"{suffix} {KernelSyncTraceFormatter.FormatContext(ctx)}");
+            (string.IsNullOrWhiteSpace(detail) ? string.Empty : $"{detail} ") +
+            DescribeEventQueue(handle));
     }
 
-    private static void TraceEventQueueHost(
-        string operation,
+    private static ulong ParseTraceEqueueReturnRip()
+    {
+        var raw = Environment.GetEnvironmentVariable("SHARPEMU_TRACE_EQUEUE_RETURN_RIP");
+        if (string.IsNullOrWhiteSpace(raw))
+        {
+            return 0;
+        }
+
+        raw = raw.Trim();
+        if (raw.StartsWith("0x", StringComparison.OrdinalIgnoreCase))
+        {
+            raw = raw[2..];
+        }
+
+        return ulong.TryParse(raw, NumberStyles.AllowHexSpecifier, CultureInfo.InvariantCulture, out var value)
+            ? value
+            : 0;
+    }
+
+    private static ulong ParseTraceEqueueHandle()
+    {
+        var raw = Environment.GetEnvironmentVariable("SHARPEMU_TRACE_EQUEUE_HANDLE");
+        if (string.IsNullOrWhiteSpace(raw))
+        {
+            return 0;
+        }
+
+        raw = raw.Trim();
+        var style = NumberStyles.Integer;
+        if (raw.StartsWith("0x", StringComparison.OrdinalIgnoreCase))
+        {
+            raw = raw[2..];
+            style = NumberStyles.AllowHexSpecifier;
+        }
+
+        return ulong.TryParse(raw, style, CultureInfo.InvariantCulture, out var value)
+            ? value
+            : 0;
+    }
+
+    private static bool IsTargetedTraceHandle(ulong handle) =>
+        _traceEqueueReturnRip != 0 &&
+        unchecked((ulong)Volatile.Read(ref _traceEqueueHandle)) == handle;
+
+    private static bool ShouldSampleHotTrace(long count) =>
+        count <= 16 ||
+        (count & (count - 1)) == 0 ||
+        count % 1_000_000 == 0;
+
+    private static bool ShouldSampleEventTrace(long count) =>
+        count <= 128 || count % 60 == 0;
+
+    private static void CaptureTargetedProducer(
+        ref List<(ulong Handle, KernelQueuedEvent Event, int PendingCount)>? tracedEvents,
         ulong handle,
-        string? detail = null)
+        KernelQueuedEvent queuedEvent,
+        int pendingCount)
     {
-        var suffix = string.IsNullOrWhiteSpace(detail) ? string.Empty : $" {detail}";
+        if (!IsTargetedTraceHandle(handle))
+        {
+            return;
+        }
+
+        (tracedEvents ??= new()).Add((handle, queuedEvent, pendingCount));
+    }
+
+    private static void TraceTargetedProducers(
+        string source,
+        List<(ulong Handle, KernelQueuedEvent Event, int PendingCount)>? tracedEvents)
+    {
+        if (tracedEvents is null)
+        {
+            return;
+        }
+
+        foreach (var tracedEvent in tracedEvents)
+        {
+            TraceTargetedProducer(
+                tracedEvent.Handle,
+                source,
+                tracedEvent.Event,
+                tracedEvent.PendingCount);
+        }
+    }
+
+    private static void TraceTargetedProducer(
+        ulong handle,
+        string source,
+        KernelQueuedEvent queuedEvent,
+        int pendingCount)
+    {
+        if (!IsTargetedTraceHandle(handle))
+        {
+            return;
+        }
+
+        var count = Interlocked.Increment(ref _traceEqueueProducerCount);
+        if (!ShouldSampleEventTrace(count))
+        {
+            return;
+        }
+
         Console.Error.WriteLine(
-            $"[LOADER][TRACE] equeue.{operation}: handle=0x{handle:X16} " +
-            $"depth={GetPendingEventCount(handle)} registrations={GetRegistrationCount(handle)} " +
-            $"{KernelSyncTraceFormatter.FormatCurrentThread()}{suffix}");
+            $"[LOADER][TRACE] equeue.producer: sample={count} ticks={Environment.TickCount64} " +
+            $"source={source} handle=0x{handle:X16} pending={pendingCount} " +
+            DescribeEvent(queuedEvent));
     }
 
-    private static int GetPendingEventCount(ulong handle)
+    private static void TraceTargetedDelivery(
+        ulong handle,
+        KernelQueuedEvent queuedEvent,
+        int deliveredCount)
+    {
+        if (!IsTargetedTraceHandle(handle))
+        {
+            return;
+        }
+
+        var count = Interlocked.Increment(ref _traceEqueueDeliveryCount);
+        if (!ShouldSampleEventTrace(count))
+        {
+            return;
+        }
+
+        Console.Error.WriteLine(
+            $"[LOADER][TRACE] equeue.delivery: sample={count} ticks={Environment.TickCount64} " +
+            $"handle=0x{handle:X16} batch={deliveredCount} {DescribeEvent(queuedEvent)}");
+    }
+
+    private static string DescribeEventQueue(ulong handle)
     {
         lock (_eventQueueGate)
         {
-            return _pendingEvents.TryGetValue(handle, out var events) ? events.Count : 0;
+            var registrations = _registeredEvents.TryGetValue(handle, out var registered)
+                ? string.Join(",", registered.Values.Select(static value =>
+                    $"0x{value.Ident:X}/f{value.Filter}/u0x{value.UserData:X}"))
+                : string.Empty;
+            var pending = _pendingEvents.TryGetValue(handle, out var queue)
+                ? queue.Count
+                : 0;
+            return $"registrations=[{registrations}] pending={pending}";
         }
     }
 
-    private static int GetRegistrationCount(ulong handle)
-    {
-        lock (_eventQueueGate)
-        {
-            return _registeredEvents.TryGetValue(handle, out var events) ? events.Count : 0;
-        }
-    }
+    private static string DescribeEvent(KernelQueuedEvent queuedEvent) =>
+        $"ident=0x{queuedEvent.Ident:X16} filter={queuedEvent.Filter} " +
+        $"flags=0x{queuedEvent.Flags:X4} fflags=0x{queuedEvent.Fflags:X8} " +
+        $"data=0x{queuedEvent.Data:X16} userdata=0x{queuedEvent.UserData:X16}";
 
     private static bool TryWriteUInt32(CpuContext ctx, ulong address, uint value)
     {

@@ -1,0 +1,30 @@
+{
+  "configured_cpu_cap": 2,
+  "evidence": [
+    {
+      "defined_body_count": 1,
+      "job": "job-000",
+      "missing_symbol_count": 0,
+      "provider_label": "libkernel",
+      "sha256": "4d2970bea8e27e1446c5f24fd927a2f9012f489c58ec1b40a5e8050e18d92c44",
+      "symbol_only_count": 1,
+      "target_count": 2
+    }
+  ],
+  "failed_jobs": 0,
+  "format": "sharpemu-rho-wave-summary-v1",
+  "launched_jobs": 1,
+  "max_cpu_per_job": 2,
+  "max_parallel_jobs": 1,
+  "peak_active_java": 5,
+  "peak_cpu_cores": 2.43,
+  "peak_cpu_percent": 243.0,
+  "peak_load1": 1.19,
+  "peak_rss_kb": 652904,
+  "result_jobs": 1,
+  "sample_count": 27,
+  "status_codes": [
+    0
+  ],
+  "successful_jobs": 1
+}

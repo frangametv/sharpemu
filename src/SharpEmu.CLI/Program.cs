@@ -94,6 +94,14 @@ internal static partial class Program
             return GuiLauncher.Run();
         }
 
+        if (args.Any(argument =>
+                string.Equals(argument, "--system-ui-preflight", StringComparison.OrdinalIgnoreCase)))
+        {
+            EnsureCliConsole();
+            UseUtf8ConsoleOutput();
+            return RunSystemUiPreflight(args);
+        }
+
         // The executable uses the GUI subsystem, so CLI mode has to connect
         // itself to a console before the first write.
         EnsureCliConsole();
@@ -246,7 +254,9 @@ internal static partial class Program
                 out var runtimeOptions,
                 out var videoOptions,
                 out var logLevel,
-                out var logFilePath))
+                out var logFilePath,
+                out var systemUiPreflight) ||
+            systemUiPreflight)
         {
             PrintUsage();
             return 1;
@@ -274,6 +284,19 @@ internal static partial class Program
         {
             Log.Error($"EBOOT file was not found: {ebootPath}");
             return 2;
+        }
+
+        if (runtimeOptions.BootMode == SharpEmuBootMode.SystemUi)
+        {
+            try
+            {
+                _ = SystemSoftwareLayout.Create(runtimeOptions.SystemRoot, ebootPath);
+            }
+            catch (Exception ex) when (ex is ArgumentException or IOException or UnauthorizedAccessException)
+            {
+                Log.Error($"System UI layout is invalid: {ex.Message}");
+                return 2;
+            }
         }
 
         if (!TryGetDebugServerOptions(args, out var debugServerEnabled, out var debugServerOptions, out var debugServerError))
@@ -987,10 +1010,48 @@ internal static partial class Program
         return builder.ToString();
     }
 
+    private static int RunSystemUiPreflight(string[] args)
+    {
+        if (!TryParseArguments(
+                args,
+                out var entryPath,
+                out var runtimeOptions,
+                out _,
+                out var logLevel,
+                out _,
+                out var systemUiPreflight) ||
+            !systemUiPreflight ||
+            runtimeOptions.BootMode != SharpEmuBootMode.SystemUi)
+        {
+            PrintUsage();
+            return 1;
+        }
+
+        SharpEmuLog.MinimumLevel = logLevel;
+        Log.Info(BuildInfo.Banner);
+        try
+        {
+            var layout = SystemSoftwareLayout.Create(runtimeOptions.SystemRoot, entryPath);
+            Log.Info(layout.BuildDiagnosticSummary());
+            layout.EnsureEntryIsLoadable();
+            Log.Info("Preflight completed without modifying the supplied system-software tree.");
+            return 0;
+        }
+        catch (Exception ex) when (
+            ex is ArgumentException or IOException or InvalidDataException or UnauthorizedAccessException)
+        {
+            Log.Error($"System UI preflight failed: {ex.Message}");
+            return 2;
+        }
+    }
+
     private static void PrintUsage()
     {
         Log.Info("Usage: SharpEmu.CLI [--strict] [--trace-imports[=N]] [--cpu-engine=<native>] [--log-level=<level>] [--log-file[=<path>]] [--window-mode=<windowed|borderless|exclusive>] [--resolution=<WIDTHxHEIGHT>] [--display=<N>] [--refresh-rate=<HZ>] [--scaling=<fit|cover|stretch|integer>] [--vsync=<on|off>] [--hdr=<auto|on|off>] [--debug-server[=host:port]] <path-to-eboot.bin>");
+        Log.Info("       SharpEmu.CLI --system-ui --system-root=<extracted-root> [options] <path-to-shell.self>");
+        Log.Info("       SharpEmu.CLI --system-ui-preflight --system-root=<extracted-root> <path-to-shell.self>");
         Log.Info(@"Example: SharpEmu.CLI --cpu-engine=native --trace-imports=64 --log-level=debug --log-file ""E:\Games\...\eboot.bin""");
+        Log.Info(@"System UI example: SharpEmu.CLI --system-ui --system-root=""D:\SystemSoftware"" ""D:\SystemSoftware\system\shell.self""");
         Log.Info("Debug server: --debug-server starts a live debug listener (default 127.0.0.1:5714); connect with SharpEmu.DebugClient.");
     }
 
@@ -1036,8 +1097,10 @@ internal static partial class Program
         out SharpEmuRuntimeOptions runtimeOptions,
         out HostVideoOptions videoOptions,
         out LogLevel logLevel,
-        out string? logFilePath)
+        out string? logFilePath,
+        out bool systemUiPreflight)
     {
+        systemUiPreflight = false;
         if (args.Length == 0)
         {
             ebootPath = string.Empty;
@@ -1050,6 +1113,7 @@ internal static partial class Program
 
         var strictDynlibResolution = false;
         var importTraceLimit = 0;
+        var importTraceSpecified = false;
         var cpuEngine = CpuExecutionEngine.NativeOnly;
         HostWindowMode? windowModeOverride = null;
         HostScalingMode? scalingModeOverride = null;
@@ -1061,6 +1125,8 @@ internal static partial class Program
         HostHdrMode? hdrModeOverride = null;
         videoOptions = HostVideoOptions.Default;
         logFilePath = null;
+        var bootMode = SharpEmuBootMode.Game;
+        string? systemRoot = null;
         logLevel = SharpEmuLog.MinimumLevel;
         var pathTokens = new List<string>(args.Length);
         for (var i = 0; i < args.Length; i++)
@@ -1150,6 +1216,32 @@ internal static partial class Program
                 continue;
             }
 
+            if (string.Equals(argument, "--system-ui", StringComparison.OrdinalIgnoreCase))
+            {
+                bootMode = SharpEmuBootMode.SystemUi;
+                continue;
+            }
+
+            if (string.Equals(argument, "--system-ui-preflight", StringComparison.OrdinalIgnoreCase))
+            {
+                bootMode = SharpEmuBootMode.SystemUi;
+                systemUiPreflight = true;
+                continue;
+            }
+
+            if (string.Equals(argument, "--system-root", StringComparison.OrdinalIgnoreCase))
+            {
+                if (i + 1 >= args.Length || string.IsNullOrWhiteSpace(args[i + 1]))
+                {
+                    ebootPath = string.Empty;
+                    runtimeOptions = default;
+                    return false;
+                }
+
+                systemRoot = args[++i];
+                continue;
+            }
+
             // The debug-server endpoint is parsed separately (see
             // TryGetDebugServerOptions); accept the flag here so it is not
             // rejected as an unknown option or mistaken for the eboot path.
@@ -1161,6 +1253,7 @@ internal static partial class Program
 
             if (string.Equals(argument, "--trace-imports", StringComparison.OrdinalIgnoreCase))
             {
+                importTraceSpecified = true;
                 importTraceLimit = DefaultImportTraceLimit;
                 if (i + 1 < args.Length && int.TryParse(args[i + 1], out var explicitLimit))
                 {
@@ -1249,6 +1342,7 @@ internal static partial class Program
             const string tracePrefix = "--trace-imports=";
             if (argument.StartsWith(tracePrefix, StringComparison.OrdinalIgnoreCase))
             {
+                importTraceSpecified = true;
                 var valueText = argument[tracePrefix.Length..];
                 if (!int.TryParse(valueText, out importTraceLimit))
                 {
@@ -1277,6 +1371,20 @@ internal static partial class Program
                 continue;
             }
 
+            const string systemRootPrefix = "--system-root=";
+            if (argument.StartsWith(systemRootPrefix, StringComparison.OrdinalIgnoreCase))
+            {
+                systemRoot = argument[systemRootPrefix.Length..];
+                if (string.IsNullOrWhiteSpace(systemRoot))
+                {
+                    ebootPath = string.Empty;
+                    runtimeOptions = default;
+                    return false;
+                }
+
+                continue;
+            }
+
             if (argument.StartsWith("--", StringComparison.Ordinal))
             {
                 ebootPath = string.Empty;
@@ -1298,12 +1406,28 @@ internal static partial class Program
             return false;
         }
 
+        if ((bootMode == SharpEmuBootMode.SystemUi && string.IsNullOrWhiteSpace(systemRoot)) ||
+            (bootMode == SharpEmuBootMode.Game && !string.IsNullOrWhiteSpace(systemRoot)))
+        {
+            ebootPath = string.Empty;
+            runtimeOptions = default;
+            logLevel = SharpEmuLog.MinimumLevel;
+            return false;
+        }
+
+        if (bootMode == SharpEmuBootMode.SystemUi && !importTraceSpecified)
+        {
+            importTraceLimit = 256;
+        }
+
         ebootPath = string.Join(' ', pathTokens);
         runtimeOptions = new SharpEmuRuntimeOptions
         {
             CpuEngine = cpuEngine,
             StrictDynlibResolution = strictDynlibResolution,
             ImportTraceLimit = importTraceLimit,
+            BootMode = bootMode,
+            SystemRoot = systemRoot,
         };
         var configuredVideoOptions = LoadConfiguredVideoOptions(ebootPath);
         videoOptions = (configuredVideoOptions with

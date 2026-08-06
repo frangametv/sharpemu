@@ -1,0 +1,70 @@
+{
+  "executable_sha256": "d07ff61fa98adff1f0bdde7f1df03d33133e932a9da82ce1005d4784bc948755",
+  "format": "sharpemu-ghidra-selected-nid-functions-v1",
+  "function_count": 3,
+  "functions": [
+    {
+      "external": false,
+      "function_body_addresses": 382,
+      "function_body_sha256": "9be216f92ae11ef9064e21b2ae46ef29a8a93c4a66175dee220941b8839c9630",
+      "function_entry": "00027100",
+      "function_name": "S1GkePI17zQ#J#A",
+      "function_present": true,
+      "instruction_count": 82,
+      "nid": "S1GkePI17zQ",
+      "result_file": "libSceSaveData_native-chunk-00.result.tsv",
+      "symbol": "S1GkePI17zQ#J#A",
+      "symbol_address": "00027100",
+      "thunk": false,
+      "thunk_target": "",
+      "thunk_target_external": null,
+      "wave": "wave2"
+    },
+    {
+      "external": false,
+      "function_body_addresses": 291,
+      "function_body_sha256": "0edcc6a6f337ba22a0fb93c4a3846c12741db9914f15270a1979fad6ace28b11",
+      "function_entry": "00028240",
+      "function_name": "Z7z6HXWORJY#J#A",
+      "function_present": true,
+      "instruction_count": 69,
+      "nid": "Z7z6HXWORJY",
+      "result_file": "libSceSaveData_native-chunk-00.result.tsv",
+      "symbol": "Z7z6HXWORJY#J#A",
+      "symbol_address": "00028240",
+      "thunk": false,
+      "thunk_target": "",
+      "thunk_target_external": null,
+      "wave": "wave2"
+    },
+    {
+      "external": false,
+      "function_body_addresses": 434,
+      "function_body_sha256": "50a6f01da2db72851314595bf27753718b106a09b8b0df16ef6f8f0e38f185d8",
+      "function_entry": "00026320",
+      "function_name": "yKDy8S5yLA0#J#A",
+      "function_present": true,
+      "instruction_count": 93,
+      "nid": "yKDy8S5yLA0",
+      "result_file": "libSceSaveData_native-chunk-00.result.tsv",
+      "symbol": "yKDy8S5yLA0#J#A",
+      "symbol_address": "00026320",
+      "thunk": false,
+      "thunk_target": "",
+      "thunk_target_external": null,
+      "wave": "wave2"
+    }
+  ],
+  "ghidra_version": "12.1.2_PUBLIC_20260605",
+  "missing": [],
+  "program_name": "libSceSaveData.native.sprx",
+  "provenance": {
+    "audit_sha256": "a28951db44df6f026715f9ab8e47b992cea172e396bc6d80b4383e00c14f2be6",
+    "evidence_policy": "Ghidra analysis of exact Gen5 provider ELFs only; no Kyty-derived contracts or implementations.",
+    "excluded_nids": [],
+    "recommendations_sha256": "f059a17f1440499c499311093ac225a428f19c5a8776c41ca609aecd670df7c5",
+    "summary_sha256": "e1e93ff2f5967daa1d6f838b08f4490de7144118032e0d4e413cb767ab50e0a2"
+  },
+  "target_count": 3,
+  "without_functions": []
+}

@@ -37,6 +37,8 @@ public sealed class SharpEmuRuntime : ISharpEmuRuntime
     private readonly ISymbolCatalog _symbolCatalog;
     private readonly CpuExecutionOptions _cpuExecutionOptions;
     private readonly IFileSystem _fileSystem;
+    private readonly SharpEmuBootMode _bootMode;
+    private readonly string? _systemRoot;
     private bool _disposed;
 
     public string? LastExecutionDiagnostics { get; private set; }
@@ -56,7 +58,9 @@ public sealed class SharpEmuRuntime : ISharpEmuRuntime
         IModuleManager moduleManager,
         ISymbolCatalog? symbolCatalog = null,
         CpuExecutionOptions cpuExecutionOptions = default,
-        IFileSystem? fileSystem = null)
+        IFileSystem? fileSystem = null,
+        SharpEmuBootMode bootMode = SharpEmuBootMode.Game,
+        string? systemRoot = null)
     {
         _selfLoader = selfLoader ?? throw new ArgumentNullException(nameof(selfLoader));
         _virtualMemory = virtualMemory ?? throw new ArgumentNullException(nameof(virtualMemory));
@@ -71,6 +75,8 @@ public sealed class SharpEmuRuntime : ISharpEmuRuntime
             DebugHook = cpuExecutionOptions.DebugHook,
         };
         _fileSystem = fileSystem ?? new PhysicalFileSystem();
+        _bootMode = bootMode;
+        _systemRoot = systemRoot;
     }
 
     public static ISharpEmuRuntime CreateDefault(SharpEmuRuntimeOptions options = default)
@@ -83,9 +89,10 @@ public sealed class SharpEmuRuntime : ISharpEmuRuntime
             DebugHook = options.DebugHook,
         };
         var moduleManager = new ModuleManager();
-        // The compile-time generated registry (SharpEmu.SourceGenerators) is the sole
-        // registration source; content tests in SharpEmu.Libs.Tests pin its invariants.
+        // Callable SysAbi exports and addressable ABI objects intentionally use
+        // separate registries. Data symbols must never enter callable dispatch.
         moduleManager.RegisterExports(SharpEmu.Generated.SysAbiExportRegistry.CreateExports(Generation.Gen4 | Generation.Gen5));
+        moduleManager.RegisterDataSymbols(DataSymbolRegistry.CreateRegistrations(Generation.Gen4 | Generation.Gen5));
         moduleManager.Freeze();
 
         var virtualMemory = new PhysicalVirtualMemory();
@@ -99,7 +106,9 @@ public sealed class SharpEmuRuntime : ISharpEmuRuntime
             moduleManager,
             Aerolib.Instance,
             cpuExecutionOptions,
-            fileSystem);
+            fileSystem,
+            options.BootMode,
+            options.SystemRoot);
     }
 
     public SelfImage LoadImage(string ebootPath)
@@ -132,7 +141,22 @@ public sealed class SharpEmuRuntime : ISharpEmuRuntime
     public OrbisGen2Result Run(string ebootPath)
     {
         var normalizedEbootPath = Path.GetFullPath(ebootPath);
+        var systemSoftwareLayout = _bootMode == SharpEmuBootMode.SystemUi
+            ? SystemSoftwareLayout.Create(_systemRoot, normalizedEbootPath)
+            : null;
+        using var systemSoftwareBinding = BindSystemSoftwareLayout(systemSoftwareLayout);
         using var app0Binding = BindApp0Root(normalizedEbootPath);
+        if (systemSoftwareLayout is null)
+        {
+            Console.Error.WriteLine("[RUNTIME] Boot mode: Game");
+        }
+        else
+        {
+            Console.Error.WriteLine("[RUNTIME] Boot mode: System UI");
+            Console.Error.WriteLine(systemSoftwareLayout.BuildDiagnosticSummary());
+            systemSoftwareLayout.EnsureEntryIsLoadable();
+        }
+
         Console.Error.WriteLine($"[RUNTIME] Loading: {ebootPath}");
         LastExecutionDiagnostics = null;
         LastExecutionTrace = null;
@@ -146,12 +170,22 @@ public sealed class SharpEmuRuntime : ISharpEmuRuntime
         KernelMemoryCompatExports.ConfigureApplicationInfo(image.TitleId);
         SaveDataExports.ConfigureApplicationInfo(image.TitleId);
         SystemServiceExports.ConfigureApplicationInfo(image.TitleId);
-        _ = RegisterLoadedModule(normalizedEbootPath, image, isMain: true, isSystemModule: false);
+        if (systemSoftwareLayout is null)
+        {
+            LogAppBundleInfo(normalizedEbootPath, image);
+        }
+
+        _ = RegisterLoadedModule(
+            normalizedEbootPath,
+            image,
+            isMain: true,
+            isSystemModule: systemSoftwareLayout is not null);
         KernelRuntimeCompatExports.ConfigureProcessProcParamAddress(image.ProcParamAddress);
         Console.Error.WriteLine($"[RUNTIME] Entry: 0x{image.EntryPoint:X16}");
         var generation = image.ElfHeader.AbiVersion == 2 ? Generation.Gen5 : Generation.Gen4;
         var activeImportStubs = new Dictionary<ulong, string>(image.ImportStubs);
         var activeRuntimeSymbols = new Dictionary<string, ulong>(image.RuntimeSymbols, StringComparer.Ordinal);
+        var activeRuntimeDataSymbols = new Dictionary<string, ulong>(image.RuntimeDataSymbols, StringComparer.Ordinal);
         var processImageName = Path.GetFileName(ebootPath);
         if (string.IsNullOrWhiteSpace(processImageName))
         {
@@ -159,15 +193,26 @@ public sealed class SharpEmuRuntime : ISharpEmuRuntime
         }
 
         HleDataSymbols.ConfigureProcessImageName(processImageName);
-        MergeKnownHleDataSymbols(activeRuntimeSymbols);
-        var loadedModuleImages = LoadAdjacentSceModules(ebootPath, activeImportStubs, activeRuntimeSymbols);
-        RebindImportedDataSymbols(image, loadedModuleImages, activeRuntimeSymbols);
+        var loadedModuleImages = LoadAdjacentSceModules(
+            ebootPath,
+            activeImportStubs,
+            activeRuntimeSymbols,
+            activeRuntimeDataSymbols,
+            isSystemModule: systemSoftwareLayout is not null);
+        MergeRegisteredHleDataSymbols(activeRuntimeDataSymbols, generation);
+        MergeLegacyStackGuardDataSymbol(activeRuntimeDataSymbols);
+        RebindImportedDataSymbols(
+            normalizedEbootPath,
+            image,
+            loadedModuleImages,
+            activeRuntimeDataSymbols);
         var initializerResult = RunAllInitializers(
             image,
             loadedModuleImages,
             generation,
             activeImportStubs,
             activeRuntimeSymbols,
+            activeRuntimeDataSymbols,
             processImageName);
         if (initializerResult is { } failedInitializerResult)
         {
@@ -187,6 +232,7 @@ public sealed class SharpEmuRuntime : ISharpEmuRuntime
             generation,
             activeImportStubs,
             activeRuntimeSymbols,
+            activeRuntimeDataSymbols,
             processImageName,
             _cpuExecutionOptions);
 
@@ -372,6 +418,117 @@ public sealed class SharpEmuRuntime : ISharpEmuRuntime
         return result;
     }
 
+    private static void LogAppBundleInfo(string ebootPath, SelfImage image)
+    {
+        var executableName = Path.GetFileName(ebootPath);
+        if (string.IsNullOrWhiteSpace(executableName))
+        {
+            executableName = "eboot.bin";
+        }
+
+        var displayName = string.IsNullOrWhiteSpace(image.Title) ? "(unknown)" : image.Title!.Trim();
+        var titleId = string.IsNullOrWhiteSpace(image.TitleId) ? "(unknown)" : image.TitleId!.Trim();
+        var version = string.IsNullOrWhiteSpace(image.Version) ? "(unknown)" : image.Version!.Trim();
+        var contentId = ResolveContentId(Path.GetDirectoryName(ebootPath)) ?? "(unknown)";
+
+        var builder = new StringBuilder();
+        builder.AppendLine("App bundle info:");
+        builder.AppendLine($"- Display name: {displayName}");
+        builder.AppendLine($"- Version: {version}");
+        builder.AppendLine($"- Title ID: {titleId}");
+        builder.AppendLine($"- Content ID: {contentId}");
+        builder.AppendLine($"- Executable: {executableName}");
+        builder.Append("- Platform: PlayStation 5");
+        Console.Error.WriteLine(builder.ToString());
+    }
+
+    private static string? ResolveContentId(string? bundleRoot)
+    {
+        if (string.IsNullOrEmpty(bundleRoot))
+        {
+            return null;
+        }
+
+        foreach (var candidate in new[]
+        {
+            Path.Combine(bundleRoot, "sce_sys", "param.json"),
+            Path.Combine(bundleRoot, "param.json"),
+        })
+        {
+            if (!File.Exists(candidate))
+            {
+                continue;
+            }
+
+            try
+            {
+                using var doc = System.Text.Json.JsonDocument.Parse(File.ReadAllBytes(candidate));
+                if (doc.RootElement.TryGetProperty("contentId", out var contentId))
+                {
+                    return contentId.GetString();
+                }
+            }
+            catch (Exception ex) when (ex is IOException or System.Text.Json.JsonException)
+            {
+            }
+
+            break;
+        }
+
+        return null;
+    }
+
+    private static SystemSoftwareBindingScope? BindSystemSoftwareLayout(SystemSoftwareLayout? layout)
+    {
+        KernelMemoryCompatExports.ClearGuestPathMounts();
+        if (layout is null)
+        {
+            return null;
+        }
+
+        try
+        {
+            foreach (var mount in layout.Mounts)
+            {
+                KernelMemoryCompatExports.RegisterGuestPathMount(
+                    mount.GuestPath,
+                    mount.HostPath,
+                    readOnly: mount.ReadOnly);
+            }
+
+            const string systemRootVariableName = "SHARPEMU_SYSTEM_ROOT";
+            var previousSystemRoot = Environment.GetEnvironmentVariable(systemRootVariableName);
+            Environment.SetEnvironmentVariable(systemRootVariableName, layout.RootPath);
+            return new SystemSoftwareBindingScope(systemRootVariableName, previousSystemRoot);
+        }
+        catch
+        {
+            KernelMemoryCompatExports.ClearGuestPathMounts();
+            throw;
+        }
+    }
+
+    private sealed class SystemSoftwareBindingScope(
+        string variableName,
+        string? previousValue) : IDisposable
+    {
+        private readonly string _variableName = variableName;
+        private readonly string? _previousValue = previousValue;
+        private bool _disposed;
+
+        public void Dispose()
+        {
+            if (_disposed)
+            {
+                return;
+            }
+
+            KernelMemoryCompatExports.ClearGuestPathMounts();
+            Environment.SetEnvironmentVariable(_variableName, _previousValue);
+            _disposed = true;
+        }
+    }
+
     private static App0BindingScope? BindApp0Root(string normalizedEbootPath)
     {
         const string app0VariableName = "SHARPEMU_APP0_DIR";
@@ -430,13 +587,15 @@ public sealed class SharpEmuRuntime : ISharpEmuRuntime
         Generation generation,
         IReadOnlyDictionary<ulong, string> activeImportStubs,
         IReadOnlyDictionary<string, ulong> activeRuntimeSymbols,
+        IReadOnlyDictionary<string, ulong> activeRuntimeDataSymbols,
         string processImageName)
     {
         var moduleStartResult = RunPreloadedModuleInitializers(
             loadedModuleImages,
             generation,
             activeImportStubs,
-            activeRuntimeSymbols);
+            activeRuntimeSymbols,
+            activeRuntimeDataSymbols);
         if (moduleStartResult is not null)
         {
             return moduleStartResult;
@@ -502,7 +661,8 @@ public sealed class SharpEmuRuntime : ISharpEmuRuntime
         IReadOnlyList<LoadedModuleImage> loadedModuleImages,
         Generation generation,
         IReadOnlyDictionary<ulong, string> activeImportStubs,
-        IReadOnlyDictionary<string, ulong> activeRuntimeSymbols)
+        IReadOnlyDictionary<string, ulong> activeRuntimeSymbols,
+        IReadOnlyDictionary<string, ulong> activeRuntimeDataSymbols)
     {
         for (var i = 0; i < loadedModuleImages.Count; i++)
         {
@@ -537,6 +697,7 @@ public sealed class SharpEmuRuntime : ISharpEmuRuntime
                 generation,
                 activeImportStubs,
                 activeRuntimeSymbols,
+                activeRuntimeDataSymbols,
                 moduleName,
                 _cpuExecutionOptions);
             KernelModuleRegistry.CompleteModuleStart(
@@ -559,6 +720,7 @@ public sealed class SharpEmuRuntime : ISharpEmuRuntime
         Generation generation,
         IReadOnlyDictionary<ulong, string> activeImportStubs,
         IReadOnlyDictionary<string, ulong> activeRuntimeSymbols,
+        IReadOnlyDictionary<string, ulong> activeRuntimeDataSymbols,
         string processImageName)
     {
         if (image.PreInitializerFunctions.Count == 0 && image.InitializerFunctions.Count == 0)
@@ -575,6 +737,7 @@ public sealed class SharpEmuRuntime : ISharpEmuRuntime
             generation,
             activeImportStubs,
             activeRuntimeSymbols,
+            activeRuntimeDataSymbols,
             processImageName);
         if (result is not null)
         {
@@ -587,6 +750,7 @@ public sealed class SharpEmuRuntime : ISharpEmuRuntime
             generation,
             activeImportStubs,
             activeRuntimeSymbols,
+            activeRuntimeDataSymbols,
             processImageName);
     }
 
@@ -596,6 +760,7 @@ public sealed class SharpEmuRuntime : ISharpEmuRuntime
         Generation generation,
         IReadOnlyDictionary<ulong, string> activeImportStubs,
         IReadOnlyDictionary<string, ulong> activeRuntimeSymbols,
+        IReadOnlyDictionary<string, ulong> activeRuntimeDataSymbols,
         string processImageName)
     {
         for (var i = 0; i < initializerFunctions.Count; i++)
@@ -614,6 +779,7 @@ public sealed class SharpEmuRuntime : ISharpEmuRuntime
                 generation,
                 activeImportStubs,
                 activeRuntimeSymbols,
+                activeRuntimeDataSymbols,
                 processImageName,
                 _cpuExecutionOptions);
             if (result != OrbisGen2Result.ORBIS_GEN2_OK)
@@ -628,7 +794,9 @@ public sealed class SharpEmuRuntime : ISharpEmuRuntime
     private List<LoadedModuleImage> LoadAdjacentSceModules(
         string ebootPath,
         IDictionary<ulong, string> importStubs,
-        IDictionary<string, ulong> runtimeSymbols)
+        IDictionary<string, ulong> runtimeSymbols,
+        IDictionary<string, ulong> runtimeDataSymbols,
+        bool isSystemModule)
     {
         var loadedImages = new List<LoadedModuleImage>();
         var ebootDirectory = Path.GetDirectoryName(ebootPath);
@@ -723,8 +891,13 @@ public sealed class SharpEmuRuntime : ISharpEmuRuntime
 
                 mergedImportCount += MergeImportStubs(importStubs, moduleImage.ImportStubs, modulePath);
                 mergedSymbolCount += MergeRuntimeSymbols(runtimeSymbols, moduleImage.RuntimeSymbols);
+                _ = MergeRuntimeSymbols(runtimeDataSymbols, moduleImage.RuntimeDataSymbols);
                 InstallNativePluginCompatibilityHooks(importStubs, moduleImage, modulePath);
-                var moduleHandle = RegisterLoadedModule(modulePath, moduleImage, isMain: false, isSystemModule: false);
+                var moduleHandle = RegisterLoadedModule(
+                    modulePath,
+                    moduleImage,
+                    isMain: false,
+                    isSystemModule: isSystemModule);
                 var moduleName = Path.GetFileName(modulePath);
                 var startAtBoot = moduleEntry.StartAtBoot ||
                     string.Equals(moduleName, "libfmod.prx", StringComparison.OrdinalIgnoreCase) ||
@@ -770,99 +943,61 @@ public sealed class SharpEmuRuntime : ISharpEmuRuntime
     }
 
     private void RebindImportedDataSymbols(
+        string mainImagePath,
         SelfImage mainImage,
         IReadOnlyList<LoadedModuleImage> loadedModuleImages,
-        IReadOnlyDictionary<string, ulong> runtimeSymbols)
+        IReadOnlyDictionary<string, ulong> runtimeDataSymbols)
     {
         var rebound = 0;
-        var unresolved = 0;
-
-        rebound += RebindImportedDataSymbols(mainImage, runtimeSymbols, ref unresolved);
+        rebound += ImportedDataRebinder.Rebind(
+            _virtualMemory,
+            mainImage,
+            mainImagePath,
+            runtimeDataSymbols);
         for (var i = 0; i < loadedModuleImages.Count; i++)
         {
-            rebound += RebindImportedDataSymbols(loadedModuleImages[i].Image, runtimeSymbols, ref unresolved);
+            rebound += ImportedDataRebinder.Rebind(
+                _virtualMemory,
+                loadedModuleImages[i].Image,
+                loadedModuleImages[i].Path,
+                runtimeDataSymbols);
         }
 
-        if (rebound != 0 || unresolved != 0)
+        if (rebound != 0)
         {
-            Console.Error.WriteLine(
-                $"[RUNTIME] Imported data rebind: rebound={rebound}, unresolved={unresolved}");
+            Console.Error.WriteLine($"[RUNTIME] Imported data rebind: rebound={rebound}, unresolved=0");
         }
     }
 
-    private int RebindImportedDataSymbols(
-        SelfImage image,
-        IReadOnlyDictionary<string, ulong> runtimeSymbols,
-        ref int unresolved)
+    internal static int MergeRegisteredHleDataSymbols(
+        IDictionary<string, ulong> runtimeDataSymbols,
+        Generation generation)
     {
-        if (image.ImportedRelocations.Count == 0)
+        var added = 0;
+        foreach (var registration in DataSymbolRegistry.CreateRegistrations(generation))
         {
-            return 0;
-        }
-
-        var rebound = 0;
-        var logRebind = string.Equals(
-            Environment.GetEnvironmentVariable("SHARPEMU_LOG_DATA_REBIND"),
-            "1",
-            StringComparison.Ordinal);
-        for (var i = 0; i < image.ImportedRelocations.Count; i++)
-        {
-            var relocation = image.ImportedRelocations[i];
-            if (!relocation.IsData)
-            {
-                continue;
-            }
-
-            if (!runtimeSymbols.TryGetValue(relocation.Nid, out var symbolAddress) ||
-                !IsUsableRuntimeSymbolAddress(symbolAddress))
-            {
-                if (logRebind)
-                {
-                    Console.Error.WriteLine(
-                        $"[RUNTIME] Imported data unresolved: nid={relocation.Nid} target=0x{relocation.TargetAddress:X16} addend=0x{unchecked((ulong)relocation.Addend):X16}");
-                }
-
-                unresolved++;
-                continue;
-            }
-
-            var reboundValue = AddSigned(symbolAddress, relocation.Addend);
-            if (!TryWriteUInt64(_virtualMemory, relocation.TargetAddress, reboundValue))
-            {
-                if (logRebind)
-                {
-                    Console.Error.WriteLine(
-                        $"[RUNTIME] Imported data write-failed: nid={relocation.Nid} target=0x{relocation.TargetAddress:X16} value=0x{reboundValue:X16}");
-                }
-
-                unresolved++;
-                continue;
-            }
-
-            if (logRebind)
-            {
-                Console.Error.WriteLine(
-                    $"[RUNTIME] Imported data rebound: nid={relocation.Nid} target=0x{relocation.TargetAddress:X16} value=0x{reboundValue:X16}");
-            }
-
-            rebound++;
-        }
-
-        return rebound;
-    }
-
-    private static void MergeKnownHleDataSymbols(IDictionary<string, ulong> runtimeSymbols)
-    {
-        foreach (var nid in HleDataSymbols.EnumerateKnownNids())
-        {
-            if (runtimeSymbols.ContainsKey(nid) ||
-                !HleDataSymbols.TryGetAddress(nid, out var symbolAddress) ||
+            if (runtimeDataSymbols.ContainsKey(registration.Nid) ||
+                !registration.TryGetHleAddress(out var symbolAddress) ||
                 !IsUsableRuntimeSymbolAddress(symbolAddress))
             {
                 continue;
             }
 
-            runtimeSymbols[nid] = symbolAddress;
+            runtimeDataSymbols[registration.Nid] = symbolAddress;
+            added++;
+        }
+
+        return added;
+    }
+
+    private static void MergeLegacyStackGuardDataSymbol(IDictionary<string, ulong> runtimeDataSymbols)
+    {
+        const string stackChkGuardNid = "f7uOxY9mM1U";
+        if (!runtimeDataSymbols.ContainsKey(stackChkGuardNid) &&
+            HleDataSymbols.TryGetAddress(stackChkGuardNid, out var address) &&
+            IsUsableRuntimeSymbolAddress(address))
+        {
+            runtimeDataSymbols[stackChkGuardNid] = address;
         }
     }
 
@@ -932,24 +1067,6 @@ public sealed class SharpEmuRuntime : ISharpEmuRuntime
         return address >= 0x10000 && !IsUnresolvedRuntimeSentinel(address);
     }
 
-    private static bool TryWriteUInt64(IVirtualMemory virtualMemory, ulong address, ulong value)
-    {
-        Span<byte> bytes = stackalloc byte[sizeof(ulong)];
-        BinaryPrimitives.WriteUInt64LittleEndian(bytes, value);
-        return virtualMemory.TryWrite(address, bytes);
-    }
-
-    private static ulong AddSigned(ulong value, long addend)
-    {
-        if (addend >= 0)
-        {
-            return unchecked(value + (ulong)addend);
-        }
-
-        var magnitude = unchecked((ulong)(-(addend + 1))) + 1;
-        return unchecked(value - magnitude);
-    }
-
     private static bool IsUnresolvedRuntimeSentinel(ulong value)
     {
         return value == 0xFFFEUL ||
@@ -998,10 +1115,30 @@ public sealed class SharpEmuRuntime : ISharpEmuRuntime
             ehFrameSize,
             isMain,
             isSystemModule);
-        KernelModuleRegistry.RegisterModuleSymbols(handle, image.RuntimeSymbols);
+        KernelModuleRegistry.RegisterModuleSymbols(handle, CreateModuleDlsymSymbols(image));
         Console.Error.WriteLine(
             $"[RUNTIME] Registered module handle={handle} name={Path.GetFileName(modulePath)} base=0x{baseAddress:X16} size=0x{size:X16}");
         return handle;
+    }
+
+    internal static IReadOnlyDictionary<string, ulong> CreateModuleDlsymSymbols(SelfImage image)
+    {
+        ArgumentNullException.ThrowIfNull(image);
+        if (image.RuntimeDataSymbols.Count == 0)
+        {
+            return image.RuntimeSymbols;
+        }
+
+        var symbols = new Dictionary<string, ulong>(image.RuntimeSymbols, StringComparer.Ordinal);
+        foreach (var (name, address) in image.RuntimeDataSymbols)
+        {
+            // A malformed image defining the same alias as both a function and
+            // an object keeps the callable entry for compatibility. The loader
+            // otherwise keeps the two symbol kinds fully separate.
+            symbols.TryAdd(name, address);
+        }
+
+        return symbols;
     }
 
     private static bool TryComputeImageRange(SelfImage image, out ulong baseAddress, out ulong size)

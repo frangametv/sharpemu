@@ -1,0 +1,627 @@
+{
+  "executable_sha256": "309cb9031209eb9b838216994d2c39613fcd65ec1eae493c4b784b9dacdd06bb",
+  "format": "sharpemu-ghidra-selected-nid-functions-v1",
+  "function_count": 30,
+  "functions": [
+    {
+      "external": false,
+      "function_body_addresses": 237,
+      "function_body_sha256": "fd7dbe44d75e4211ff1826c4ca4481dff3fc61811bbc183c57b2abc0ce60233e",
+      "function_entry": "0015add0",
+      "function_name": "+qitMEbkSWk#D#A",
+      "function_present": true,
+      "instruction_count": 65,
+      "nid": "+qitMEbkSWk",
+      "runtime_direct_bridge_count": 4,
+      "runtime_load_base": "0x0000000805AEA000",
+      "runtime_symbol_addresses": [
+        "0x0000000805C44DD0"
+      ],
+      "symbol": "+qitMEbkSWk#D#A",
+      "symbol_address": "0015add0",
+      "thunk": false,
+      "thunk_target": null,
+      "thunk_target_external": false
+    },
+    {
+      "external": false,
+      "function_body_addresses": 8,
+      "function_body_sha256": "928202e97510b947871cdc8a6dfc8d8510f1be6b6a4709a6e96857a994535e10",
+      "function_entry": "00102d30",
+      "function_name": "0hlfW1O4Aa4#D#A",
+      "function_present": true,
+      "instruction_count": 2,
+      "nid": "0hlfW1O4Aa4",
+      "runtime_direct_bridge_count": 4,
+      "runtime_load_base": "0x0000000805AEA000",
+      "runtime_symbol_addresses": [
+        "0x0000000805BECD30"
+      ],
+      "symbol": "0hlfW1O4Aa4#D#A",
+      "symbol_address": "00102d30",
+      "thunk": false,
+      "thunk_target": null,
+      "thunk_target_external": false
+    },
+    {
+      "external": false,
+      "function_body_addresses": 1544,
+      "function_body_sha256": "f0abde8bf239d59023cb5ebdfd13ed0ce43cb66938ca56d57e4acc65ed5ccc37",
+      "function_entry": "0014c600",
+      "function_name": "1D0H2KNjshE#D#A",
+      "function_present": true,
+      "instruction_count": 341,
+      "nid": "1D0H2KNjshE",
+      "runtime_direct_bridge_count": 4,
+      "runtime_load_base": "0x0000000805AEA000",
+      "runtime_symbol_addresses": [
+        "0x0000000805C36600"
+      ],
+      "symbol": "1D0H2KNjshE#D#A",
+      "symbol_address": "0014c600",
+      "thunk": false,
+      "thunk_target": null,
+      "thunk_target_external": false
+    },
+    {
+      "external": false,
+      "function_body_addresses": 244,
+      "function_body_sha256": "1ec2c71574dc787562d2e505913439764e58db21b5d81af2f5253aa0e1d95ca6",
+      "function_entry": "0015a8b0",
+      "function_name": "24m4Z4bUaoY#D#A",
+      "function_present": true,
+      "instruction_count": 54,
+      "nid": "24m4Z4bUaoY",
+      "runtime_direct_bridge_count": 4,
+      "runtime_load_base": "0x0000000805AEA000",
+      "runtime_symbol_addresses": [
+        "0x0000000805C448B0"
+      ],
+      "symbol": "24m4Z4bUaoY#D#A",
+      "symbol_address": "0015a8b0",
+      "thunk": false,
+      "thunk_target": null,
+      "thunk_target_external": false
+    },
+    {
+      "external": false,
+      "function_body_addresses": 6611,
+      "function_body_sha256": "20d408a7261739ac32bc0d54de91b7f36644d441af4336438e039d5a948b44ac",
+      "function_entry": "0015b7c0",
+      "function_name": "2vDqwBlpF-o#D#A",
+      "function_present": true,
+      "instruction_count": 1626,
+      "nid": "2vDqwBlpF-o",
+      "runtime_direct_bridge_count": 4,
+      "runtime_load_base": "0x0000000805AEA000",
+      "runtime_symbol_addresses": [
+        "0x0000000805C457C0"
+      ],
+      "symbol": "2vDqwBlpF-o#D#A",
+      "symbol_address": "0015b7c0",
+      "thunk": false,
+      "thunk_target": null,
+      "thunk_target_external": false
+    },
+    {
+      "external": false,
+      "function_body_addresses": 11,
+      "function_body_sha256": "ec49b7befe12c52756499b73b9b2b9e0c583e2f3583b2abc720f502db9a90512",
+      "function_entry": "00105ca0",
+      "function_name": "5Lf51jvohTQ#D#A",
+      "function_present": true,
+      "instruction_count": 5,
+      "nid": "5Lf51jvohTQ",
+      "runtime_direct_bridge_count": 4,
+      "runtime_load_base": "0x0000000805AEA000",
+      "runtime_symbol_addresses": [
+        "0x0000000805BEFCA0"
+      ],
+      "symbol": "5Lf51jvohTQ#D#A",
+      "symbol_address": "00105ca0",
+      "thunk": false,
+      "thunk_target": null,
+      "thunk_target_external": false
+    },
+    {
+      "external": false,
+      "function_body_addresses": 61,
+      "function_body_sha256": "84423fec9840f6fc34a57089fffc6feaf724570abc0f833b19501fb7bdb1e5c0",
+      "function_entry": "0016bfd0",
+      "function_name": "5bBacGLyLOs#D#A",
+      "function_present": true,
+      "instruction_count": 20,
+      "nid": "5bBacGLyLOs",
+      "runtime_direct_bridge_count": 4,
+      "runtime_load_base": "0x0000000805AEA000",
+      "runtime_symbol_addresses": [
+        "0x0000000805C55FD0"
+      ],
+      "symbol": "5bBacGLyLOs#D#A",
+      "symbol_address": "0016bfd0",
+      "thunk": false,
+      "thunk_target": null,
+      "thunk_target_external": false
+    },
+    {
+      "external": false,
+      "function_body_addresses": 14,
+      "function_body_sha256": "3fc3344fb8be4fb4be82a338cd79baff395d78c04ec9c78e7a711abbdca5c658",
+      "function_entry": "001c28f0",
+      "function_name": "802pFCwC9w0#D#A",
+      "function_present": true,
+      "instruction_count": 6,
+      "nid": "802pFCwC9w0",
+      "runtime_direct_bridge_count": 4,
+      "runtime_load_base": "0x0000000805AEA000",
+      "runtime_symbol_addresses": [
+        "0x0000000805CAC8F0"
+      ],
+      "symbol": "802pFCwC9w0#D#A",
+      "symbol_address": "001c28f0",
+      "thunk": false,
+      "thunk_target": null,
+      "thunk_target_external": false
+    },
+    {
+      "external": false,
+      "function_body_addresses": 649,
+      "function_body_sha256": "4ad4aea51cf8fc3360e4036007fdaf29b04e70ad641102db34f59434d1747794",
+      "function_entry": "00141010",
+      "function_name": "EH-x713A99c#D#A",
+      "function_present": true,
+      "instruction_count": 116,
+      "nid": "EH-x713A99c",
+      "runtime_direct_bridge_count": 4,
+      "runtime_load_base": "0x0000000805AEA000",
+      "runtime_symbol_addresses": [
+        "0x0000000805C2B010"
+      ],
+      "symbol": "EH-x713A99c#D#A",
+      "symbol_address": "00141010",
+      "thunk": false,
+      "thunk_target": null,
+      "thunk_target_external": false
+    },
+    {
+      "external": false,
+      "function_body_addresses": 460,
+      "function_body_sha256": "bd77d6b55379a5f18d599900f18e5860abc1c773471dcccc94e42fd6a42cd848",
+      "function_entry": "00140b70",
+      "function_name": "HUbZmOnT-Dg#D#A",
+      "function_present": true,
+      "instruction_count": 115,
+      "nid": "HUbZmOnT-Dg",
+      "runtime_direct_bridge_count": 4,
+      "runtime_load_base": "0x0000000805AEA000",
+      "runtime_symbol_addresses": [
+        "0x0000000805C2AB70"
+      ],
+      "symbol": "HUbZmOnT-Dg#D#A",
+      "symbol_address": "00140b70",
+      "thunk": false,
+      "thunk_target": null,
+      "thunk_target_external": false
+    },
+    {
+      "external": false,
+      "function_body_addresses": 52,
+      "function_body_sha256": "6bb1a0679638682938715778ac3fe114badb4e2eb52cf6891f346f0b0540b839",
+      "function_entry": "00116890",
+      "function_name": "MELi-cKqWq0#D#A",
+      "function_present": true,
+      "instruction_count": 12,
+      "nid": "MELi-cKqWq0",
+      "runtime_direct_bridge_count": 8,
+      "runtime_load_base": "0x0000000805AEA000",
+      "runtime_symbol_addresses": [
+        "0x0000000805C00890"
+      ],
+      "symbol": "MELi-cKqWq0#D#A",
+      "symbol_address": "00116890",
+      "thunk": false,
+      "thunk_target": null,
+      "thunk_target_external": false
+    },
+    {
+      "external": false,
+      "function_body_addresses": 236,
+      "function_body_sha256": "6a72dd8f659e69060d6c99210d6c0b45397b17c8853c7b35f28323321dace261",
+      "function_entry": "0016aa10",
+      "function_name": "NFLs+dRJGNg#D#A",
+      "function_present": true,
+      "instruction_count": 68,
+      "nid": "NFLs+dRJGNg",
+      "runtime_direct_bridge_count": 4,
+      "runtime_load_base": "0x0000000805AEA000",
+      "runtime_symbol_addresses": [
+        "0x0000000805C54A10"
+      ],
+      "symbol": "NFLs+dRJGNg#D#A",
+      "symbol_address": "0016aa10",
+      "thunk": false,
+      "thunk_target": null,
+      "thunk_target_external": false
+    },
+    {
+      "external": false,
+      "function_body_addresses": 581,
+      "function_body_sha256": "055726998ff540f9e01ae7c7aa1fae9ae424ba2c2f635aabc4e4bb96fd663226",
+      "function_entry": "0017db50",
+      "function_name": "O4L+0oCN9zA#D#A",
+      "function_present": true,
+      "instruction_count": 129,
+      "nid": "O4L+0oCN9zA",
+      "runtime_direct_bridge_count": 4,
+      "runtime_load_base": "0x0000000805AEA000",
+      "runtime_symbol_addresses": [
+        "0x0000000805C67B50"
+      ],
+      "symbol": "O4L+0oCN9zA#D#A",
+      "symbol_address": "0017db50",
+      "thunk": false,
+      "thunk_target": null,
+      "thunk_target_external": false
+    },
+    {
+      "external": false,
+      "function_body_addresses": 295,
+      "function_body_sha256": "f6a7dee6c446ff996cfd0f63e65e32dbbc89389df26f4d0627140326714b90e4",
+      "function_entry": "0017d700",
+      "function_name": "PdnFCFqKGqA#D#A",
+      "function_present": true,
+      "instruction_count": 74,
+      "nid": "PdnFCFqKGqA",
+      "runtime_direct_bridge_count": 4,
+      "runtime_load_base": "0x0000000805AEA000",
+      "runtime_symbol_addresses": [
+        "0x0000000805C67700"
+      ],
+      "symbol": "PdnFCFqKGqA#D#A",
+      "symbol_address": "0017d700",
+      "thunk": false,
+      "thunk_target": null,
+      "thunk_target_external": false
+    },
+    {
+      "external": false,
+      "function_body_addresses": 238,
+      "function_body_sha256": "ddffffdbbdcc582158cb74813cce55dd64dbd863f0d8f1e061ebc2e7d702b669",
+      "function_entry": "0014f9a0",
+      "function_name": "SAd0Z3wKwLA#D#A",
+      "function_present": true,
+      "instruction_count": 56,
+      "nid": "SAd0Z3wKwLA",
+      "runtime_direct_bridge_count": 4,
+      "runtime_load_base": "0x0000000805AEA000",
+      "runtime_symbol_addresses": [
+        "0x0000000805C399A0"
+      ],
+      "symbol": "SAd0Z3wKwLA#D#A",
+      "symbol_address": "0014f9a0",
+      "thunk": false,
+      "thunk_target": null,
+      "thunk_target_external": false
+    },
+    {
+      "external": false,
+      "function_body_addresses": 13,
+      "function_body_sha256": "28284dcf9ced1fb04b8df5753492d65e0614ea08ad142c7795299ad31d9abd07",
+      "function_entry": "0015b7b0",
+      "function_name": "SRI6S9B+-a4#D#A",
+      "function_present": true,
+      "instruction_count": 6,
+      "nid": "SRI6S9B+-a4",
+      "runtime_direct_bridge_count": 4,
+      "runtime_load_base": "0x0000000805AEA000",
+      "runtime_symbol_addresses": [
+        "0x0000000805C457B0"
+      ],
+      "symbol": "SRI6S9B+-a4#D#A",
+      "symbol_address": "0015b7b0",
+      "thunk": false,
+      "thunk_target": null,
+      "thunk_target_external": false
+    },
+    {
+      "external": false,
+      "function_body_addresses": 117,
+      "function_body_sha256": "26e27d85f4081cd9f1d44ca58c5a54c95c330ff09af818b625e4b607c52ff594",
+      "function_entry": "00105c20",
+      "function_name": "YaHc3GS7y7g#D#A",
+      "function_present": true,
+      "instruction_count": 36,
+      "nid": "YaHc3GS7y7g",
+      "runtime_direct_bridge_count": 4,
+      "runtime_load_base": "0x0000000805AEA000",
+      "runtime_symbol_addresses": [
+        "0x0000000805BEFC20"
+      ],
+      "symbol": "YaHc3GS7y7g#D#A",
+      "symbol_address": "00105c20",
+      "thunk": false,
+      "thunk_target": null,
+      "thunk_target_external": false
+    },
+    {
+      "external": false,
+      "function_body_addresses": 229,
+      "function_body_sha256": "331145a858e90f0f423ad59fccdbf9fe0d08854723e936e059a378d075f6fd0a",
+      "function_entry": "00115cc0",
+      "function_name": "bRujIheWlB0#D#A",
+      "function_present": true,
+      "instruction_count": 59,
+      "nid": "bRujIheWlB0",
+      "runtime_direct_bridge_count": 4,
+      "runtime_load_base": "0x0000000805AEA000",
+      "runtime_symbol_addresses": [
+        "0x0000000805BFFCC0"
+      ],
+      "symbol": "bRujIheWlB0#D#A",
+      "symbol_address": "00115cc0",
+      "thunk": false,
+      "thunk_target": null,
+      "thunk_target_external": false
+    },
+    {
+      "external": false,
+      "function_body_addresses": 12,
+      "function_body_sha256": "6de1120b10aec73bbb38eb3cee2f93f947d7b4b9c5ef0395d2f7bea362f6c57c",
+      "function_entry": "001183a0",
+      "function_name": "bZx+FFSlkUM#D#A",
+      "function_present": true,
+      "instruction_count": 5,
+      "nid": "bZx+FFSlkUM",
+      "runtime_direct_bridge_count": 4,
+      "runtime_load_base": "0x0000000805AEA000",
+      "runtime_symbol_addresses": [
+        "0x0000000805C023A0"
+      ],
+      "symbol": "bZx+FFSlkUM#D#A",
+      "symbol_address": "001183a0",
+      "thunk": false,
+      "thunk_target": null,
+      "thunk_target_external": false
+    },
+    {
+      "external": false,
+      "function_body_addresses": 52,
+      "function_body_sha256": "c663f80c4a73c465baff8aee941e05552d52a225dc61b179963ac182276996de",
+      "function_entry": "001163f0",
+      "function_name": "eT2UsmTewbU#D#A",
+      "function_present": true,
+      "instruction_count": 12,
+      "nid": "eT2UsmTewbU",
+      "runtime_direct_bridge_count": 4,
+      "runtime_load_base": "0x0000000805AEA000",
+      "runtime_symbol_addresses": [
+        "0x0000000805C003F0"
+      ],
+      "symbol": "eT2UsmTewbU#D#A",
+      "symbol_address": "001163f0",
+      "thunk": false,
+      "thunk_target": null,
+      "thunk_target_external": false
+    },
+    {
+      "external": false,
+      "function_body_addresses": 144,
+      "function_body_sha256": "68d501f6d4b1b2ddd02e1485c0d31bad1b43a12e54ae3791bc489f0c0ce08815",
+      "function_entry": "0016bf40",
+      "function_name": "fiiNDnNBKVY#D#A",
+      "function_present": true,
+      "instruction_count": 47,
+      "nid": "fiiNDnNBKVY",
+      "runtime_direct_bridge_count": 4,
+      "runtime_load_base": "0x0000000805AEA000",
+      "runtime_symbol_addresses": [
+        "0x0000000805C55F40"
+      ],
+      "symbol": "fiiNDnNBKVY#D#A",
+      "symbol_address": "0016bf40",
+      "thunk": false,
+      "thunk_target": null,
+      "thunk_target_external": false
+    },
+    {
+      "external": false,
+      "function_body_addresses": 13,
+      "function_body_sha256": "69de6a61170d30f28be00c65bce4c1996ea14ab6faa281f407ab8514d54ddfbb",
+      "function_entry": "00105cb0",
+      "function_name": "gTuXQwP9rrs#D#A",
+      "function_present": true,
+      "instruction_count": 6,
+      "nid": "gTuXQwP9rrs",
+      "runtime_direct_bridge_count": 4,
+      "runtime_load_base": "0x0000000805AEA000",
+      "runtime_symbol_addresses": [
+        "0x0000000805BEFCB0"
+      ],
+      "symbol": "gTuXQwP9rrs#D#A",
+      "symbol_address": "00105cb0",
+      "thunk": false,
+      "thunk_target": null,
+      "thunk_target_external": false
+    },
+    {
+      "external": false,
+      "function_body_addresses": 33,
+      "function_body_sha256": "b8e8f2b1d97156411ee356de9d7e128f771f21260f381c04d563c645f3cea0b7",
+      "function_entry": "00105cc0",
+      "function_name": "iS4aWbUonl0#D#A",
+      "function_present": true,
+      "instruction_count": 12,
+      "nid": "iS4aWbUonl0",
+      "runtime_direct_bridge_count": 4,
+      "runtime_load_base": "0x0000000805AEA000",
+      "runtime_symbol_addresses": [
+        "0x0000000805BEFCC0"
+      ],
+      "symbol": "iS4aWbUonl0#D#A",
+      "symbol_address": "00105cc0",
+      "thunk": false,
+      "thunk_target": null,
+      "thunk_target_external": false
+    },
+    {
+      "external": false,
+      "function_body_addresses": 1196,
+      "function_body_sha256": "4888386bdb21f46e70ca5fe5bd648d5cecf32ab3fbde28a7cff24d59091d7c3a",
+      "function_entry": "0014dc20",
+      "function_name": "jMB7EFyu30Y#D#A",
+      "function_present": true,
+      "instruction_count": 259,
+      "nid": "jMB7EFyu30Y",
+      "runtime_direct_bridge_count": 4,
+      "runtime_load_base": "0x0000000805AEA000",
+      "runtime_symbol_addresses": [
+        "0x0000000805C37C20"
+      ],
+      "symbol": "jMB7EFyu30Y#D#A",
+      "symbol_address": "0014dc20",
+      "thunk": false,
+      "thunk_target": null,
+      "thunk_target_external": false
+    },
+    {
+      "external": false,
+      "function_body_addresses": 117,
+      "function_body_sha256": "28e65f6e3385e9b7021d52e1e3675046b750cbda2163ccf1dd8c34f5ff6e9048",
+      "function_entry": "00153cd0",
+      "function_name": "lKEN2IebgJ0#D#A",
+      "function_present": true,
+      "instruction_count": 35,
+      "nid": "lKEN2IebgJ0",
+      "runtime_direct_bridge_count": 4,
+      "runtime_load_base": "0x0000000805AEA000",
+      "runtime_symbol_addresses": [
+        "0x0000000805C3DCD0"
+      ],
+      "symbol": "lKEN2IebgJ0#D#A",
+      "symbol_address": "00153cd0",
+      "thunk": false,
+      "thunk_target": null,
+      "thunk_target_external": false
+    },
+    {
+      "external": false,
+      "function_body_addresses": 58,
+      "function_body_sha256": "70f7587d4fa44fd919e71a20a3817f28e0100ed29dfbb5c3b04a71c39bbcf011",
+      "function_entry": "00116600",
+      "function_name": "ozMAr28BwSY#D#A",
+      "function_present": true,
+      "instruction_count": 16,
+      "nid": "ozMAr28BwSY",
+      "runtime_direct_bridge_count": 4,
+      "runtime_load_base": "0x0000000805AEA000",
+      "runtime_symbol_addresses": [
+        "0x0000000805C00600"
+      ],
+      "symbol": "ozMAr28BwSY#D#A",
+      "symbol_address": "00116600",
+      "thunk": false,
+      "thunk_target": null,
+      "thunk_target_external": false
+    },
+    {
+      "external": false,
+      "function_body_addresses": 8,
+      "function_body_sha256": "083f13b497269b24f9aec95e593d31661f07d914e2ce6fbcc137e945b5186b16",
+      "function_entry": "0013abf0",
+      "function_name": "rcQCUr0EaRU#D#A",
+      "function_present": true,
+      "instruction_count": 2,
+      "nid": "rcQCUr0EaRU",
+      "runtime_direct_bridge_count": 4,
+      "runtime_load_base": "0x0000000805AEA000",
+      "runtime_symbol_addresses": [
+        "0x0000000805C24BF0"
+      ],
+      "symbol": "rcQCUr0EaRU#D#A",
+      "symbol_address": "0013abf0",
+      "thunk": false,
+      "thunk_target": null,
+      "thunk_target_external": false
+    },
+    {
+      "external": false,
+      "function_body_addresses": 58,
+      "function_body_sha256": "cf38e8b4f3488af94d14926b2ab34c8071ae85b2cdbe2c497d4459c01b082948",
+      "function_entry": "00116520",
+      "function_name": "tQIo+GIPklo#D#A",
+      "function_present": true,
+      "instruction_count": 16,
+      "nid": "tQIo+GIPklo",
+      "runtime_direct_bridge_count": 4,
+      "runtime_load_base": "0x0000000805AEA000",
+      "runtime_symbol_addresses": [
+        "0x0000000805C00520"
+      ],
+      "symbol": "tQIo+GIPklo#D#A",
+      "symbol_address": "00116520",
+      "thunk": false,
+      "thunk_target": null,
+      "thunk_target_external": false
+    },
+    {
+      "external": false,
+      "function_body_addresses": 13,
+      "function_body_sha256": "6ebfedbaec496191c40590099787d42b425a6218308483307cf4c3ae660e80e1",
+      "function_entry": "0013d600",
+      "function_name": "zlfEH8FmyUA#D#A",
+      "function_present": true,
+      "instruction_count": 6,
+      "nid": "zlfEH8FmyUA",
+      "runtime_direct_bridge_count": 8,
+      "runtime_load_base": "0x0000000805AEA000",
+      "runtime_symbol_addresses": [
+        "0x0000000805C27600"
+      ],
+      "symbol": "zlfEH8FmyUA#D#A",
+      "symbol_address": "0013d600",
+      "thunk": false,
+      "thunk_target": null,
+      "thunk_target_external": false
+    },
+    {
+      "external": false,
+      "function_body_addresses": 20,
+      "function_body_sha256": "f8988400cd9033baf825b6ea48b535764e21436cadd786695d187c7c969bf0c3",
+      "function_entry": "00134fe0",
+      "function_name": "zr094EQ39Ww#D#A",
+      "function_present": true,
+      "instruction_count": 5,
+      "nid": "zr094EQ39Ww",
+      "runtime_direct_bridge_count": 8,
+      "runtime_load_base": "0x0000000805AEA000",
+      "runtime_symbol_addresses": [
+        "0x0000000805C1EFE0"
+      ],
+      "symbol": "zr094EQ39Ww#D#A",
+      "symbol_address": "00134fe0",
+      "thunk": false,
+      "thunk_target": null,
+      "thunk_target_external": false
+    }
+  ],
+  "ghidra_version": "12.1.2",
+  "missing": [],
+  "program_name": "gta-v-libc.reconstructed.elf",
+  "provenance": {
+    "evidence_policy": "Ghidra plus SharpEmu runtime routing only; no emulator-source contracts",
+    "runtime_log_sha256": "421c0627d2fa265a608c98bd54d280153f54f611ddd240c0bdd1166e00dc9b88",
+    "source_hashes": {
+      "EVIDENCE.md": "70bce710805b582b134c923038ecf9a82329e24a7a2d4f955400ebcb32e87e0d",
+      "cleanup-proof-deep.txt": "66da95fde8c387f9d71ce1cb705c7301869b49c7959c2e6734b9ef9b815a1a87",
+      "cleanup-proof.txt": "bcfcd26bd2cb185f7d4538075268ad333299f3105f3b1d7899d80af931b69448",
+      "consolidated-nid-evidence.json": "fa845efcb3786257c57105f7c54d318d1f1b732a865ee30b37378fb79b4e33b3",
+      "data-import-disposition.csv": "6028eb14a42456f3aaedaf41d1c9a8c0d07ca47835e65e391acace3ded4cadf8",
+      "kernel-hle-contract-queue.csv": "8b9d1d6b7e66afa6d431bc8df186fd557ef8b02c18906a5cd0686b2dd589b7ce",
+      "libc-non-lle-contract-queue.csv": "f0add93f4100a99f556e6b871fdbc76bb4d20f606287e49f69b5da82251ad045",
+      "prefer-lle-include-candidates.csv": "1967c50f439cf71ea00c481bd86277a22251fc21988e41ff780d26b3c9f3c337",
+      "provider-coverage-summary.json": "9bc760c8cda928fd848d5dd93610cf95dca912f291d1ab9f7d9f404e3c82525e"
+    }
+  },
+  "target_count": 30,
+  "without_functions": []
+}

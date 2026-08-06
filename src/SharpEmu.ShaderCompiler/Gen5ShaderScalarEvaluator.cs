@@ -164,6 +164,10 @@ public static class Gen5ShaderScalarEvaluator
             Environment.GetEnvironmentVariable("SHARPEMU_CFG_RESOURCE_DISCOVERY"),
             "0",
             StringComparison.Ordinal);
+    private static readonly bool _traceVertexRaw = string.Equals(
+        Environment.GetEnvironmentVariable("SHARPEMU_TRACE_VERTEX_RAW"),
+        "1",
+        StringComparison.Ordinal);
 
     /// <summary>
     /// Optional fallback for global-memory reads that ctx.Memory cannot satisfy (the
@@ -258,6 +262,11 @@ public static class Gen5ShaderScalarEvaluator
         evaluation = default!;
         error = string.Empty;
         var scalarRegisters = new uint[ScalarRegisterCount];
+        if (state.GraphicsSystemRegisters is { } graphicsSystemRegisters)
+        {
+            graphicsSystemRegisters.Apply(scalarRegisters);
+        }
+
         for (var index = 0;
              index < state.UserData.Count &&
              state.UserDataScalarRegisterBase + (uint)index < scalarRegisters.Length;
@@ -407,6 +416,13 @@ public static class Gen5ShaderScalarEvaluator
 
                 continue;
             }
+
+                if (instruction.Opcode == "SWaitcntVscnt")
+                {
+                    // Scalar discovery executes against a coherent CPU snapshot; there
+                    // are no outstanding guest vector stores to wait for here.
+                    continue;
+                }
 
                 if (instruction.Encoding == Gen5ShaderEncoding.Sopk &&
                 instruction.Opcode.StartsWith("SCmpk", StringComparison.Ordinal))
@@ -634,12 +650,9 @@ public static class Gen5ShaderScalarEvaluator
                             bufferDescriptor.Stride;
                         var elementBytes =
                             (ulong)Math.Max(bufferMemory.DwordCount, 1u) * sizeof(uint);
-                        var recordSpan = Math.Max(
-                            (ulong)bufferDescriptor.Stride,
-                            SaturatingAdd(bindingOffset, elementBytes));
                         var requiredBytes = SaturatingAdd(
                             lastRecordOffset,
-                            recordSpan);
+                            SaturatingAdd(bindingOffset, elementBytes));
                         vertexReadBytes = Math.Min(vertexReadBytes, requiredBytes);
                     }
 
@@ -1044,10 +1057,7 @@ public static class Gen5ShaderScalarEvaluator
 
     private static void TraceTitleVertexInputs(IReadOnlyList<Gen5VertexInputBinding> bindings)
     {
-        if (!string.Equals(
-                Environment.GetEnvironmentVariable("SHARPEMU_TRACE_VERTEX_RAW"),
-                "1",
-                StringComparison.Ordinal) ||
+        if (!_traceVertexRaw ||
             bindings.Count != 3 ||
             !bindings.Any(static binding =>
                 binding.Pc == 0xF8 && binding.Stride == 16 &&
@@ -1369,6 +1379,27 @@ public static class Gen5ShaderScalarEvaluator
             return true;
         }
 
+        if (instruction.Opcode is "SBcnt1I32B64" or "SFF1I32B64")
+        {
+            if (!TryEvaluateScalarOperand64(
+                    instruction.Sources[0],
+                    registers,
+                    execMask,
+                    out var value))
+            {
+                error = $"scalar-source64 pc=0x{instruction.Pc:X} op={instruction.Opcode}";
+                return false;
+            }
+
+            registers[destination.Value] = instruction.Opcode == "SBcnt1I32B64"
+                ? (uint)BitOperations.PopCount(value)
+                : value == 0
+                    ? uint.MaxValue
+                    : (uint)BitOperations.TrailingZeroCount(value);
+            scalarConditionCode = registers[destination.Value] != 0;
+            return true;
+        }
+
         if (instruction.Opcode is "SMovB64" or "SWqmB64" or "SNotB64")
         {
             if (destination.Value >= ScalarRegisterCount - 1 ||
@@ -1554,7 +1585,24 @@ public static class Gen5ShaderScalarEvaluator
             return true;
         }
 
+        if (instruction.Opcode == "SWqmB32")
+        {
+            var quadAny = (left | (left >> 1) | (left >> 2) | (left >> 3)) &
+                0x1111_1111u;
+            var value = quadAny * 0xFu;
+            registers[destination.Value] = value;
+            if (destination.Value == 126)
+            {
+                execMask = value;
+                registers[127] = 0;
+            }
+
+            scalarConditionCode = value != 0;
+            return true;
+        }
+
         if (instruction.Opcode is
+            "SAbsI32" or
             "SNotB32" or
             "SBrevB32" or
             "SBcnt1I32B32" or
@@ -1563,6 +1611,9 @@ public static class Gen5ShaderScalarEvaluator
         {
             registers[destination.Value] = instruction.Opcode switch
             {
+                "SAbsI32" => (left & 0x8000_0000u) != 0
+                    ? unchecked(0u - left)
+                    : left,
                 "SNotB32" => ~left,
                 "SBrevB32" => ReverseBits(left),
                 "SBcnt1I32B32" => (uint)BitOperations.PopCount(left),
@@ -1949,6 +2000,30 @@ public static class Gen5ShaderScalarEvaluator
     {
         scalarConditionCode = false;
         error = string.Empty;
+        if (instruction.Opcode is "SCmpEqU64" or "SCmpLgU64")
+        {
+            if (instruction.Sources.Count != 2 ||
+                !TryEvaluateScalarOperand64(
+                    instruction.Sources[0],
+                    registers,
+                    ulong.MaxValue,
+                    out var left64) ||
+                !TryEvaluateScalarOperand64(
+                    instruction.Sources[1],
+                    registers,
+                    ulong.MaxValue,
+                    out var right64))
+            {
+                error = $"scalar-compare-source64 pc=0x{instruction.Pc:X} op={instruction.Opcode}";
+                return false;
+            }
+
+            scalarConditionCode = instruction.Opcode == "SCmpEqU64"
+                ? left64 == right64
+                : left64 != right64;
+            return true;
+        }
+
         if (instruction.Sources.Count != 2 ||
             !TryEvaluateScalarOperand(instruction.Sources[0], registers, out var left) ||
             !TryEvaluateScalarOperand(instruction.Sources[1], registers, out var right))

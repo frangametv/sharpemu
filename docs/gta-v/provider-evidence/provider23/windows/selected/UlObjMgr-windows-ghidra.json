@@ -1,0 +1,55 @@
+{
+  "executable_sha256": "82ee954d51f7d3eb9015b96bf4afcbb9f00ffff51afd99baaad5d90451f1b2a8",
+  "format": "sharpemu-ghidra-selected-nid-functions-v1",
+  "function_count": 2,
+  "functions": [
+    {
+      "external": false,
+      "function_body_addresses": 114,
+      "function_body_sha256": "e024157704ed2ba5cb00e864d03adee36c6cdcce87310944fcdf22c25f018ab5",
+      "function_entry": "00000140",
+      "function_name": "BG26hBGiNlw#C#A",
+      "function_present": true,
+      "instruction_count": 38,
+      "log_file": "audit-14-UlObjMgr.log",
+      "nid": "BG26hBGiNlw",
+      "result_file": "14-UlObjMgr.result.tsv",
+      "symbol": "BG26hBGiNlw#C#A",
+      "symbol_address": "00000140",
+      "thunk": false,
+      "thunk_target": "",
+      "thunk_target_external": null
+    },
+    {
+      "external": false,
+      "function_body_addresses": 44,
+      "function_body_sha256": "2223f780e0ec6634e200ca0d58e56c7e076ba9f0f488d3752a414f53d051d6d4",
+      "function_entry": "000001c0",
+      "function_name": "Smf+fUNblPc#C#A",
+      "function_present": true,
+      "instruction_count": 11,
+      "log_file": "audit-14-UlObjMgr.log",
+      "nid": "Smf+fUNblPc",
+      "result_file": "14-UlObjMgr.result.tsv",
+      "symbol": "Smf+fUNblPc#C#A",
+      "symbol_address": "000001c0",
+      "thunk": false,
+      "thunk_target": "",
+      "thunk_target_external": null
+    }
+  ],
+  "ghidra_version": "12.1.2_PUBLIC_20260605",
+  "missing": [],
+  "program_name": "ulobjmgr.sprx",
+  "provenance": {
+    "audit_script_sha256": "f946f435e38dc99db306165473b180209d5db7e0581c6c52d3b417510f87dfa9",
+    "computer": "DESKTOP-RAAKAQJ",
+    "evidence_policy": "Ghidra analysis of exact Gen5 provider ELFs only; no Kyty or other emulator-derived source, contracts, or implementations.",
+    "log_sha256": "d6b2a598e3f2cd7f91574c48508f1e6efcaeaab11ecadd2ddfb6316dcdb880b7",
+    "plan_sha256": "7b98c992e0d65d55d9743b30b320ad197f0bc52bb803d5654398a701a814d831",
+    "provider_role": "primary",
+    "result_sha256": "cbcef2233cdcb37289ae6131beb38d813205a79f72696e65d2faf58b10f30c47"
+  },
+  "target_count": 2,
+  "without_functions": []
+}

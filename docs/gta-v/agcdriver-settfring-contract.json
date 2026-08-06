@@ -1,0 +1,66 @@
+{
+  "schema_version": 1,
+  "generated_at": "2026-07-18T06:20:00-04:00",
+  "target": {
+    "nid": "XlNp7jzGiPo",
+    "export_name": "sceAgcDriverSetTFRing",
+    "library": "libSceAgcDriver",
+    "provider_virtual_address": "0x6ff0",
+    "provider_sha256": "bc2ca28f3632ce69e25ab44991ed1f49bc1624fe39c2fc81f2efc6e705876348",
+    "provider_size_bytes": 141176,
+    "provider_path": "/Users/mcruz/Developer/sharpemu/Firmware/dev/ssd0.system_b_out/common/lib/libSceAgcDriver.sprx"
+  },
+  "abi": {
+    "return": "int32",
+    "arguments": [
+      {"index": 0, "register": "rdi", "type": "uint64", "meaning": "TF ring guest address"},
+      {"index": 1, "register": "rsi", "type": "uint32", "meaning": "TF ring size in bytes"}
+    ],
+    "output_memory_writes": []
+  },
+  "public_dispatch": {
+    "process_query_dependency_nid": "0vTn5IDMU9A",
+    "special_query_result": "0x00840f00",
+    "special_size_cap_bytes": 16384,
+    "interface_stride_bytes": 120,
+    "callback_slot_offset": "0x80",
+    "selected_index_address": "0x1aa2c",
+    "selected_callback": "0x6f90"
+  },
+  "selected_callback": {
+    "virtual_address": "0x6f90",
+    "driver_handle_address": "0x1a90c",
+    "helper_virtual_address": "0x9c20",
+    "success": "0x00000000",
+    "failure": "0x8a6dffff"
+  },
+  "helper": {
+    "validation_order": [
+      "ring_address_low_8_bits_equal_zero",
+      "size_low_2_bits_equal_zero",
+      "driver_ioctl_returns_zero"
+    ],
+    "ioctl_dependency_nid": "PfccT7qURYE",
+    "ioctl_command": "0x80108128",
+    "ioctl_input_size_bytes": 16,
+    "ioctl_input_fields": [
+      {"offset": 0, "type": "uint64", "meaning": "ring address"},
+      {"offset": 8, "type": "uint32", "meaning": "effective size"}
+    ],
+    "stack_guard_failure_dependency_nid": "Ou3iL1abvng"
+  },
+  "gta_observation": {
+    "caller_return_address": "0x00000008029574a5",
+    "ring_address": "0x0000000311f00200",
+    "requested_size": "0x0003fff8",
+    "unresolved_fallback": "0xffffffff80020002",
+    "reaction": "TEST EAX followed by INT 0x41 on nonzero"
+  },
+  "confidence": {
+    "abi_and_return_flow": "high",
+    "validation_and_error_codes": "high",
+    "interface_selection": "high",
+    "opaque_process_query_name": "low",
+    "kernel_driver_side_effects_beyond_ring_registration": "medium-low"
+  }
+}

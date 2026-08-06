@@ -1,0 +1,26 @@
+{
+  "schema_version": 1,
+  "host": "DESKTOP-RAAKAQJ",
+  "campaign_root": "C:\\Users\\Miguel Cruz\\AppData\\Local\\Temp\\cg-gh-swarm-20260718-3e9d1e5c",
+  "cleanup_run": {
+    "timestamp_utc": "2026-07-18T07:45:13.9145386Z",
+    "validated_parent": "C:\\Users\\Miguel Cruz\\AppData\\Local\\Temp",
+    "root_existed_before": true,
+    "campaign_java_before": 0,
+    "root_exists_after": false,
+    "campaign_java_after": 0,
+    "matching_temp_entries_after": 0,
+    "all_java_processes_after": 0,
+    "cleanup_verified": true
+  },
+  "independent_followup": {
+    "timestamp_utc": "2026-07-18T07:45:54.0973118Z",
+    "root_exists": false,
+    "cleanup_script_exists": false,
+    "verifier_self_removed": true,
+    "campaign_java": 0,
+    "all_java": 0,
+    "matching_temp_entries": 0,
+    "verified": true
+  }
+}

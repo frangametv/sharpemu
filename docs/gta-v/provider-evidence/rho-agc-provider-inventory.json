@@ -1,0 +1,82 @@
+{
+  "schema_version": 1,
+  "evidence_scope": "Ghidra-defined-export existence for GTA V remaining AGC, AgcDriver, and AMPR imports",
+  "ghidra": {
+    "version": "12.1.2",
+    "archive_sha256": "b62e81a0390618466c019c60d8c2f796ced2509c4c1aea4a37644a77272cf99d",
+    "execution_host": "rho.cs.oswego.edu",
+    "projects": "one unique ephemeral project per target under a unique /dev/shm campaign root"
+  },
+  "generation": "Gen5",
+  "providers": [
+    {
+      "library": "libSceAgcDriver",
+      "source_path": "/Users/mcruz/Developer/sharpemu/Firmware/12.70-root/system/common/lib/libSceAgcDriver.sprx",
+      "source_size": 45084,
+      "source_sha256": "f4eb57dbcefda5ccca70be909b5138890c4c33daa6976a8985c4dd9a55c9d212",
+      "reconstructed_derivative_path": "/Users/mcruz/Developer/sharpemu/Firmware/dev/ssd0.system_b_out/common/lib/libSceAgcDriver.sprx",
+      "reconstructed_derivative_size": 141176,
+      "reconstructed_derivative_sha256": "bc2ca28f3632ce69e25ab44991ed1f49bc1624fe39c2fc81f2efc6e705876348",
+      "ghidra_project_pattern": "agc_contracts-driver_<ordinal>",
+      "program_functions": 396,
+      "program_instructions": 9886,
+      "program_symbols": 761,
+      "targets": 26,
+      "matched_real_defined_functions": 26,
+      "missing": 0,
+      "ambiguous": 0,
+      "headless_failures": 0
+    },
+    {
+      "library": "libSceAgc",
+      "source_path": "/Users/mcruz/Developer/sharpemu/Firmware/12.70-root/system/common/lib/libSceAgc.sprx",
+      "source_size": 95878,
+      "source_sha256": "9595740c624776f0298a19ee9afbb009d53c84d5607c6d529f2cccd70d0472b9",
+      "reconstructed_derivative_path": "/Users/mcruz/Developer/sharpemu/Firmware/dev/ssd0.system_b_out/common/lib/libSceAgc.sprx",
+      "reconstructed_derivative_size": 366416,
+      "reconstructed_derivative_sha256": "110df81f759ae3dffcc9b5e3fa062c74058518631847641b8e08a54f6b8b6e2d",
+      "ghidra_project_pattern": "agc_contracts-agc_<ordinal>",
+      "program_functions": 614,
+      "program_instructions": 23697,
+      "program_symbols": 1159,
+      "targets": 119,
+      "matched_real_defined_functions": 119,
+      "missing": 0,
+      "ambiguous": 0,
+      "headless_failures": 0
+    },
+    {
+      "library": "libSceAmpr",
+      "source_path": "/Users/mcruz/Developer/sharpemu/Firmware/12.70-root/system/common/lib/libSceAmpr.sprx",
+      "source_size": 17197,
+      "source_sha256": "5afdd225969ab5bc92a3e83339da8def83bfb4c47cfed0c15e8cc6fade256d58",
+      "reconstructed_derivative_path": "/Users/mcruz/Developer/sharpemu/Firmware/dev/ssd0.system_b_out/common/lib/libSceAmpr.sprx",
+      "reconstructed_derivative_size": 91316,
+      "reconstructed_derivative_sha256": "129a972cdb762d1b362ad136cdb802f5cac7d3a5f48ecb8b7e5d695c70af4047",
+      "ghidra_project_pattern": "agc_contracts-ampr_<ordinal>",
+      "program_functions": 244,
+      "program_instructions": 5129,
+      "program_symbols": 544,
+      "targets": 46,
+      "matched_real_defined_functions": 46,
+      "missing": 0,
+      "ambiguous": 0,
+      "headless_failures": 0
+    }
+  ],
+  "totals": {
+    "targets": 191,
+    "matched_real_defined_functions": 191,
+    "missing": 0,
+    "ambiguous": 0,
+    "headless_failures": 0
+  },
+  "rows_csv": "provider-export-existence.csv",
+  "rows_csv_sha256": "890033c1b53293ba505f9f4782c33f9f2c34eedd4fece1ab560a944a90d95cd3",
+  "limitations": [
+    "Export existence proves the provider has a real defined entry suitable for PreferLle registration.",
+    "It does not by itself establish an HLE behavior contract.",
+    "The MM4IZSEYytQ contract is documented separately from this existence inventory."
+  ],
+  "other_emulator_source_used": false
+}

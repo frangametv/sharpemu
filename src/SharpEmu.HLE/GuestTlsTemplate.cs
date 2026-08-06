@@ -6,6 +6,10 @@ using System.Diagnostics;
 
 namespace SharpEmu.HLE;
 
+// Attribution: substantial PS5 TLS/DTV portions in this file were originally authored
+// by @xnetcat and later adapted in PR #216. Source snapshot:
+// https://github.com/xnetcat/sharpemu/tree/2497ea6799432ac2385a50f739eff2ce922d6fd4
+
 /// <summary>
 /// Process-wide registry of ELF PT_TLS templates and per-thread dynamic thread
 /// vectors. AMD64 uses TLS Variant II: startup/static module blocks precede the
@@ -14,10 +18,11 @@ namespace SharpEmu.HLE;
 /// </summary>
 public static class GuestTlsTemplate
 {
-    // Must match CpuDispatcher/DirectExecutionBackend's mapped prefix. PS5
-    // modules can require more than one host page of Variant II static TLS;
-    // Dreaming Sarah's startup image, for example, reaches 0x1870 bytes.
-    public const ulong StartupStaticTlsReservation = 0x20000UL;     // Was 0x10000UL, but thats too small for GTA V
+    // Must match CpuDispatcher/DirectExecutionBackend's mapped prefix. Keep the
+    // reservation on a 64 KiB host-allocation boundary: GTA V's startup module
+    // set reaches 0x13570 bytes of Variant II static TLS below the thread
+    // pointer, while Windows exact-address mappings require 64 KiB alignment.
+    public const ulong StartupStaticTlsReservation = 0x20000UL;
     private static readonly object _gate = new();
     private static readonly SortedDictionary<ulong, ModuleTemplate> _modules = new();
     private static readonly Dictionary<ulong, ThreadDtv> _threadDtvs = new();

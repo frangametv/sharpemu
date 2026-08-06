@@ -40,7 +40,8 @@ internal interface IGuestGpuBackend
         int imageBindingBase = 0,
         int scalarRegisterBufferIndex = -1,
         int requiredVertexOutputCount = 0,
-        ulong storageBufferOffsetAlignment = 1);
+        ulong storageBufferOffsetAlignment = 1,
+        IReadOnlyList<uint>? pixelInputControls = null);
 
     bool TryCompilePixelShader(
         Gen5ShaderState state,
@@ -54,8 +55,9 @@ internal interface IGuestGpuBackend
         int scalarRegisterBufferIndex = -1,
         uint pixelInputEnable = 0,
         uint pixelInputAddress = 0,
-        IReadOnlyList<uint>? pixelInputCntl = null,
-        ulong storageBufferOffsetAlignment = 1);
+        ulong storageBufferOffsetAlignment = 1,
+        IReadOnlyList<uint>? pixelInputControls = null,
+        int gdsBufferIndex = -1);
 
     bool TryCompileComputeShader(
         Gen5ShaderState state,
@@ -68,7 +70,27 @@ internal interface IGuestGpuBackend
         int totalGlobalBufferCount = -1,
         int initialScalarBufferIndex = -1,
         uint waveLaneCount = 32,
+        ulong storageBufferOffsetAlignment = 1,
+        int gdsBufferIndex = -1);
+
+    bool TryCompileNggComputeShader(
+        Gen5ShaderState state,
+        Gen5ShaderEvaluation evaluation,
+        Gen5NggOutputLayout outputLayout,
+        out IGuestCompiledShader? shader,
+        out string error,
+        int globalBufferBase,
+        int totalGlobalBufferCount,
+        int imageBindingBase,
+        int initialScalarBufferIndex = -1,
         ulong storageBufferOffsetAlignment = 1);
+
+    bool TryCreateNggRasterVertexShader(
+        Gen5NggOutputLayout outputLayout,
+        int totalGlobalBufferCount,
+        IReadOnlyList<uint> pixelInputControls,
+        out IGuestCompiledShader? shader,
+        out string error);
 
     /// <summary>Returns the backend's no-color-output fragment shader.</summary>
     IGuestCompiledShader GetDepthOnlyFragmentShader();
@@ -219,6 +241,10 @@ internal interface IGuestGpuBackend
     /// <summary>Sequence currently executing on the guest-work consumer; diagnostics only.</summary>
     long CurrentGuestWorkSequenceForDiagnostics { get; }
 
+    /// <summary>Most recent work sequence enqueued by the calling thread;
+    /// diagnostics only.</summary>
+    long CurrentThreadEnqueuedGuestWorkSequenceForDiagnostics { get; }
+
     // Guest image lifecycle beyond presentation: CPU-visible seeding, writes, and
     // extent queries the AGC layer uses to keep guest memory and backend images
     // coherent. Addresses and formats are always raw guest values.
@@ -258,6 +284,13 @@ internal interface IGuestGpuBackend
     /// drain. Must not enqueue retained plane copies on the producer path.
     /// </summary>
     void RequestCpuWrittenGuestImageSync(ulong scopeAddress = 0, ulong scopeByteCount = ulong.MaxValue);
+
+    /// <summary>
+    /// Copies the current GPU-side contents between compatible live guest images.
+    /// Returns false when either image is unavailable so the caller can fall back
+    /// to uploading the guest CPU-memory snapshot.
+    /// </summary>
+    bool TrySubmitGuestImageCopy(ulong sourceAddress, ulong destinationAddress);
 
     bool TryGetGuestImageExtent(ulong address, out uint width, out uint height, out ulong byteCount);
 

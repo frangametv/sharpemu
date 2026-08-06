@@ -165,6 +165,39 @@ public sealed class KernelEventQueueCompatExportsTests
         Assert.Equal(0UL, BinaryPrimitives.ReadUInt64LittleEndian(evt[0x10..]));
     }
 
+    [Theory]
+    [InlineData(0u, true)]
+    [InlineData(1u, true)]
+    [InlineData(999u, true)]
+    [InlineData(1_000u, false)]
+    public void SubMillisecondTimeoutsUsePollPath(uint timeoutUsec, bool expected)
+    {
+        Assert.Equal(expected, KernelEventQueueCompatExports.IsSubMillisecondPoll(timeoutUsec));
+    }
+
+    [Fact]
+    public void WaitEqueue_OneMicrosecondTimeoutReturnsTimedOutWithoutAnEvent()
+    {
+        var handle = CreateEqueue();
+        var memory = new FakeCpuMemory(MemoryBase, MemorySize);
+        var context = new CpuContext(memory, Generation.Gen5);
+        const ulong eventsAddress = MemoryBase + 0x100;
+        const ulong outCountAddress = MemoryBase + 0x300;
+        const ulong timeoutAddress = MemoryBase + 0x308;
+        Assert.True(context.TryWriteUInt32(timeoutAddress, 1));
+        context[CpuRegister.Rdi] = handle;
+        context[CpuRegister.Rsi] = eventsAddress;
+        context[CpuRegister.Rdx] = 1;
+        context[CpuRegister.Rcx] = outCountAddress;
+        context[CpuRegister.R8] = timeoutAddress;
+
+        var result = KernelEventQueueCompatExports.KernelWaitEqueue(context);
+
+        Assert.Equal((int)OrbisGen2Result.ORBIS_GEN2_ERROR_TIMED_OUT, result);
+        Assert.True(context.TryReadUInt32(outCountAddress, out var delivered));
+        Assert.Equal(0u, delivered);
+    }
+
     private static ulong CreateEqueue()
     {
         var memory = new FakeCpuMemory(MemoryBase, MemorySize);

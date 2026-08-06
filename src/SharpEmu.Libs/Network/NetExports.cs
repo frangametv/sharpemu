@@ -3,6 +3,7 @@
 
 using System.Buffers.Binary;
 using System.Collections.Concurrent;
+using System.Globalization;
 using System.Net;
 using System.Net.Sockets;
 using System.Runtime.InteropServices;
@@ -15,15 +16,20 @@ public static class NetExports
 {
     private const int NetErrorBadFileDescriptor = unchecked((int)0x80410109);
     private const int NetErrorInvalidArgument = unchecked((int)0x80410116);
+    private const int NetErrorAddressFamilyNotSupported = unchecked((int)0x8041012F);
     private const int NetErrorWouldBlock = unchecked((int)0x80410123);
     private const int NetErrorAddressInUse = unchecked((int)0x80410130);
     private const int NetErrorNotInitialized = unchecked((int)0x804101C8);
     private const int NetErrnoBadFileDescriptor = 9;
     private const int NetErrnoInvalidArgument = 22;
+    private const int NetErrnoAddressFamilyNotSupported = 47;
     private const int NetErrnoWouldBlock = 35;
     private const int NetErrnoAddressInUse = 48;
     private const int NetErrnoNotInitialized = 200;
     private const int MaxNameLength = 256;
+    private const int NetSockInfoSize = 0xA0;
+    private const int NetSockInfoLocalPortOffset = 0x3C;
+    private const int NetGetSockInfoInvalidFlagsMask = 0x31000;
 
     private static readonly ConcurrentDictionary<int, NetPool> _pools = new();
     private static readonly ConcurrentDictionary<int, ResolverContext> _resolvers = new();
@@ -72,6 +78,70 @@ public static class NetExports
         _sockets.Clear();
         TraceNet("term", 0, 0, 0, 0);
         return ctx.SetReturn(0);
+    }
+
+    // Ghidra 12.1.2_PUBLIC_20260605, libSceNet.sprx
+    // SHA-256 c04e1735a3f80a502c120610a43d0d37741f7ef90040d6b9d3346cc43988c64d,
+    // entry RVA 0x34A0. The provider accepts the Orbis AF_INET (2) and
+    // AF_INET6 (28) values, returns 1/0 for valid/invalid text, and only sets
+    // net errno for an invalid source pointer or unsupported address family.
+    [SysAbiExport(
+        Nid = "8Kcp5d-q1Uo",
+        ExportName = "sceNetInetPton",
+        Target = Generation.Gen5,
+        LibraryName = "libSceNet",
+        PreferLle = true)]
+    public static int NetInetPton(CpuContext ctx)
+    {
+        var family = unchecked((int)ctx[CpuRegister.Rdi]);
+        var sourceAddress = ctx[CpuRegister.Rsi];
+        var destinationAddress = ctx[CpuRegister.Rdx];
+
+        if (family is not 2 and not 28)
+        {
+            return SetNetError(
+                ctx,
+                NetErrorAddressFamilyNotSupported,
+                NetErrnoAddressFamilyNotSupported);
+        }
+
+        if (sourceAddress == 0)
+        {
+            return SetNetError(ctx, NetErrorInvalidArgument, NetErrnoInvalidArgument);
+        }
+
+        if (!TryReadUtf8Z(ctx, sourceAddress, MaxNameLength, out var text))
+        {
+            return ctx.SetReturn(OrbisGen2Result.ORBIS_GEN2_ERROR_MEMORY_FAULT);
+        }
+
+        byte[] packed;
+        if (family == 2)
+        {
+            if (!TryParseStrictIpv4(text, out packed))
+            {
+                return ctx.SetReturn(0);
+            }
+        }
+        else
+        {
+            if (text.Contains('%', StringComparison.Ordinal) ||
+                !IPAddress.TryParse(text, out var address) ||
+                address.AddressFamily != AddressFamily.InterNetworkV6)
+            {
+                return ctx.SetReturn(0);
+            }
+
+            packed = address.GetAddressBytes();
+        }
+
+        if (destinationAddress == 0 || !ctx.Memory.TryWrite(destinationAddress, packed))
+        {
+            return ctx.SetReturn(OrbisGen2Result.ORBIS_GEN2_ERROR_MEMORY_FAULT);
+        }
+
+        ctx[CpuRegister.Rax] = 1;
+        return (int)OrbisGen2Result.ORBIS_GEN2_OK;
     }
 
     [SysAbiExport(
@@ -192,7 +262,7 @@ public static class NetExports
         Nid = "fFxGkxF2bVo",
         ExportName = "setsockopt",
         Target = Generation.Gen4 | Generation.Gen5,
-        LibraryName = "libKernel")]
+        LibraryName = "libScePosix")]
     public static int PosixSetsockopt(CpuContext ctx) => NetSetsockopt(ctx);
 
     /// <summary>
@@ -209,7 +279,7 @@ public static class NetExports
         Nid = "6O8EwYOgH9Y",
         ExportName = "getsockopt",
         Target = Generation.Gen4 | Generation.Gen5,
-        LibraryName = "libKernel")]
+        LibraryName = "libScePosix")]
     public static int PosixGetsockopt(CpuContext ctx)
     {
         var id = unchecked((int)ctx[CpuRegister.Rdi]);
@@ -276,7 +346,7 @@ public static class NetExports
         Nid = "fZOeZIOEmLw",
         ExportName = "send",
         Target = Generation.Gen4 | Generation.Gen5,
-        LibraryName = "libKernel")]
+        LibraryName = "libScePosix")]
     public static int PosixSend(CpuContext ctx)
     {
         var id = unchecked((int)ctx[CpuRegister.Rdi]);
@@ -332,7 +402,7 @@ public static class NetExports
         Nid = "5jRCs2axtr4",
         ExportName = "inet_ntop",
         Target = Generation.Gen4 | Generation.Gen5,
-        LibraryName = "libKernel")]
+        LibraryName = "libScePosix")]
     public static int PosixInetNtop(CpuContext ctx)
     {
         var family = unchecked((int)ctx[CpuRegister.Rdi]);
@@ -421,6 +491,57 @@ public static class NetExports
         {
             return SetNetError(ctx, NetErrorInvalidArgument, NetErrnoInvalidArgument);
         }
+    }
+
+    // Ghidra 12.1.2_PUBLIC_20260605, libSceNet.sprx SHA-256
+    // c04e1735a3f80a502c120610a43d0d37741f7ef90040d6b9d3346cc43988c64d,
+    // entry RVA 0x4180. GTA V caller FUN_02AE1E70 passes one 0xA0-byte
+    // record and consumes the big-endian local port at record offset 0x3C.
+    [SysAbiExport(
+        Nid = "hLuXdjHnhiI",
+        ExportName = "sceNetGetSockInfo",
+        Target = Generation.Gen5,
+        LibraryName = "libSceNet",
+        PreferLle = true)]
+    public static int NetGetSockInfo(CpuContext ctx)
+    {
+        if (!_initialized)
+        {
+            return SetNetError(ctx, NetErrorNotInitialized, NetErrnoNotInitialized);
+        }
+
+        var id = unchecked((int)ctx[CpuRegister.Rdi]);
+        var infoAddress = ctx[CpuRegister.Rsi];
+        var recordCount = unchecked((int)ctx[CpuRegister.Rdx]);
+        var flags = unchecked((int)ctx[CpuRegister.Rcx]);
+        if (infoAddress == 0 || recordCount < 1 || (flags & NetGetSockInfoInvalidFlagsMask) != 0)
+        {
+            return SetNetError(ctx, NetErrorInvalidArgument, NetErrnoInvalidArgument);
+        }
+
+        if (!_sockets.TryGetValue(id, out var socket))
+        {
+            return SetNetError(ctx, NetErrorBadFileDescriptor, NetErrnoBadFileDescriptor);
+        }
+
+        if (socket.LocalEndPoint is not IPEndPoint localEndpoint ||
+            localEndpoint.Port is < 0 or > ushort.MaxValue)
+        {
+            return SetNetError(ctx, NetErrorInvalidArgument, NetErrnoInvalidArgument);
+        }
+
+        Span<byte> info = stackalloc byte[NetSockInfoSize];
+        info.Clear();
+        BinaryPrimitives.WriteUInt16BigEndian(
+            info.Slice(NetSockInfoLocalPortOffset, sizeof(ushort)),
+            unchecked((ushort)localEndpoint.Port));
+        if (!ctx.Memory.TryWrite(infoAddress, info))
+        {
+            return ctx.SetReturn((int)OrbisGen2Result.ORBIS_GEN2_ERROR_MEMORY_FAULT);
+        }
+
+        TraceNet("socket.info", id, unchecked((ulong)localEndpoint.Port), unchecked((ulong)recordCount), unchecked((ulong)flags));
+        return ctx.SetReturn(0);
     }
 
     [SysAbiExport(
@@ -672,6 +793,34 @@ public static class NetExports
         return ctx.SetReturn(result);
     }
 
+    private static bool TryParseStrictIpv4(string text, out byte[] octets)
+    {
+        octets = new byte[4];
+        var parts = text.Split('.');
+        if (parts.Length != octets.Length)
+        {
+            return false;
+        }
+
+        for (var index = 0; index < parts.Length; index++)
+        {
+            if (parts[index].Length == 0 ||
+                !uint.TryParse(
+                    parts[index],
+                    NumberStyles.None,
+                    CultureInfo.InvariantCulture,
+                    out var value) ||
+                value > byte.MaxValue)
+            {
+                return false;
+            }
+
+            octets[index] = (byte)value;
+        }
+
+        return true;
+    }
+
     private static bool TryTranslateSocketParameters(
         int family,
         int type,
@@ -753,52 +902,6 @@ public static class NetExports
 
         value = Encoding.UTF8.GetString(bytes, 0, count);
         return true;
-    }
-
-    [SysAbiExport(
-        Nid = "8Kcp5d-q1Uo",
-        ExportName = "sceNetInetPton",
-        Target = Generation.Gen4 | Generation.Gen5,
-        LibraryName = "libSceNet")]
-    public static int NetInetPton(CpuContext ctx)
-    {
-        var addressFamily = unchecked((int)ctx[CpuRegister.Rdi]);
-        var sourceAddress = ctx[CpuRegister.Rsi];
-        var destinationAddress = ctx[CpuRegister.Rdx];
-        if (sourceAddress == 0 || destinationAddress == 0)
-        {
-            return SetNetError(ctx, NetErrorInvalidArgument, NetErrnoInvalidArgument);
-        }
-
-        if (!TryReadUtf8Z(ctx, sourceAddress, MaxNameLength, out var source))
-        {
-            return SetNetError(ctx, NetErrorInvalidArgument, NetErrnoInvalidArgument);
-        }
-
-        var family = addressFamily switch
-        {
-            2 => AddressFamily.InterNetwork,      // AF_INET
-            28 => AddressFamily.InterNetworkV6,   // AF_INET6
-            _ => AddressFamily.Unknown,
-        };
-        if (family == AddressFamily.Unknown ||
-            !IPAddress.TryParse(source, out var parsed) ||
-            parsed.AddressFamily != family)
-        {
-            // Match BSD inet_pton: return 0 for a parseable-family miss.
-            ctx[CpuRegister.Rax] = 0;
-            return 0;
-        }
-
-        var bytes = parsed.GetAddressBytes();
-        if (!ctx.Memory.TryWrite(destinationAddress, bytes))
-        {
-            return SetNetError(ctx, NetErrorInvalidArgument, NetErrnoInvalidArgument);
-        }
-
-        TraceNet("inet_pton", addressFamily, sourceAddress, destinationAddress, (ulong)bytes.Length);
-        ctx[CpuRegister.Rax] = 1;
-        return 1;
     }
 
     private static void TraceNet(string operation, int id, ulong arg0, ulong arg1, ulong arg2)

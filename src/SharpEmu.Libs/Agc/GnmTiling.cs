@@ -9,29 +9,14 @@ namespace SharpEmu.Libs.Agc;
 /// <summary>Which in-block address equation a <see cref="DetileParams"/> carries.</summary>
 internal enum DetileEquation
 {
-    /// <summary>Unsupported mode/format; caller must use the CPU path or raw upload.</summary>
     None,
-
-    /// <summary>Exact AddrLib XOR equation (RDNA2 modes 1/5/9/24/27): factored X/Y terms.</summary>
     ExactXor,
-
-    /// <summary>Other modes: a precomputed in-block Morton/standard element-offset table.</summary>
     BlockTable,
 }
 
 /// <summary>
-/// Backend-agnostic description of how to deswizzle one surface, produced by
-/// <see cref="GnmTiling.GetDetileParams"/>. Holds only plain integers and small
-/// int[] tables — no host graphics-API types — so it can cross the guest-GPU
-/// backend seam and drive a Vulkan (SPIR-V) or Metal (MSL) detile compute kernel
-/// identically to the CPU <see cref="GnmTiling.TryDetile"/> fallback. The single
-/// shared addressing formula both consume is:
-/// <code>
-///   inBlockByte = Equation == ExactXor
-///       ? XByteTerm[x &amp; XMask] ^ YByteTerm[y &amp; YMask]
-///       : BlockTable[(y % BlockHeight) * BlockWidth + (x % BlockWidth)] * BytesPerElement;
-///   srcByte = ((y / BlockHeight) * BlocksPerRow + (x / BlockWidth)) * BlockBytes + inBlockByte;
-/// </code>
+/// Backend-agnostic description of a tiled surface. CPU, Vulkan, and Metal
+/// consume this same addressing contract.
 /// </summary>
 internal readonly record struct DetileParams(
     DetileEquation Equation,
@@ -43,17 +28,18 @@ internal readonly record struct DetileParams(
     int BlockElements,
     int BlockBytes,
     int BlocksPerRow,
-    // ExactXor: within-block BYTE offset = XByteTerm[x & XMask] ^ YByteTerm[y & YMask].
     int[] XByteTerm,
     int XMask,
     int[] YByteTerm,
     int YMask,
-    // BlockTable: within-block ELEMENT offset = BlockTable[inBlockY * BlockWidth + inBlockX].
     int[] BlockTable)
 {
-    /// <summary>False when the mode/format is not GPU-portable (Equation == None).</summary>
     public bool IsSupported => Equation != DetileEquation.None;
 }
+
+// Attribution: substantial PS5 GNM tiling portions in this file were originally authored
+// by @xnetcat and later adapted in PR #216. Source snapshot:
+// https://github.com/xnetcat/sharpemu/tree/2497ea6799432ac2385a50f739eff2ce922d6fd4
 
 /// <summary>
 /// Deswizzles RDNA2 (GFX10) tiled texture surfaces into linear layout so they
@@ -70,6 +56,16 @@ internal readonly record struct DetileParams(
 /// </summary>
 internal static unsafe class GnmTiling
 {
+    internal readonly record struct TiledMipLayout(
+        ulong SourceOffset,
+        ulong SourceByteCount,
+        ulong AllocationByteCount,
+        int ElementsWide,
+        int ElementsHigh,
+        int SourceX,
+        int SourceY,
+        bool IsMipTail);
+
     private const int ParallelDetileElementThreshold = 512 * 512;
     private const int MaxDetileWorkers = 4;
 
@@ -145,9 +141,6 @@ internal static unsafe class GnmTiling
          Y(2), X(2), Y(3), X(3), Y(4), X(4), Y(5), X(5)],
     ];
 
-    // GFX10 256B_S: 8-bit micro-tile equation (low octet of the 4K_S pattern).
-    // The generic StandardSwizzle bit-interleave is a different layout and leaves
-    // a broken grid on Gen5 UI atlases that ship as Standard256B.
     private static readonly AddressBit[][] Standard256 =
     [
         [X(0), X(1), X(2), X(3), Y(0), Y(1), Y(2), Y(3)],
@@ -155,6 +148,25 @@ internal static unsafe class GnmTiling
         [Zero, Zero, X(0), X(1), Y(0), Y(1), Y(2), X(2)],
         [Zero, Zero, Zero, X(0), Y(0), Y(1), X(1), X(2)],
         [Zero, Zero, Zero, Zero, Y(0), Y(1), X(0), X(1)],
+    ];
+
+    // AGC packs the small levels of a thin 64 KiB mip chain into the first
+    // swizzle block. Coordinates are in elements (pixels for uncompressed
+    // formats, 4x4 blocks for BC formats), indexed by log2(bytes/element).
+    // The non-tail levels follow that block in reverse mip order, which means
+    // mip 0 is not necessarily at the descriptor's base address.
+    private static readonly (int X, int Y)[][] Standard64KMipTailLocations =
+    [
+        [(128, 0), (0, 128), (64, 0), (0, 64), (32, 0), (16, 32),
+         (0, 48), (0, 32), (16, 16), (16, 0), (0, 16), (0, 0)],
+        [(128, 0), (0, 64), (64, 0), (0, 32), (32, 0), (16, 16),
+         (0, 24), (0, 16), (16, 8), (16, 0), (0, 8), (0, 0)],
+        [(64, 0), (0, 64), (32, 0), (0, 32), (16, 0), (8, 16),
+         (0, 24), (0, 16), (8, 8), (8, 0), (0, 8), (0, 0)],
+        [(64, 0), (0, 32), (32, 0), (0, 16), (16, 0), (8, 8),
+         (0, 12), (0, 8), (8, 4), (8, 0), (0, 4), (0, 0)],
+        [(32, 0), (0, 32), (16, 0), (0, 16), (8, 0), (4, 8),
+         (0, 12), (0, 8), (4, 4), (4, 0), (0, 4), (0, 0)],
     ];
 
     // GFX10 4K_S has a separate 12-bit micro-tile equation. It is not the
@@ -428,6 +440,121 @@ internal static unsafe class GnmTiling
     }
 
     /// <summary>
+    /// Resolves one mip within a GFX10 64 KiB standard (mode 9) allocation.
+    /// AGC reserves the first block for the mip tail, then stores larger levels
+    /// from smallest to largest. Callers must add <see cref="TiledMipLayout.SourceOffset"/>
+    /// to the descriptor address before reading the selected level.
+    /// </summary>
+    public static bool TryGetStandard64KMipLayout(
+        uint swizzleMode,
+        int baseElementsWide,
+        int baseElementsHigh,
+        int bytesPerElement,
+        uint resourceMipLevels,
+        uint mipLevel,
+        out TiledMipLayout layout)
+    {
+        layout = default;
+        if (swizzleMode != 9 ||
+            baseElementsWide <= 0 ||
+            baseElementsHigh <= 0 ||
+            resourceMipLevels == 0 ||
+            mipLevel >= resourceMipLevels)
+        {
+            return false;
+        }
+
+        var bytesLog2 = BitLog2((uint)bytesPerElement);
+        if (bytesLog2 < 0 || bytesLog2 >= Standard64KMipTailLocations.Length)
+        {
+            return false;
+        }
+
+        const int blockBytes = 65536;
+        var blockElements = blockBytes >> bytesLog2;
+        var (blockWidth, blockHeight) = SquareBlockDimensions(blockElements);
+        if (blockWidth == 0 || blockHeight == 0)
+        {
+            return false;
+        }
+
+        const uint maximumTailLevels = 12;
+        var firstTailLevel = resourceMipLevels;
+        for (uint level = 0; level < resourceMipLevels; level++)
+        {
+            var levelWidth = ShiftCeil(baseElementsWide, level);
+            var levelHeight = ShiftCeil(baseElementsHigh, level);
+            if (levelWidth <= blockWidth / 2 &&
+                levelHeight <= blockHeight &&
+                resourceMipLevels - level <= maximumTailLevels)
+            {
+                firstTailLevel = level;
+                break;
+            }
+        }
+
+        try
+        {
+            ulong allocationBytes = firstTailLevel < resourceMipLevels
+                ? (ulong)blockBytes
+                : 0ul;
+            ulong selectedOffset = 0;
+            ulong selectedByteCount = 0;
+
+            for (var level = (int)firstTailLevel - 1; level >= 0; level--)
+            {
+                var levelWidth = ShiftCeil(baseElementsWide, (uint)level);
+                var levelHeight = ShiftCeil(baseElementsHigh, (uint)level);
+                var paddedWidth = AlignUp(levelWidth, blockWidth);
+                var paddedHeight = AlignUp(levelHeight, blockHeight);
+                var levelBytes = checked(
+                    (ulong)paddedWidth * (ulong)paddedHeight * (ulong)bytesPerElement);
+                if ((uint)level == mipLevel)
+                {
+                    selectedOffset = allocationBytes;
+                    selectedByteCount = levelBytes;
+                }
+
+                allocationBytes = checked(allocationBytes + levelBytes);
+            }
+
+            var selectedWidth = ShiftCeil(baseElementsWide, mipLevel);
+            var selectedHeight = ShiftCeil(baseElementsHigh, mipLevel);
+            var sourceX = 0;
+            var sourceY = 0;
+            var isMipTail = mipLevel >= firstTailLevel;
+            if (isMipTail)
+            {
+                var tailIndex = mipLevel - firstTailLevel;
+                if (tailIndex >= maximumTailLevels)
+                {
+                    return false;
+                }
+
+                (sourceX, sourceY) = Standard64KMipTailLocations[bytesLog2][tailIndex];
+                selectedOffset = 0;
+                selectedByteCount = blockBytes;
+            }
+
+            layout = new TiledMipLayout(
+                selectedOffset,
+                selectedByteCount,
+                AlignUp(allocationBytes, blockBytes),
+                selectedWidth,
+                selectedHeight,
+                sourceX,
+                sourceY,
+                isMipTail);
+            return selectedByteCount != 0;
+        }
+        catch (OverflowException)
+        {
+            layout = default;
+            return false;
+        }
+    }
+
+    /// <summary>
     /// Deswizzles <paramref name="tiled"/> into linear row-major order.
     /// Elements are pixels for uncompressed formats and 4x4 blocks for
     /// block-compressed formats, so callers pass the element grid dimensions
@@ -440,9 +567,16 @@ internal static unsafe class GnmTiling
         uint swizzleMode,
         int elementsWide,
         int elementsHigh,
-        int bytesPerElement)
+        int bytesPerElement,
+        int sourceX = 0,
+        int sourceY = 0)
     {
-        if (!ShouldDetile(swizzleMode) || elementsWide <= 0 || elementsHigh <= 0 || bytesPerElement <= 0)
+        if (!ShouldDetile(swizzleMode) ||
+            elementsWide <= 0 ||
+            elementsHigh <= 0 ||
+            bytesPerElement <= 0 ||
+            sourceX < 0 ||
+            sourceY < 0)
         {
             return false;
         }
@@ -469,6 +603,13 @@ internal static unsafe class GnmTiling
         if (blockWidth == 0 || blockHeight == 0)
         {
             ReportUnsupported(swizzleMode);
+            return false;
+        }
+
+        var hasSourceOrigin = sourceX != 0 || sourceY != 0;
+        if (hasSourceOrigin &&
+            (sourceX + elementsWide > blockWidth || sourceY + elementsHigh > blockHeight))
+        {
             return false;
         }
 
@@ -509,22 +650,23 @@ internal static unsafe class GnmTiling
             var blockWidthMask = blockWidth - 1;
             var detileRow = (int y) =>
             {
-                var blockY = y / blockHeight;
-                var inBlockY = y & (blockHeight - 1);
+                var blockY = hasSourceOrigin ? 0 : y / blockHeight;
+                var inBlockY = hasSourceOrigin ? y + sourceY : y & (blockHeight - 1);
                 var rowBlockBase = (long)blockY * blocksPerRow;
                 var tableRowBase = inBlockY * blockWidth;
                 var destRowBase = (long)y * elementsWide * bytesPerElement;
                 var yTerm = hasExactXorPattern
-                    ? patternTerms.Y[y & patternTerms.YMask]
+                    ? patternTerms.Y[(y + sourceY) & patternTerms.YMask]
                     : 0;
                 for (var x = 0; x < elementsWide; x++)
                 {
                     var blockX = x >> blockWidthShift;
                     var inBlockX = x & blockWidthMask;
-                    var blockIndex = rowBlockBase + blockX;
+                    var blockIndex = hasSourceOrigin ? 0 : rowBlockBase + blockX;
                     var sourceByte = hasExactXorPattern
-                        ? blockIndex * blockBytes + (patternTerms.X[x & patternTerms.XMask] ^ yTerm)
-                        : (blockIndex * blockElements + blockTable[tableRowBase + inBlockX]) *
+                        ? blockIndex * blockBytes +
+                          (patternTerms.X[(x + sourceX) & patternTerms.XMask] ^ yTerm)
+                        : (blockIndex * blockElements + blockTable[tableRowBase + inBlockX + sourceX]) *
                           (long)bytesPerElement;
                     var destByte = destRowBase + (long)x * bytesPerElement;
                     if (sourceByte < 0 ||
@@ -941,6 +1083,28 @@ internal static unsafe class GnmTiling
         var heightBits = totalBits - widthBits;
         return (1 << widthBits, 1 << heightBits);
     }
+
+    private static int ShiftCeil(int value, uint shift)
+    {
+        if (shift == 0)
+        {
+            return value;
+        }
+
+        if (shift >= 31)
+        {
+            return 1;
+        }
+
+        var divisor = 1 << (int)shift;
+        return Math.Max((value + divisor - 1) / divisor, 1);
+    }
+
+    private static int AlignUp(int value, int alignment) =>
+        checked((value + alignment - 1) & -alignment);
+
+    private static ulong AlignUp(ulong value, ulong alignment) =>
+        checked((value + alignment - 1) & ~(alignment - 1));
 
     private static int BitLog2(uint value)
     {

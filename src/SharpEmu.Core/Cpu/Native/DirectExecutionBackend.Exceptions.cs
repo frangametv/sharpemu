@@ -123,6 +123,10 @@ public sealed partial class DirectExecutionBackend
 
 			ulong rip = ReadCtxU64(contextRecord, 248);
 			ulong rsp = ReadCtxU64(contextRecord, 152);
+			if (TryRecoverGuestExecutionProbe(exceptionCode, exceptionAddress, contextRecord, rip))
+			{
+				return -1;
+			}
 			if (TryRecoverGuestInt41(exceptionCode, contextRecord, rip))
 			{
 				return -1;
@@ -1255,7 +1259,12 @@ public sealed partial class DirectExecutionBackend
 		}
 	}
 
-	private unsafe static bool TryReadHostBytes(ulong address, byte[] buffer)
+	private unsafe static bool TryReadHostBytes(ulong address, byte[] buffer) =>
+		TryReadHostBytes(address, buffer.AsSpan());
+
+	// Span overload so signal-handler recovery paths can read into a stackalloc
+	// buffer instead of allocating managed arrays inside the handler.
+	private unsafe static bool TryReadHostBytes(ulong address, Span<byte> buffer)
 	{
 		if (address < 65536)
 		{
@@ -1279,7 +1288,7 @@ public sealed partial class DirectExecutionBackend
 
 		try
 		{
-			Marshal.Copy((nint)address, buffer, 0, buffer.Length);
+			new ReadOnlySpan<byte>((void*)address, buffer.Length).CopyTo(buffer);
 			return true;
 		}
 		catch
@@ -1320,6 +1329,19 @@ public sealed partial class DirectExecutionBackend
 
 		list.Sort((a, b) => a.Value.CompareTo(b.Value));
 		_runtimeSymbolsByAddress = list.ToArray();
+	}
+
+	private void InitializeRuntimeDataSymbolIndex(IReadOnlyDictionary<string, ulong> runtimeDataSymbols)
+	{
+		_runtimeDataSymbolsByName.Clear();
+		foreach (KeyValuePair<string, ulong> runtimeDataSymbol in runtimeDataSymbols)
+		{
+			if (IsRuntimeSymbolAddressUsable(runtimeDataSymbol.Value) &&
+				!string.IsNullOrWhiteSpace(runtimeDataSymbol.Key))
+			{
+				_runtimeDataSymbolsByName[runtimeDataSymbol.Key] = runtimeDataSymbol.Value;
+			}
+		}
 	}
 
 	private bool TryFormatNearestRuntimeSymbol(ulong address, out string text)

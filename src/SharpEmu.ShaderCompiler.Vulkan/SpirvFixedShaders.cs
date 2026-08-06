@@ -1,6 +1,8 @@
 // Copyright (C) 2026 SharpEmu Emulator Project
 // SPDX-License-Identifier: GPL-2.0-or-later
 
+using SharpEmu.ShaderCompiler;
+
 namespace SharpEmu.ShaderCompiler.Vulkan;
 
 public static class SpirvFixedShaders
@@ -89,6 +91,271 @@ public static class SpirvFixedShaders
         attributes.CopyTo(interfaces, 2);
         module.AddEntryPoint(SpirvExecutionModel.Vertex, main, "main", interfaces);
         _ = boolType;
+        return module.Build();
+    }
+
+    /// <summary>
+    /// Raster half of the NGG compute-lowering path. The compute shader writes
+    /// primitive connectivity, positions and parameter exports to one storage
+    /// buffer; this fixed vertex stage expands each generated primitive into a
+    /// host triangle and restores the guest vertex-to-pixel interface.
+    /// </summary>
+    public static byte[] CreateNggRasterVertex(
+        Gen5NggOutputLayout layout,
+        int totalGlobalBufferCount,
+        IReadOnlyList<uint> pixelInputControls)
+    {
+        if (layout.BufferIndex < 0 ||
+            layout.BufferIndex >= totalGlobalBufferCount)
+        {
+            throw new ArgumentOutOfRangeException(nameof(layout));
+        }
+
+        var module = new SpirvModuleBuilder();
+        module.AddCapability(SpirvCapability.Shader);
+
+        var voidType = module.TypeVoid();
+        var boolType = module.TypeBool();
+        var uintType = module.TypeInt(32, signed: false);
+        var floatType = module.TypeFloat(32);
+        var vec4Type = module.TypeVector(floatType, 4);
+        var inputUintPointer = module.TypePointer(SpirvStorageClass.Input, uintType);
+        var outputVec4Pointer = module.TypePointer(SpirvStorageClass.Output, vec4Type);
+
+        var runtimeArray = module.TypeRuntimeArray(uintType);
+        module.AddDecoration(runtimeArray, SpirvDecoration.ArrayStride, sizeof(uint));
+        var block = module.TypeStruct(runtimeArray);
+        module.AddDecoration(block, SpirvDecoration.Block);
+        module.AddMemberDecoration(block, 0, SpirvDecoration.Offset, 0);
+        var descriptorArray = module.TypeArray(
+            block,
+            checked((uint)totalGlobalBufferCount));
+        var descriptorPointer = module.TypePointer(
+            SpirvStorageClass.StorageBuffer,
+            descriptorArray);
+        var storageUintPointer = module.TypePointer(
+            SpirvStorageClass.StorageBuffer,
+            uintType);
+        var guestBuffers = module.AddGlobalVariable(
+            descriptorPointer,
+            SpirvStorageClass.StorageBuffer);
+        module.AddName(guestBuffers, "guestBuffers");
+        module.AddDecoration(guestBuffers, SpirvDecoration.DescriptorSet, 0);
+        module.AddDecoration(guestBuffers, SpirvDecoration.Binding, 0);
+
+        var vertexIndex = module.AddGlobalVariable(
+            inputUintPointer,
+            SpirvStorageClass.Input);
+        module.AddName(vertexIndex, "vertexIndex");
+        module.AddDecoration(
+            vertexIndex,
+            SpirvDecoration.BuiltIn,
+            (uint)SpirvBuiltIn.VertexIndex);
+
+        var position = module.AddGlobalVariable(
+            outputVec4Pointer,
+            SpirvStorageClass.Output);
+        module.AddName(position, "position");
+        module.AddDecoration(position, SpirvDecoration.BuiltIn, (uint)SpirvBuiltIn.Position);
+
+        var attributes = new uint[pixelInputControls.Count];
+        for (var index = 0; index < attributes.Length; index++)
+        {
+            var attribute = module.AddGlobalVariable(
+                outputVec4Pointer,
+                SpirvStorageClass.Output);
+            module.AddName(attribute, $"attr{index}");
+            module.AddDecoration(attribute, SpirvDecoration.Location, checked((uint)index));
+            if ((pixelInputControls[index] & 0x400u) != 0)
+            {
+                module.AddDecoration(attribute, SpirvDecoration.Flat);
+            }
+
+            attributes[index] = attribute;
+        }
+
+        var functionType = module.TypeFunction(voidType);
+        var main = module.BeginFunction(voidType, functionType);
+        module.AddName(main, "main");
+        module.AddLabel();
+
+        var zero = module.Constant(uintType, 0);
+        var one = module.Constant(uintType, 1);
+        var three = module.Constant(uintType, 3);
+        var four = module.Constant(uintType, 4);
+        var indexValue = module.AddInstruction(SpirvOp.Load, uintType, vertexIndex);
+        var primitiveIndex = module.AddInstruction(
+            SpirvOp.UDiv,
+            uintType,
+            indexValue,
+            three);
+        var primitiveCorner = module.AddInstruction(
+            SpirvOp.UMod,
+            uintType,
+            indexValue,
+            three);
+
+        uint LoadWord(uint dwordAddress)
+        {
+            var pointer = module.AddInstruction(
+                SpirvOp.AccessChain,
+                storageUintPointer,
+                guestBuffers,
+                module.Constant(uintType, checked((uint)layout.BufferIndex)),
+                zero,
+                dwordAddress);
+            return module.AddInstruction(SpirvOp.Load, uintType, pointer);
+        }
+
+        var primitiveWord = LoadWord(module.AddInstruction(
+            SpirvOp.IAdd,
+            uintType,
+            module.Constant(uintType, layout.PrimitiveDataDwordOffset),
+            primitiveIndex));
+        var primitiveValidWord = LoadWord(module.AddInstruction(
+            SpirvOp.IAdd,
+            uintType,
+            module.Constant(uintType, layout.PrimitiveValidDwordOffset),
+            primitiveIndex));
+        var primitiveValid = module.AddInstruction(
+            SpirvOp.INotEqual,
+            boolType,
+            primitiveValidWord,
+            zero);
+        var primitiveNotNull = module.AddInstruction(
+            SpirvOp.IEqual,
+            boolType,
+            module.AddInstruction(
+                SpirvOp.BitwiseAnd,
+                uintType,
+                primitiveWord,
+                module.Constant(uintType, 0x8000_0000u)),
+            zero);
+        var shift = module.AddInstruction(
+            SpirvOp.IMul,
+            uintType,
+            primitiveCorner,
+            module.Constant(uintType, 10));
+        var guestVertex = module.AddInstruction(
+            SpirvOp.BitwiseAnd,
+            uintType,
+            module.AddInstruction(
+                SpirvOp.ShiftRightLogical,
+                uintType,
+                primitiveWord,
+                shift),
+            module.Constant(uintType, 0x1FF));
+        var vertexInRange = module.AddInstruction(
+            SpirvOp.ULessThan,
+            boolType,
+            guestVertex,
+            module.Constant(uintType, layout.MaximumVertexCount));
+        var safeVertex = module.AddInstruction(
+            SpirvOp.Select,
+            uintType,
+            vertexInRange,
+            guestVertex,
+            zero);
+        var vertexValidWord = LoadWord(module.AddInstruction(
+            SpirvOp.IAdd,
+            uintType,
+            module.Constant(uintType, layout.VertexValidDwordOffset),
+            safeVertex));
+        var vertexValid = module.AddInstruction(
+            SpirvOp.INotEqual,
+            boolType,
+            vertexValidWord,
+            zero);
+        var outputValid = module.AddInstruction(
+            SpirvOp.LogicalAnd,
+            boolType,
+            primitiveValid,
+            module.AddInstruction(
+                SpirvOp.LogicalAnd,
+                boolType,
+                primitiveNotNull,
+                module.AddInstruction(
+                    SpirvOp.LogicalAnd,
+                    boolType,
+                    vertexInRange,
+                    vertexValid)));
+
+        uint LoadVector(uint baseDword)
+        {
+            var vertexBase = module.AddInstruction(
+                SpirvOp.IAdd,
+                uintType,
+                module.Constant(uintType, baseDword),
+                module.AddInstruction(
+                    SpirvOp.IMul,
+                    uintType,
+                    safeVertex,
+                    four));
+            var components = new uint[4];
+            for (uint component = 0; component < 4; component++)
+            {
+                var raw = LoadWord(module.AddInstruction(
+                    SpirvOp.IAdd,
+                    uintType,
+                    vertexBase,
+                    module.Constant(uintType, component)));
+                components[component] = module.AddInstruction(
+                    SpirvOp.Bitcast,
+                    floatType,
+                    raw);
+            }
+
+            return module.AddInstruction(
+                SpirvOp.CompositeConstruct,
+                vec4Type,
+                components);
+        }
+
+        var generatedPosition = LoadVector(layout.PositionDwordOffset);
+        var clippedPosition = module.ConstantComposite(
+            vec4Type,
+            module.ConstantFloat(floatType, 0f),
+            module.ConstantFloat(floatType, 0f),
+            module.ConstantFloat(floatType, 2f),
+            module.ConstantFloat(floatType, 1f));
+        module.AddStatement(
+            SpirvOp.Store,
+            position,
+            module.AddInstruction(
+                SpirvOp.Select,
+                vec4Type,
+                outputValid,
+                generatedPosition,
+                clippedPosition));
+
+        var zeroVector = module.ConstantNull(vec4Type);
+        for (var index = 0; index < attributes.Length; index++)
+        {
+            var parameter = pixelInputControls[index] & 0x1Fu;
+            var value = parameter < layout.ParameterCount
+                ? LoadVector(layout.GetParameterDwordOffset(parameter))
+                : zeroVector;
+            module.AddStatement(
+                SpirvOp.Store,
+                attributes[index],
+                module.AddInstruction(
+                    SpirvOp.Select,
+                    vec4Type,
+                    outputValid,
+                    value,
+                    zeroVector));
+        }
+
+        module.AddStatement(SpirvOp.Return);
+        module.EndFunction();
+
+        var interfaces = new uint[3 + attributes.Length];
+        interfaces[0] = guestBuffers;
+        interfaces[1] = vertexIndex;
+        interfaces[2] = position;
+        attributes.CopyTo(interfaces, 3);
+        module.AddEntryPoint(SpirvExecutionModel.Vertex, main, "main", interfaces);
+        _ = one;
         return module.Build();
     }
 

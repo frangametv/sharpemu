@@ -8,6 +8,7 @@ namespace SharpEmu.Libs.NpGameIntent;
 
 public static class NpGameIntentExports
 {
+    private const int NpGameIntentErrorNotInitialized = unchecked((int)0x80553802);
     private static int _initialized;
 
     [SysAbiExport(
@@ -21,4 +22,22 @@ public static class NpGameIntentExports
         ctx[CpuRegister.Rax] = 0;
         return (int)OrbisGen2Result.ORBIS_GEN2_OK;
     }
+
+    [SysAbiExport(
+        Nid = "0HBYxYAjmf0",
+        ExportName = "sceNpGameIntentTerminate",
+        Target = Generation.Gen5,
+        LibraryName = "libSceNpGameIntent",
+        PreferLle = true)]
+    public static int NpGameIntentTerminate(CpuContext ctx)
+    {
+        if (Interlocked.CompareExchange(ref _initialized, 0, 1) == 0)
+        {
+            return ctx.SetReturn(NpGameIntentErrorNotInitialized);
+        }
+
+        return ctx.SetReturn(OrbisGen2Result.ORBIS_GEN2_OK);
+    }
+
+    internal static void ResetForTests() => Volatile.Write(ref _initialized, 0);
 }

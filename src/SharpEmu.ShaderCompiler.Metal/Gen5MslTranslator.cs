@@ -1229,8 +1229,13 @@ public static partial class Gen5MslTranslator
             {
                 case "SNop":
                 case "SWaitcnt":
+                case "SWaitcntVscnt":
                 case "SInstPrefetch":
                 case "STtraceData":
+                // With no guest GPU debugger attached, S_TRAP has no host-side
+                // trap handler to enter. Match the hardware-facing emulator
+                // behavior by allowing the wave to continue.
+                case "STrap":
                 case "SClause":
                 case "VNop":
                 // NGG shaders bracket their exports with s_sendmsg
@@ -1531,6 +1536,22 @@ public static partial class Gen5MslTranslator
                     StoreLds(LdsIndex(address, control.Offset0), RawSource(instruction, 1));
                     return true;
                 }
+                case "DsWriteAddtidB32":
+                {
+                    if (instruction.Sources.Count < 1)
+                    {
+                        error = "missing LDS add-thread-id write source";
+                        return false;
+                    }
+
+                    var address = Temp(
+                        "uint",
+                        $"{ScalarExpression(124)} + (sharpemu_lane * {sizeof(uint)}u)");
+                    StoreLds(
+                        LdsIndex(address, EffectiveDsSingleOffsetBytes(control)),
+                        RawSource(instruction, 0));
+                    return true;
+                }
                 case "DsWriteB64":
                 {
                     var address = Temp("uint", RawSource(instruction, 0));
@@ -1570,7 +1591,25 @@ public static partial class Gen5MslTranslator
                     var address = Temp("uint", RawSource(instruction, 0));
                     StoreVector(
                         instruction.Destinations[0].Value,
-                        $"sharpemu_lds[{LdsIndex(address, control.Offset0)}]");
+                        $"sharpemu_lds[{LdsIndex(address, EffectiveDsSingleOffsetBytes(control))}]");
+                    return true;
+                }
+                case "DsReadB64":
+                {
+                    if (instruction.Destinations.Count < 2)
+                    {
+                        error = "missing LDS read64 operand";
+                        return false;
+                    }
+
+                    var address = Temp("uint", RawSource(instruction, 0));
+                    var offset = EffectiveDsSingleOffsetBytes(control);
+                    StoreVector(
+                        instruction.Destinations[0].Value,
+                        $"sharpemu_lds[{LdsIndex(address, offset)}]");
+                    StoreVector(
+                        instruction.Destinations[1].Value,
+                        $"sharpemu_lds[{LdsIndex(address, offset + sizeof(uint))}]");
                     return true;
                 }
                 case "DsReadB96":
@@ -1620,6 +1659,10 @@ public static partial class Gen5MslTranslator
 
         private static uint EffectiveDsPairOffsetBytes(uint offset, bool st64) =>
             offset * (st64 ? 256u : sizeof(uint));
+
+        private static uint EffectiveDsSingleOffsetBytes(
+            Gen5DataShareControl control) =>
+            control.Offset0 | (control.Offset1 << 8);
 
         private bool TryEmitResolvedMemoryAccess(
             string opcode,

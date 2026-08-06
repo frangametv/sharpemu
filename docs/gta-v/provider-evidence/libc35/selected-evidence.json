@@ -1,0 +1,1637 @@
+{
+  "counts": {
+    "excluded_data_objects": 5,
+    "excluded_kernel_posix_functions": 27,
+    "gen5_hle_fail_closed": 1,
+    "gen5_prefer_lle": 34,
+    "libSceLibcInternal_prefer_lle": 4,
+    "libc_prefer_lle": 30
+  },
+  "evidence_policy": "Ghidra 12.1.2 plus SharpEmu runtime routing only; no Kyty or other emulator source",
+  "format": "sharpemu-gta-v-libc35-selected-evidence-v1",
+  "hybrid_library_decision": {
+    "nids": [
+      "MELi-cKqWq0",
+      "zlfEH8FmyUA",
+      "zr094EQ39Ww"
+    ],
+    "reason": "single NID registry plus exact loaded GTA libc runtime resolution",
+    "registered_library": "libc"
+  },
+  "records": [
+    {
+      "catalog_symbol": "vsprintf_s",
+      "component": "Libc",
+      "disposition": "gen5_prefer_lle_fail_closed",
+      "library": "libc",
+      "module": "libc",
+      "nid": "+qitMEbkSWk",
+      "provider_evidence": {
+        "gta_v_libc": {
+          "decompile_sha256": "5f0f8e0dbe9248223660570a81381c5a694a6bed76eb63e933a10f7156d777f2",
+          "deterministic_across_runs": true,
+          "evidence_file": "remote-results/libc-family-40x2/job-027/evidence.json",
+          "evidence_file_sha256": "b38ba2e20812b27f276e6dc773905743c6089897d0eaf0db61efa21cf41a487a",
+          "function_body_addresses": 237,
+          "function_body_sha256": "fd7dbe44d75e4211ff1826c4ca4481dff3fc61811bbc183c57b2abc0ce60233e",
+          "function_entry": "0015add0",
+          "function_name": "+qitMEbkSWk#D#A",
+          "function_present": true,
+          "ghidra_version": "12.1.2",
+          "instruction_count": 65,
+          "provider": "gta_v_libc",
+          "provider_label": "gta_v_libc",
+          "provider_sha256": "309cb9031209eb9b838216994d2c39613fcd65ec1eae493c4b784b9dacdd06bb",
+          "symbol_address": "0015add0",
+          "symbol_external": false,
+          "symbol_name": "+qitMEbkSWk#D#A",
+          "symbol_type": "Function",
+          "thunk": false,
+          "thunk_target_entry": null,
+          "thunk_target_external": null,
+          "thunk_target_name": null
+        }
+      },
+      "registered_library": "libc",
+      "runtime": {
+        "direct_bridge_count": 4,
+        "lle_redirect_count": 4,
+        "runtime_symbol_addresses": [
+          "0x0000000805C44DD0"
+        ],
+        "runtime_symbol_count": 4,
+        "trampoline_log_addresses": [],
+        "trampoline_log_count": 0
+      }
+    },
+    {
+      "catalog_symbol": "localeconv",
+      "component": "Libc",
+      "disposition": "gen5_prefer_lle_fail_closed",
+      "library": "libc",
+      "module": "libc",
+      "nid": "0hlfW1O4Aa4",
+      "provider_evidence": {
+        "gta_v_libc": {
+          "decompile_sha256": "154357086eab9cf5969fbef965b50cf33ab7f81146433bdaeeae71f5eb247cdc",
+          "deterministic_across_runs": true,
+          "evidence_file": "remote-results/libc-family-40x2/job-017/evidence.json",
+          "evidence_file_sha256": "fe28afcc35a71b0eddbde9c7268a41dd2fb8f98adc7da1ec23447462a94d772d",
+          "function_body_addresses": 8,
+          "function_body_sha256": "928202e97510b947871cdc8a6dfc8d8510f1be6b6a4709a6e96857a994535e10",
+          "function_entry": "00102d30",
+          "function_name": "0hlfW1O4Aa4#D#A",
+          "function_present": true,
+          "ghidra_version": "12.1.2",
+          "instruction_count": 2,
+          "provider": "gta_v_libc",
+          "provider_label": "gta_v_libc",
+          "provider_sha256": "309cb9031209eb9b838216994d2c39613fcd65ec1eae493c4b784b9dacdd06bb",
+          "symbol_address": "00102d30",
+          "symbol_external": false,
+          "symbol_name": "0hlfW1O4Aa4#D#A",
+          "symbol_type": "Function",
+          "thunk": false,
+          "thunk_target_entry": null,
+          "thunk_target_external": null,
+          "thunk_target_name": null
+        }
+      },
+      "registered_library": "libc",
+      "runtime": {
+        "direct_bridge_count": 4,
+        "lle_redirect_count": 0,
+        "runtime_symbol_addresses": [
+          "0x0000000805BECD30"
+        ],
+        "runtime_symbol_count": 4,
+        "trampoline_log_addresses": [],
+        "trampoline_log_count": 0
+      }
+    },
+    {
+      "catalog_symbol": "powf",
+      "component": "Libc",
+      "disposition": "gen5_prefer_lle_fail_closed",
+      "library": "libc",
+      "module": "libc",
+      "nid": "1D0H2KNjshE",
+      "provider_evidence": {
+        "gta_v_libc": {
+          "decompile_sha256": "7898f777a8ffde477c60d44b2bcd4f10d7c477d15a10c27d35f697ae1dadaf53",
+          "deterministic_across_runs": true,
+          "evidence_file": "remote-results/libc-family-40x2/job-022/evidence.json",
+          "evidence_file_sha256": "0bb4a558a8a812187d88575167bbf179190314fac4ec53ae290e3008919084c8",
+          "function_body_addresses": 1544,
+          "function_body_sha256": "f0abde8bf239d59023cb5ebdfd13ed0ce43cb66938ca56d57e4acc65ed5ccc37",
+          "function_entry": "0014c600",
+          "function_name": "1D0H2KNjshE#D#A",
+          "function_present": true,
+          "ghidra_version": "12.1.2",
+          "instruction_count": 341,
+          "provider": "gta_v_libc",
+          "provider_label": "gta_v_libc",
+          "provider_sha256": "309cb9031209eb9b838216994d2c39613fcd65ec1eae493c4b784b9dacdd06bb",
+          "symbol_address": "0014c600",
+          "symbol_external": false,
+          "symbol_name": "1D0H2KNjshE#D#A",
+          "symbol_type": "Function",
+          "thunk": false,
+          "thunk_target_entry": null,
+          "thunk_target_external": null,
+          "thunk_target_name": null
+        }
+      },
+      "registered_library": "libc",
+      "runtime": {
+        "direct_bridge_count": 4,
+        "lle_redirect_count": 0,
+        "runtime_symbol_addresses": [
+          "0x0000000805C36600"
+        ],
+        "runtime_symbol_count": 4,
+        "trampoline_log_addresses": [],
+        "trampoline_log_count": 0
+      }
+    },
+    {
+      "catalog_symbol": "sscanf_s",
+      "component": "Libc",
+      "disposition": "gen5_prefer_lle_fail_closed",
+      "library": "libc",
+      "module": "libc",
+      "nid": "24m4Z4bUaoY",
+      "provider_evidence": {
+        "gta_v_libc": {
+          "decompile_sha256": "05612e9a20cf8bec5e032f9425c2c46e843c50125e973d66d3b64fe881a73fe8",
+          "deterministic_across_runs": true,
+          "evidence_file": "remote-results/libc-family-40x2/job-024/evidence.json",
+          "evidence_file_sha256": "6f5568fe8fe7127c6f9e7b278b4db6f04a926efac8ffe0e7431caf0c75ff3f53",
+          "function_body_addresses": 244,
+          "function_body_sha256": "1ec2c71574dc787562d2e505913439764e58db21b5d81af2f5253aa0e1d95ca6",
+          "function_entry": "0015a8b0",
+          "function_name": "24m4Z4bUaoY#D#A",
+          "function_present": true,
+          "ghidra_version": "12.1.2",
+          "instruction_count": 54,
+          "provider": "gta_v_libc",
+          "provider_label": "gta_v_libc",
+          "provider_sha256": "309cb9031209eb9b838216994d2c39613fcd65ec1eae493c4b784b9dacdd06bb",
+          "symbol_address": "0015a8b0",
+          "symbol_external": false,
+          "symbol_name": "24m4Z4bUaoY#D#A",
+          "symbol_type": "Function",
+          "thunk": false,
+          "thunk_target_entry": null,
+          "thunk_target_external": null,
+          "thunk_target_name": null
+        }
+      },
+      "registered_library": "libc",
+      "runtime": {
+        "direct_bridge_count": 4,
+        "lle_redirect_count": 0,
+        "runtime_symbol_addresses": [
+          "0x0000000805C448B0"
+        ],
+        "runtime_symbol_count": 4,
+        "trampoline_log_addresses": [],
+        "trampoline_log_count": 0
+      }
+    },
+    {
+      "catalog_symbol": "strtod",
+      "component": "Libc",
+      "disposition": "gen5_prefer_lle_fail_closed",
+      "library": "libc",
+      "module": "libc",
+      "nid": "2vDqwBlpF-o",
+      "provider_evidence": {
+        "gta_v_libc": {
+          "decompile_sha256": "6d89a9f1665731c995fb246b44f79d2e845e449bb4e7cd02be3fb116d1a1a5a0",
+          "deterministic_across_runs": true,
+          "evidence_file": "remote-results/libc-family-40x2/job-025/evidence.json",
+          "evidence_file_sha256": "2595faad4e4208b287d22503a4aeab09e8029b4e7861318810a3a02b80eed0f6",
+          "function_body_addresses": 6611,
+          "function_body_sha256": "20d408a7261739ac32bc0d54de91b7f36644d441af4336438e039d5a948b44ac",
+          "function_entry": "0015b7c0",
+          "function_name": "2vDqwBlpF-o#D#A",
+          "function_present": true,
+          "ghidra_version": "12.1.2",
+          "instruction_count": 1626,
+          "provider": "gta_v_libc",
+          "provider_label": "gta_v_libc",
+          "provider_sha256": "309cb9031209eb9b838216994d2c39613fcd65ec1eae493c4b784b9dacdd06bb",
+          "symbol_address": "0015b7c0",
+          "symbol_external": false,
+          "symbol_name": "2vDqwBlpF-o#D#A",
+          "symbol_type": "Function",
+          "thunk": false,
+          "thunk_target_entry": null,
+          "thunk_target_external": null,
+          "thunk_target_name": null
+        }
+      },
+      "registered_library": "libc",
+      "runtime": {
+        "direct_bridge_count": 4,
+        "lle_redirect_count": 0,
+        "runtime_symbol_addresses": [
+          "0x0000000805C457C0"
+        ],
+        "runtime_symbol_count": 4,
+        "trampoline_log_addresses": [],
+        "trampoline_log_count": 0
+      }
+    },
+    {
+      "catalog_symbol": "snprintf_s",
+      "component": "LibcInternal",
+      "disposition": "gen5_prefer_lle_fail_closed",
+      "library": "libSceLibcInternal",
+      "module": "libSceLibcInternal",
+      "nid": "3BytPOQgVKc",
+      "provider_evidence": {
+        "gta_v_libc": {
+          "decompile_sha256": "9c4ab113070fb87594f9baee000467367ebb3815ed74e339075c5a8cffdb34a2",
+          "deterministic_across_runs": true,
+          "evidence_file": "remote-results/deep-kernel-loaded-libc-40x2/job-031/evidence.json",
+          "evidence_file_sha256": "ac6d7a32b13290ec2eec1d458daa1bd62fa2a436a3888c320bdcf0dca8b6f7ae",
+          "function_body_addresses": 325,
+          "function_body_sha256": "6e18cc9234133bf811f2677928d05f1a4a8c71758994ee5a1307b6857b88f7b7",
+          "function_entry": "0015a570",
+          "function_name": "3BytPOQgVKc#D#A",
+          "function_present": true,
+          "ghidra_version": "12.1.2",
+          "instruction_count": 77,
+          "provider": "gta_v_libc",
+          "provider_label": "gta_v_libc_internal_audit",
+          "provider_sha256": "309cb9031209eb9b838216994d2c39613fcd65ec1eae493c4b784b9dacdd06bb",
+          "symbol_address": "0015a570",
+          "symbol_external": false,
+          "symbol_name": "3BytPOQgVKc#D#A",
+          "symbol_type": "Function",
+          "thunk": false,
+          "thunk_target_entry": null,
+          "thunk_target_external": null,
+          "thunk_target_name": null
+        }
+      },
+      "registered_library": "libSceLibcInternal",
+      "runtime": {
+        "direct_bridge_count": 4,
+        "lle_redirect_count": 0,
+        "runtime_symbol_addresses": [
+          "0x0000000805C44570"
+        ],
+        "runtime_symbol_count": 4,
+        "trampoline_log_addresses": [],
+        "trampoline_log_count": 0
+      }
+    },
+    {
+      "catalog_symbol": "_Mtx_destroy",
+      "component": "Libc",
+      "disposition": "gen5_prefer_lle_fail_closed",
+      "library": "libc",
+      "module": "libc",
+      "nid": "5Lf51jvohTQ",
+      "provider_evidence": {
+        "gta_v_libc": {
+          "decompile_sha256": "c7f9c6b11a5edb29caf38ea77c0e44c66ee8d44475c605e91cc3eb4c46d1b36d",
+          "deterministic_across_runs": true,
+          "evidence_file": "remote-results/libc-family-40x2/job-002/evidence.json",
+          "evidence_file_sha256": "28d98fe1a3ff8f0a5ab0432c4791855942800013722106b8db80ac2b4478c6ec",
+          "function_body_addresses": 11,
+          "function_body_sha256": "ec49b7befe12c52756499b73b9b2b9e0c583e2f3583b2abc720f502db9a90512",
+          "function_entry": "00105ca0",
+          "function_name": "5Lf51jvohTQ#D#A",
+          "function_present": true,
+          "ghidra_version": "12.1.2",
+          "instruction_count": 5,
+          "provider": "gta_v_libc",
+          "provider_label": "gta_v_libc",
+          "provider_sha256": "309cb9031209eb9b838216994d2c39613fcd65ec1eae493c4b784b9dacdd06bb",
+          "symbol_address": "00105ca0",
+          "symbol_external": false,
+          "symbol_name": "5Lf51jvohTQ#D#A",
+          "symbol_type": "Function",
+          "thunk": false,
+          "thunk_target_entry": null,
+          "thunk_target_external": null,
+          "thunk_target_name": null
+        }
+      },
+      "registered_library": "libc",
+      "runtime": {
+        "direct_bridge_count": 4,
+        "lle_redirect_count": 0,
+        "runtime_symbol_addresses": [
+          "0x0000000805BEFCA0"
+        ],
+        "runtime_symbol_count": 4,
+        "trampoline_log_addresses": [],
+        "trampoline_log_count": 0
+      }
+    },
+    {
+      "catalog_symbol": "gmtime_s",
+      "component": "Libc",
+      "disposition": "gen5_prefer_lle_fail_closed",
+      "library": "libc",
+      "module": "libc",
+      "nid": "5bBacGLyLOs",
+      "provider_evidence": {
+        "gta_v_libc": {
+          "decompile_sha256": "10d68ec63eda2bc423ade581a30adca90488f23072a0df783bb2489943cf0b94",
+          "deterministic_across_runs": true,
+          "evidence_file": "remote-results/libc-family-40x2/job-016/evidence.json",
+          "evidence_file_sha256": "9546e220e268d0d70d36d315250e96b901b46d592fa59b4f109058b329bcdc78",
+          "function_body_addresses": 61,
+          "function_body_sha256": "84423fec9840f6fc34a57089fffc6feaf724570abc0f833b19501fb7bdb1e5c0",
+          "function_entry": "0016bfd0",
+          "function_name": "5bBacGLyLOs#D#A",
+          "function_present": true,
+          "ghidra_version": "12.1.2",
+          "instruction_count": 20,
+          "provider": "gta_v_libc",
+          "provider_label": "gta_v_libc",
+          "provider_sha256": "309cb9031209eb9b838216994d2c39613fcd65ec1eae493c4b784b9dacdd06bb",
+          "symbol_address": "0016bfd0",
+          "symbol_external": false,
+          "symbol_name": "5bBacGLyLOs#D#A",
+          "symbol_type": "Function",
+          "thunk": false,
+          "thunk_target_entry": null,
+          "thunk_target_external": null,
+          "thunk_target_name": null
+        }
+      },
+      "registered_library": "libc",
+      "runtime": {
+        "direct_bridge_count": 4,
+        "lle_redirect_count": 4,
+        "runtime_symbol_addresses": [
+          "0x0000000805C55FD0"
+        ],
+        "runtime_symbol_count": 4,
+        "trampoline_log_addresses": [],
+        "trampoline_log_count": 0
+      }
+    },
+    {
+      "catalog_symbol": "__udivti3",
+      "component": "Libc",
+      "disposition": "gen5_prefer_lle_fail_closed",
+      "library": "libc",
+      "module": "libc",
+      "nid": "802pFCwC9w0",
+      "provider_evidence": {
+        "gta_v_libc": {
+          "decompile_sha256": "a3c7c82a4d6c548c01aa61d2c06a956c4292f65b9c0e3b1d3cc7d7ba84b75560",
+          "deterministic_across_runs": true,
+          "evidence_file": "remote-results/libc-family-40x2/job-000/evidence.json",
+          "evidence_file_sha256": "abbb4babfdd532098eed85cd938fc8711315f5eab87a2bb2fc2c7fea9932ca1e",
+          "function_body_addresses": 14,
+          "function_body_sha256": "3fc3344fb8be4fb4be82a338cd79baff395d78c04ec9c78e7a711abbdca5c658",
+          "function_entry": "001c28f0",
+          "function_name": "802pFCwC9w0#D#A",
+          "function_present": true,
+          "ghidra_version": "12.1.2",
+          "instruction_count": 6,
+          "provider": "gta_v_libc",
+          "provider_label": "gta_v_libc",
+          "provider_sha256": "309cb9031209eb9b838216994d2c39613fcd65ec1eae493c4b784b9dacdd06bb",
+          "symbol_address": "001c28f0",
+          "symbol_external": false,
+          "symbol_name": "802pFCwC9w0#D#A",
+          "symbol_type": "Function",
+          "thunk": false,
+          "thunk_target_entry": null,
+          "thunk_target_external": null,
+          "thunk_target_name": null
+        }
+      },
+      "registered_library": "libc",
+      "runtime": {
+        "direct_bridge_count": 4,
+        "lle_redirect_count": 0,
+        "runtime_symbol_addresses": [
+          "0x0000000805CAC8F0"
+        ],
+        "runtime_symbol_count": 4,
+        "trampoline_log_addresses": [],
+        "trampoline_log_count": 0
+      }
+    },
+    {
+      "catalog_symbol": "atan2f",
+      "component": "Libc",
+      "disposition": "gen5_prefer_lle_fail_closed",
+      "library": "libc",
+      "module": "libc",
+      "nid": "EH-x713A99c",
+      "provider_evidence": {
+        "gta_v_libc": {
+          "decompile_sha256": "b1faf235d5847a07f349becdd632050f2dd77d41baa05b3ff125e82a7be6e12b",
+          "deterministic_across_runs": true,
+          "evidence_file": "remote-results/libc-family-40x2/job-014/evidence.json",
+          "evidence_file_sha256": "7022988c2901d80a48b2925f314b5af3fdf7ff9e4e5a0d6f94896e0d9009ff9d",
+          "function_body_addresses": 649,
+          "function_body_sha256": "4ad4aea51cf8fc3360e4036007fdaf29b04e70ad641102db34f59434d1747794",
+          "function_entry": "00141010",
+          "function_name": "EH-x713A99c#D#A",
+          "function_present": true,
+          "ghidra_version": "12.1.2",
+          "instruction_count": 116,
+          "provider": "gta_v_libc",
+          "provider_label": "gta_v_libc",
+          "provider_sha256": "309cb9031209eb9b838216994d2c39613fcd65ec1eae493c4b784b9dacdd06bb",
+          "symbol_address": "00141010",
+          "symbol_external": false,
+          "symbol_name": "EH-x713A99c#D#A",
+          "symbol_type": "Function",
+          "thunk": false,
+          "thunk_target_entry": null,
+          "thunk_target_external": null,
+          "thunk_target_name": null
+        }
+      },
+      "registered_library": "libc",
+      "runtime": {
+        "direct_bridge_count": 4,
+        "lle_redirect_count": 4,
+        "runtime_symbol_addresses": [
+          "0x0000000805C2B010"
+        ],
+        "runtime_symbol_count": 4,
+        "trampoline_log_addresses": [],
+        "trampoline_log_count": 0
+      }
+    },
+    {
+      "catalog_symbol": "sceLibcInternalBacktraceForGame",
+      "component": "LibcInternalExt",
+      "disposition": "gen5_hle_fail_closed_no_prefer_lle",
+      "library": "libSceLibcInternalExt",
+      "module": "libSceLibcInternal",
+      "nid": "EHsF2i9FXPM",
+      "provider_evidence": {
+        "gta_v_libc": {
+          "decompile_sha256": "f99a26c13305c50bafc971f59265aeafdab4ab9a5c01cdb1e4c6d360d0d48a02",
+          "deterministic_across_runs": true,
+          "evidence_file": "remote-results/deep-kernel-loaded-libc-40x2/job-035/evidence.json",
+          "evidence_file_sha256": "88fa2e2409b9302eb351d80e8672eab7f11106233698e8f6b3077e70885b8a94",
+          "function_body_addresses": 6,
+          "function_body_sha256": "97a7100f7a2c1387ca129c2e7196b3146c4ee71efe822e4cda026a7033e286de",
+          "function_entry": "001c4400",
+          "function_name": "EHsF2i9FXPM#B#C",
+          "function_present": true,
+          "ghidra_version": "12.1.2",
+          "instruction_count": 1,
+          "provider": "gta_v_libc",
+          "provider_label": "gta_v_libc_internal_audit",
+          "provider_sha256": "309cb9031209eb9b838216994d2c39613fcd65ec1eae493c4b784b9dacdd06bb",
+          "symbol_address": "001c4400",
+          "symbol_external": false,
+          "symbol_name": "EHsF2i9FXPM#B#C",
+          "symbol_type": "Function",
+          "thunk": true,
+          "thunk_target_entry": "EXTERNAL:00000029",
+          "thunk_target_external": true,
+          "thunk_target_name": "EHsF2i9FXPM#B#C"
+        },
+        "libSceLibcInternal": {
+          "decompile_sha256": "7c3d285d3c8e0a6cf88bf3d6cf1ded03bb548668c3e45dc8a54396f308265c85",
+          "deterministic_across_runs": true,
+          "evidence_file": "remote-results/libc-family-40x2/job-039/evidence.json",
+          "evidence_file_sha256": "d66cc1c79a238d2738288eeba6dc6b6c869ec3d47e8ff7d77fe79381325aceb2",
+          "function_body_addresses": 67,
+          "function_body_sha256": "e3e63f55204ffdfcffac1f2bd7f65534ac11d8391d0907ac233354a429b619d3",
+          "function_entry": "00007a20",
+          "function_name": "EHsF2i9FXPM#D#A",
+          "function_present": true,
+          "ghidra_version": "12.1.2",
+          "instruction_count": 23,
+          "provider": "libSceLibcInternal",
+          "provider_label": "libSceLibcInternal",
+          "provider_sha256": "d85d61d42f7bb538caafa8b07066f36ec7553a0d6f442cc8138894f22b77370a",
+          "symbol_address": "00007a20",
+          "symbol_external": false,
+          "symbol_name": "EHsF2i9FXPM#D#A",
+          "symbol_type": "Function",
+          "thunk": false,
+          "thunk_target_entry": null,
+          "thunk_target_external": null,
+          "thunk_target_name": null
+        }
+      },
+      "registered_library": "libSceLibcInternalExt",
+      "runtime": {
+        "direct_bridge_count": 0,
+        "lle_redirect_count": 0,
+        "runtime_symbol_addresses": [],
+        "runtime_symbol_count": 0,
+        "trampoline_log_addresses": [
+          "0x000000011A9ED000",
+          "0x000000011A9EF000",
+          "0x000000011A9FD000",
+          "0x000000011A9FF000"
+        ],
+        "trampoline_log_count": 4
+      }
+    },
+    {
+      "catalog_symbol": "atan2",
+      "component": "Libc",
+      "disposition": "gen5_prefer_lle_fail_closed",
+      "library": "libc",
+      "module": "libc",
+      "nid": "HUbZmOnT-Dg",
+      "provider_evidence": {
+        "gta_v_libc": {
+          "decompile_sha256": "2659436c94efb6a2ce762a2489f3cd41b92933e06f6e1a07c8f7beb0d07223c5",
+          "deterministic_across_runs": true,
+          "evidence_file": "remote-results/libc-family-40x2/job-013/evidence.json",
+          "evidence_file_sha256": "32061cccad4a4cf7a2ff3a0652b5668f3fff2595f507edc131e5c201b5986a1e",
+          "function_body_addresses": 460,
+          "function_body_sha256": "bd77d6b55379a5f18d599900f18e5860abc1c773471dcccc94e42fd6a42cd848",
+          "function_entry": "00140b70",
+          "function_name": "HUbZmOnT-Dg#D#A",
+          "function_present": true,
+          "ghidra_version": "12.1.2",
+          "instruction_count": 115,
+          "provider": "gta_v_libc",
+          "provider_label": "gta_v_libc",
+          "provider_sha256": "309cb9031209eb9b838216994d2c39613fcd65ec1eae493c4b784b9dacdd06bb",
+          "symbol_address": "00140b70",
+          "symbol_external": false,
+          "symbol_name": "HUbZmOnT-Dg#D#A",
+          "symbol_type": "Function",
+          "thunk": false,
+          "thunk_target_entry": null,
+          "thunk_target_external": null,
+          "thunk_target_name": null
+        }
+      },
+      "registered_library": "libc",
+      "runtime": {
+        "direct_bridge_count": 4,
+        "lle_redirect_count": 0,
+        "runtime_symbol_addresses": [
+          "0x0000000805C2AB70"
+        ],
+        "runtime_symbol_count": 4,
+        "trampoline_log_addresses": [],
+        "trampoline_log_count": 0
+      }
+    },
+    {
+      "catalog_symbol": "_ZSt19_Xbad_function_callv",
+      "component": "LibcInternal;Libc",
+      "disposition": "gen5_prefer_lle_fail_closed",
+      "library": "libSceLibcInternal;libc",
+      "module": "libSceLibcInternal;libc",
+      "nid": "MELi-cKqWq0",
+      "provider_evidence": {
+        "gta_v_libc": {
+          "decompile_sha256": "8cce03033c7a63fb0e5cb085ba202787a2c51f8eb11a00afd98874871b33b960",
+          "deterministic_across_runs": true,
+          "evidence_file": "remote-results/libc-family-40x2/job-030/evidence.json",
+          "evidence_file_sha256": "a9cff565a55e0fde3159afb7d5612f389f9e56b7246b8261a64d305576c48278",
+          "function_body_addresses": 52,
+          "function_body_sha256": "6bb1a0679638682938715778ac3fe114badb4e2eb52cf6891f346f0b0540b839",
+          "function_entry": "00116890",
+          "function_name": "MELi-cKqWq0#D#A",
+          "function_present": true,
+          "ghidra_version": "12.1.2",
+          "instruction_count": 12,
+          "provider": "gta_v_libc",
+          "provider_label": "gta_v_libc",
+          "provider_sha256": "309cb9031209eb9b838216994d2c39613fcd65ec1eae493c4b784b9dacdd06bb",
+          "symbol_address": "00116890",
+          "symbol_external": false,
+          "symbol_name": "MELi-cKqWq0#D#A",
+          "symbol_type": "Function",
+          "thunk": false,
+          "thunk_target_entry": null,
+          "thunk_target_external": null,
+          "thunk_target_name": null
+        }
+      },
+      "registered_library": "libc",
+      "runtime": {
+        "direct_bridge_count": 8,
+        "lle_redirect_count": 4,
+        "runtime_symbol_addresses": [
+          "0x0000000805C00890"
+        ],
+        "runtime_symbol_count": 8,
+        "trampoline_log_addresses": [],
+        "trampoline_log_count": 0
+      }
+    },
+    {
+      "catalog_symbol": "memcpy_s",
+      "component": "Libc",
+      "disposition": "gen5_prefer_lle_fail_closed",
+      "library": "libc",
+      "module": "libc",
+      "nid": "NFLs+dRJGNg",
+      "provider_evidence": {
+        "gta_v_libc": {
+          "decompile_sha256": "8dacd09dd6d36ce621e5546f17b71c364b69ffd653a75a24f57dd4b6ec2f8b60",
+          "deterministic_across_runs": true,
+          "evidence_file": "remote-results/libc-family-40x2/job-020/evidence.json",
+          "evidence_file_sha256": "9af452486f83eb08a313ba061719400ea2865d97c4c15c95e8e68efd67bf38bf",
+          "function_body_addresses": 236,
+          "function_body_sha256": "6a72dd8f659e69060d6c99210d6c0b45397b17c8853c7b35f28323321dace261",
+          "function_entry": "0016aa10",
+          "function_name": "NFLs+dRJGNg#D#A",
+          "function_present": true,
+          "ghidra_version": "12.1.2",
+          "instruction_count": 68,
+          "provider": "gta_v_libc",
+          "provider_label": "gta_v_libc",
+          "provider_sha256": "309cb9031209eb9b838216994d2c39613fcd65ec1eae493c4b784b9dacdd06bb",
+          "symbol_address": "0016aa10",
+          "symbol_external": false,
+          "symbol_name": "NFLs+dRJGNg#D#A",
+          "symbol_type": "Function",
+          "thunk": false,
+          "thunk_target_entry": null,
+          "thunk_target_external": null,
+          "thunk_target_name": null
+        }
+      },
+      "registered_library": "libc",
+      "runtime": {
+        "direct_bridge_count": 4,
+        "lle_redirect_count": 4,
+        "runtime_symbol_addresses": [
+          "0x0000000805C54A10"
+        ],
+        "runtime_symbol_count": 4,
+        "trampoline_log_addresses": [],
+        "trampoline_log_count": 0
+      }
+    },
+    {
+      "catalog_symbol": "_FSinh",
+      "component": "Libc",
+      "disposition": "gen5_prefer_lle_fail_closed",
+      "library": "libc",
+      "module": "libc",
+      "nid": "O4L+0oCN9zA",
+      "provider_evidence": {
+        "gta_v_libc": {
+          "decompile_sha256": "3b2218fd90641566491b092d8edeef8450d41d74eeaf0a02f04b75f28fe188df",
+          "deterministic_across_runs": true,
+          "evidence_file": "remote-results/libc-family-40x2/job-001/evidence.json",
+          "evidence_file_sha256": "b68d2a720c6a4fc2d25068fe95b85d0ea38d85d251faa600388c4525b5eeb0f7",
+          "function_body_addresses": 581,
+          "function_body_sha256": "055726998ff540f9e01ae7c7aa1fae9ae424ba2c2f635aabc4e4bb96fd663226",
+          "function_entry": "0017db50",
+          "function_name": "O4L+0oCN9zA#D#A",
+          "function_present": true,
+          "ghidra_version": "12.1.2",
+          "instruction_count": 129,
+          "provider": "gta_v_libc",
+          "provider_label": "gta_v_libc",
+          "provider_sha256": "309cb9031209eb9b838216994d2c39613fcd65ec1eae493c4b784b9dacdd06bb",
+          "symbol_address": "0017db50",
+          "symbol_external": false,
+          "symbol_name": "O4L+0oCN9zA#D#A",
+          "symbol_type": "Function",
+          "thunk": false,
+          "thunk_target_entry": null,
+          "thunk_target_external": null,
+          "thunk_target_name": null
+        }
+      },
+      "registered_library": "libc",
+      "runtime": {
+        "direct_bridge_count": 4,
+        "lle_redirect_count": 4,
+        "runtime_symbol_addresses": [
+          "0x0000000805C67B50"
+        ],
+        "runtime_symbol_count": 4,
+        "trampoline_log_addresses": [],
+        "trampoline_log_count": 0
+      }
+    },
+    {
+      "catalog_symbol": "_FCosh",
+      "component": "Libc",
+      "disposition": "gen5_prefer_lle_fail_closed",
+      "library": "libc",
+      "module": "libc",
+      "nid": "PdnFCFqKGqA",
+      "provider_evidence": {
+        "gta_v_libc": {
+          "decompile_sha256": "f35f8fa0b9719d9d8f91a31f533b6cb45c8f9094d54a46cb6dd6a32dbbac464f",
+          "deterministic_across_runs": true,
+          "evidence_file": "remote-results/libc-family-40x2/job-000/evidence.json",
+          "evidence_file_sha256": "abbb4babfdd532098eed85cd938fc8711315f5eab87a2bb2fc2c7fea9932ca1e",
+          "function_body_addresses": 295,
+          "function_body_sha256": "f6a7dee6c446ff996cfd0f63e65e32dbbc89389df26f4d0627140326714b90e4",
+          "function_entry": "0017d700",
+          "function_name": "PdnFCFqKGqA#D#A",
+          "function_present": true,
+          "ghidra_version": "12.1.2",
+          "instruction_count": 74,
+          "provider": "gta_v_libc",
+          "provider_label": "gta_v_libc",
+          "provider_sha256": "309cb9031209eb9b838216994d2c39613fcd65ec1eae493c4b784b9dacdd06bb",
+          "symbol_address": "0017d700",
+          "symbol_external": false,
+          "symbol_name": "PdnFCFqKGqA#D#A",
+          "symbol_type": "Function",
+          "thunk": false,
+          "thunk_target_entry": null,
+          "thunk_target_external": null,
+          "thunk_target_name": null
+        }
+      },
+      "registered_library": "libc",
+      "runtime": {
+        "direct_bridge_count": 4,
+        "lle_redirect_count": 0,
+        "runtime_symbol_addresses": [
+          "0x0000000805C67700"
+        ],
+        "runtime_symbol_count": 4,
+        "trampoline_log_addresses": [],
+        "trampoline_log_count": 0
+      }
+    },
+    {
+      "catalog_symbol": "tanhf",
+      "component": "Libc",
+      "disposition": "gen5_prefer_lle_fail_closed",
+      "library": "libc",
+      "module": "libc",
+      "nid": "SAd0Z3wKwLA",
+      "provider_evidence": {
+        "gta_v_libc": {
+          "decompile_sha256": "54d6a4f630216979cef70b3e5f6066e6417a59c9341ee83d7b71505dc9369f7d",
+          "deterministic_across_runs": true,
+          "evidence_file": "remote-results/libc-family-40x2/job-026/evidence.json",
+          "evidence_file_sha256": "fd5e24d75e07e2a06422d8026aa1c4f05935b1b8de4e8fa1e1601c9082bf8dd2",
+          "function_body_addresses": 238,
+          "function_body_sha256": "ddffffdbbdcc582158cb74813cce55dd64dbd863f0d8f1e061ebc2e7d702b669",
+          "function_entry": "0014f9a0",
+          "function_name": "SAd0Z3wKwLA#D#A",
+          "function_present": true,
+          "ghidra_version": "12.1.2",
+          "instruction_count": 56,
+          "provider": "gta_v_libc",
+          "provider_label": "gta_v_libc",
+          "provider_sha256": "309cb9031209eb9b838216994d2c39613fcd65ec1eae493c4b784b9dacdd06bb",
+          "symbol_address": "0014f9a0",
+          "symbol_external": false,
+          "symbol_name": "SAd0Z3wKwLA#D#A",
+          "symbol_type": "Function",
+          "thunk": false,
+          "thunk_target_entry": null,
+          "thunk_target_external": null,
+          "thunk_target_name": null
+        }
+      },
+      "registered_library": "libc",
+      "runtime": {
+        "direct_bridge_count": 4,
+        "lle_redirect_count": 0,
+        "runtime_symbol_addresses": [
+          "0x0000000805C399A0"
+        ],
+        "runtime_symbol_count": 4,
+        "trampoline_log_addresses": [],
+        "trampoline_log_count": 0
+      }
+    },
+    {
+      "catalog_symbol": "atof",
+      "component": "Libc",
+      "disposition": "gen5_prefer_lle_fail_closed",
+      "library": "libc",
+      "module": "libc",
+      "nid": "SRI6S9B+-a4",
+      "provider_evidence": {
+        "gta_v_libc": {
+          "decompile_sha256": "4b532c608987cd4b857543a6e3dbaab19ed68a07d55075d5cb27d5b3e783b07f",
+          "deterministic_across_runs": true,
+          "evidence_file": "remote-results/libc-family-40x2/job-015/evidence.json",
+          "evidence_file_sha256": "7081e0f7dcfd794340373da80f083bfe33e9d396f15f08418e37e664e48518ad",
+          "function_body_addresses": 13,
+          "function_body_sha256": "28284dcf9ced1fb04b8df5753492d65e0614ea08ad142c7795299ad31d9abd07",
+          "function_entry": "0015b7b0",
+          "function_name": "SRI6S9B+-a4#D#A",
+          "function_present": true,
+          "ghidra_version": "12.1.2",
+          "instruction_count": 6,
+          "provider": "gta_v_libc",
+          "provider_label": "gta_v_libc",
+          "provider_sha256": "309cb9031209eb9b838216994d2c39613fcd65ec1eae493c4b784b9dacdd06bb",
+          "symbol_address": "0015b7b0",
+          "symbol_external": false,
+          "symbol_name": "SRI6S9B+-a4#D#A",
+          "symbol_type": "Function",
+          "thunk": false,
+          "thunk_target_entry": null,
+          "thunk_target_external": null,
+          "thunk_target_name": null
+        }
+      },
+      "registered_library": "libc",
+      "runtime": {
+        "direct_bridge_count": 4,
+        "lle_redirect_count": 4,
+        "runtime_symbol_addresses": [
+          "0x0000000805C457B0"
+        ],
+        "runtime_symbol_count": 4,
+        "trampoline_log_addresses": [],
+        "trampoline_log_count": 0
+      }
+    },
+    {
+      "catalog_symbol": "sceLibcMspaceFree",
+      "component": "LibcInternal",
+      "disposition": "gen5_prefer_lle_fail_closed",
+      "library": "libSceLibcInternal",
+      "module": "libSceLibcInternal",
+      "nid": "Vla-Z+eXlxo",
+      "provider_evidence": {
+        "gta_v_libc": {
+          "decompile_sha256": "4ed6ae72d6699920a8394ebeeaa9a819d8e4506c066a26c1bcdbc41f966d3330",
+          "deterministic_across_runs": true,
+          "evidence_file": "remote-results/deep-kernel-loaded-libc-40x2/job-028/evidence.json",
+          "evidence_file_sha256": "cf57f0fb381a9312839ae79d82c7bf8f52d43635b1a28a789620481ba1f5554c",
+          "function_body_addresses": 69,
+          "function_body_sha256": "86269fe5bfb80801d4fde8b422b2d17ab05e8da0764fc4cd022a8a9fee0885a4",
+          "function_entry": "0010f5a0",
+          "function_name": "Vla-Z+eXlxo#D#A",
+          "function_present": true,
+          "ghidra_version": "12.1.2",
+          "instruction_count": 28,
+          "provider": "gta_v_libc",
+          "provider_label": "gta_v_libc_internal_audit",
+          "provider_sha256": "309cb9031209eb9b838216994d2c39613fcd65ec1eae493c4b784b9dacdd06bb",
+          "symbol_address": "0010f5a0",
+          "symbol_external": false,
+          "symbol_name": "Vla-Z+eXlxo#D#A",
+          "symbol_type": "Function",
+          "thunk": false,
+          "thunk_target_entry": null,
+          "thunk_target_external": null,
+          "thunk_target_name": null
+        }
+      },
+      "registered_library": "libSceLibcInternal",
+      "runtime": {
+        "direct_bridge_count": 4,
+        "lle_redirect_count": 0,
+        "runtime_symbol_addresses": [
+          "0x0000000805BF95A0"
+        ],
+        "runtime_symbol_count": 4,
+        "trampoline_log_addresses": [],
+        "trampoline_log_count": 0
+      }
+    },
+    {
+      "catalog_symbol": "_Mtx_init",
+      "component": "Libc",
+      "disposition": "gen5_prefer_lle_fail_closed",
+      "library": "libc",
+      "module": "libc",
+      "nid": "YaHc3GS7y7g",
+      "provider_evidence": {
+        "gta_v_libc": {
+          "decompile_sha256": "8f52b17626aaead97246296d011d31dcb4e05ad82017c375a83cc821952740cb",
+          "deterministic_across_runs": true,
+          "evidence_file": "remote-results/libc-family-40x2/job-003/evidence.json",
+          "evidence_file_sha256": "6844180820183d5591bf915f87938ce298328194504ee5890581a289e2966aac",
+          "function_body_addresses": 117,
+          "function_body_sha256": "26e27d85f4081cd9f1d44ca58c5a54c95c330ff09af818b625e4b607c52ff594",
+          "function_entry": "00105c20",
+          "function_name": "YaHc3GS7y7g#D#A",
+          "function_present": true,
+          "ghidra_version": "12.1.2",
+          "instruction_count": 36,
+          "provider": "gta_v_libc",
+          "provider_label": "gta_v_libc",
+          "provider_sha256": "309cb9031209eb9b838216994d2c39613fcd65ec1eae493c4b784b9dacdd06bb",
+          "symbol_address": "00105c20",
+          "symbol_external": false,
+          "symbol_name": "YaHc3GS7y7g#D#A",
+          "symbol_type": "Function",
+          "thunk": false,
+          "thunk_target_entry": null,
+          "thunk_target_external": null,
+          "thunk_target_name": null
+        }
+      },
+      "registered_library": "libc",
+      "runtime": {
+        "direct_bridge_count": 4,
+        "lle_redirect_count": 0,
+        "runtime_symbol_addresses": [
+          "0x0000000805BEFC20"
+        ],
+        "runtime_symbol_count": 4,
+        "trampoline_log_addresses": [],
+        "trampoline_log_count": 0
+      }
+    },
+    {
+      "catalog_symbol": "_ZSt14_Throw_C_errori",
+      "component": "Libc",
+      "disposition": "gen5_prefer_lle_fail_closed",
+      "library": "libc",
+      "module": "libc",
+      "nid": "bRujIheWlB0",
+      "provider_evidence": {
+        "gta_v_libc": {
+          "decompile_sha256": "53e17ef31a7e914998f1ba5ab6829fea75711819263bab515a38a34ef1fa9dec",
+          "deterministic_across_runs": true,
+          "evidence_file": "remote-results/libc-family-40x2/job-010/evidence.json",
+          "evidence_file_sha256": "f3066d45ed17278898cf5c03982d31e0437b27fa6d0e5b24155dd6c643c6e152",
+          "function_body_addresses": 229,
+          "function_body_sha256": "331145a858e90f0f423ad59fccdbf9fe0d08854723e936e059a378d075f6fd0a",
+          "function_entry": "00115cc0",
+          "function_name": "bRujIheWlB0#D#A",
+          "function_present": true,
+          "ghidra_version": "12.1.2",
+          "instruction_count": 59,
+          "provider": "gta_v_libc",
+          "provider_label": "gta_v_libc",
+          "provider_sha256": "309cb9031209eb9b838216994d2c39613fcd65ec1eae493c4b784b9dacdd06bb",
+          "symbol_address": "00115cc0",
+          "symbol_external": false,
+          "symbol_name": "bRujIheWlB0#D#A",
+          "symbol_type": "Function",
+          "thunk": false,
+          "thunk_target_entry": null,
+          "thunk_target_external": null,
+          "thunk_target_name": null
+        }
+      },
+      "registered_library": "libc",
+      "runtime": {
+        "direct_bridge_count": 4,
+        "lle_redirect_count": 0,
+        "runtime_symbol_addresses": [
+          "0x0000000805BFFCC0"
+        ],
+        "runtime_symbol_count": 4,
+        "trampoline_log_addresses": [],
+        "trampoline_log_count": 0
+      }
+    },
+    {
+      "catalog_symbol": "_ZdlPvSt11align_val_t",
+      "component": "Libc",
+      "disposition": "gen5_prefer_lle_fail_closed",
+      "library": "libc",
+      "module": "libc",
+      "nid": "bZx+FFSlkUM",
+      "provider_evidence": {
+        "gta_v_libc": {
+          "decompile_sha256": "926ed5cf718250a873b40dcb611aed6fdfc38e22cd7a1ce7c0cc6dbb72e85904",
+          "deterministic_across_runs": true,
+          "evidence_file": "remote-results/libc-family-40x2/job-008/evidence.json",
+          "evidence_file_sha256": "7d8e76bd894ff10981ad6fa03599f5d41a31449ee67239ce42a5db7bd9ab26e6",
+          "function_body_addresses": 12,
+          "function_body_sha256": "6de1120b10aec73bbb38eb3cee2f93f947d7b4b9c5ef0395d2f7bea362f6c57c",
+          "function_entry": "001183a0",
+          "function_name": "bZx+FFSlkUM#D#A",
+          "function_present": true,
+          "ghidra_version": "12.1.2",
+          "instruction_count": 5,
+          "provider": "gta_v_libc",
+          "provider_label": "gta_v_libc",
+          "provider_sha256": "309cb9031209eb9b838216994d2c39613fcd65ec1eae493c4b784b9dacdd06bb",
+          "symbol_address": "001183a0",
+          "symbol_external": false,
+          "symbol_name": "bZx+FFSlkUM#D#A",
+          "symbol_type": "Function",
+          "thunk": false,
+          "thunk_target_entry": null,
+          "thunk_target_external": null,
+          "thunk_target_name": null
+        }
+      },
+      "registered_library": "libc",
+      "runtime": {
+        "direct_bridge_count": 4,
+        "lle_redirect_count": 0,
+        "runtime_symbol_addresses": [
+          "0x0000000805C023A0"
+        ],
+        "runtime_symbol_count": 4,
+        "trampoline_log_addresses": [],
+        "trampoline_log_count": 0
+      }
+    },
+    {
+      "catalog_symbol": "_ZSt11_Xbad_allocv",
+      "component": "Libc",
+      "disposition": "gen5_prefer_lle_fail_closed",
+      "library": "libc",
+      "module": "libc",
+      "nid": "eT2UsmTewbU",
+      "provider_evidence": {
+        "gta_v_libc": {
+          "decompile_sha256": "dfa23a6a73b552cc867690d739bcd640d04b113b28647f2dbdb12d9e4c6ffa76",
+          "deterministic_across_runs": true,
+          "evidence_file": "remote-results/libc-family-40x2/job-009/evidence.json",
+          "evidence_file_sha256": "0f4949e2731eb33d47a02aa9aee12cb9480efb9819b2924d2e76592d52b97e80",
+          "function_body_addresses": 52,
+          "function_body_sha256": "c663f80c4a73c465baff8aee941e05552d52a225dc61b179963ac182276996de",
+          "function_entry": "001163f0",
+          "function_name": "eT2UsmTewbU#D#A",
+          "function_present": true,
+          "ghidra_version": "12.1.2",
+          "instruction_count": 12,
+          "provider": "gta_v_libc",
+          "provider_label": "gta_v_libc",
+          "provider_sha256": "309cb9031209eb9b838216994d2c39613fcd65ec1eae493c4b784b9dacdd06bb",
+          "symbol_address": "001163f0",
+          "symbol_external": false,
+          "symbol_name": "eT2UsmTewbU#D#A",
+          "symbol_type": "Function",
+          "thunk": false,
+          "thunk_target_entry": null,
+          "thunk_target_external": null,
+          "thunk_target_name": null
+        }
+      },
+      "registered_library": "libc",
+      "runtime": {
+        "direct_bridge_count": 4,
+        "lle_redirect_count": 4,
+        "runtime_symbol_addresses": [
+          "0x0000000805C003F0"
+        ],
+        "runtime_symbol_count": 4,
+        "trampoline_log_addresses": [],
+        "trampoline_log_count": 0
+      }
+    },
+    {
+      "catalog_symbol": "localtime_s",
+      "component": "Libc",
+      "disposition": "gen5_prefer_lle_fail_closed",
+      "library": "libc",
+      "module": "libc",
+      "nid": "fiiNDnNBKVY",
+      "provider_evidence": {
+        "gta_v_libc": {
+          "decompile_sha256": "cc5970448b029efd8435938e24f2caab8dd8783c138e283bea1261a88fea28f7",
+          "deterministic_across_runs": true,
+          "evidence_file": "remote-results/libc-family-40x2/job-018/evidence.json",
+          "evidence_file_sha256": "aea9896c1ac410fd13db5064a3bdcaa5082cdbc0ecf6aab2a821fe8d45b04e69",
+          "function_body_addresses": 144,
+          "function_body_sha256": "68d501f6d4b1b2ddd02e1485c0d31bad1b43a12e54ae3791bc489f0c0ce08815",
+          "function_entry": "0016bf40",
+          "function_name": "fiiNDnNBKVY#D#A",
+          "function_present": true,
+          "ghidra_version": "12.1.2",
+          "instruction_count": 47,
+          "provider": "gta_v_libc",
+          "provider_label": "gta_v_libc",
+          "provider_sha256": "309cb9031209eb9b838216994d2c39613fcd65ec1eae493c4b784b9dacdd06bb",
+          "symbol_address": "0016bf40",
+          "symbol_external": false,
+          "symbol_name": "fiiNDnNBKVY#D#A",
+          "symbol_type": "Function",
+          "thunk": false,
+          "thunk_target_entry": null,
+          "thunk_target_external": null,
+          "thunk_target_name": null
+        }
+      },
+      "registered_library": "libc",
+      "runtime": {
+        "direct_bridge_count": 4,
+        "lle_redirect_count": 4,
+        "runtime_symbol_addresses": [
+          "0x0000000805C55F40"
+        ],
+        "runtime_symbol_count": 4,
+        "trampoline_log_addresses": [],
+        "trampoline_log_count": 0
+      }
+    },
+    {
+      "catalog_symbol": "_Mtx_unlock",
+      "component": "Libc",
+      "disposition": "gen5_prefer_lle_fail_closed",
+      "library": "libc",
+      "module": "libc",
+      "nid": "gTuXQwP9rrs",
+      "provider_evidence": {
+        "gta_v_libc": {
+          "decompile_sha256": "0502d13c2f329e46ca13b3b36b4649c646f6cbd6d50b2acfa9d8c7e779e5b52a",
+          "deterministic_across_runs": true,
+          "evidence_file": "remote-results/libc-family-40x2/job-005/evidence.json",
+          "evidence_file_sha256": "2a6d59452e0e26f5e52b859ff7243f6ae744fc64a4a66e9b6128c01b0daa3eda",
+          "function_body_addresses": 13,
+          "function_body_sha256": "69de6a61170d30f28be00c65bce4c1996ea14ab6faa281f407ab8514d54ddfbb",
+          "function_entry": "00105cb0",
+          "function_name": "gTuXQwP9rrs#D#A",
+          "function_present": true,
+          "ghidra_version": "12.1.2",
+          "instruction_count": 6,
+          "provider": "gta_v_libc",
+          "provider_label": "gta_v_libc",
+          "provider_sha256": "309cb9031209eb9b838216994d2c39613fcd65ec1eae493c4b784b9dacdd06bb",
+          "symbol_address": "00105cb0",
+          "symbol_external": false,
+          "symbol_name": "gTuXQwP9rrs#D#A",
+          "symbol_type": "Function",
+          "thunk": false,
+          "thunk_target_entry": null,
+          "thunk_target_external": null,
+          "thunk_target_name": null
+        }
+      },
+      "registered_library": "libc",
+      "runtime": {
+        "direct_bridge_count": 4,
+        "lle_redirect_count": 0,
+        "runtime_symbol_addresses": [
+          "0x0000000805BEFCB0"
+        ],
+        "runtime_symbol_count": 4,
+        "trampoline_log_addresses": [],
+        "trampoline_log_count": 0
+      }
+    },
+    {
+      "catalog_symbol": "sceLibcMspaceRealloc",
+      "component": "LibcInternal",
+      "disposition": "gen5_prefer_lle_fail_closed",
+      "library": "libSceLibcInternal",
+      "module": "libSceLibcInternal",
+      "nid": "gigoVHZvVPE",
+      "provider_evidence": {
+        "gta_v_libc": {
+          "decompile_sha256": "4987f56965ea2d8857206b74fee24cc99047b38b917f63e25f80a6930cd8d4e6",
+          "deterministic_across_runs": true,
+          "evidence_file": "remote-results/deep-kernel-loaded-libc-40x2/job-030/evidence.json",
+          "evidence_file_sha256": "34df5f8465c6888024f31ada0704178ca1a91db4928a7f16335d85a15ae66ce0",
+          "function_body_addresses": 111,
+          "function_body_sha256": "63ca468d074beebad22585d095b4484aeed78d5135adea407c4d32f00dc1b011",
+          "function_entry": "0010f670",
+          "function_name": "gigoVHZvVPE#D#A",
+          "function_present": true,
+          "ghidra_version": "12.1.2",
+          "instruction_count": 36,
+          "provider": "gta_v_libc",
+          "provider_label": "gta_v_libc_internal_audit",
+          "provider_sha256": "309cb9031209eb9b838216994d2c39613fcd65ec1eae493c4b784b9dacdd06bb",
+          "symbol_address": "0010f670",
+          "symbol_external": false,
+          "symbol_name": "gigoVHZvVPE#D#A",
+          "symbol_type": "Function",
+          "thunk": false,
+          "thunk_target_entry": null,
+          "thunk_target_external": null,
+          "thunk_target_name": null
+        }
+      },
+      "registered_library": "libSceLibcInternal",
+      "runtime": {
+        "direct_bridge_count": 4,
+        "lle_redirect_count": 0,
+        "runtime_symbol_addresses": [
+          "0x0000000805BF9670"
+        ],
+        "runtime_symbol_count": 4,
+        "trampoline_log_addresses": [],
+        "trampoline_log_count": 0
+      }
+    },
+    {
+      "catalog_symbol": "_Mtx_lock",
+      "component": "Libc",
+      "disposition": "gen5_prefer_lle_fail_closed",
+      "library": "libc",
+      "module": "libc",
+      "nid": "iS4aWbUonl0",
+      "provider_evidence": {
+        "gta_v_libc": {
+          "decompile_sha256": "91ed83acaddc2e2c452feef96cca71ee485ee3648aab453d2007c026e47cf6e0",
+          "deterministic_across_runs": true,
+          "evidence_file": "remote-results/libc-family-40x2/job-004/evidence.json",
+          "evidence_file_sha256": "6f2af19707cca9061243ae454d282a25f7fd455c927fb10512aac8d6eccbfe06",
+          "function_body_addresses": 33,
+          "function_body_sha256": "b8e8f2b1d97156411ee356de9d7e128f771f21260f381c04d563c645f3cea0b7",
+          "function_entry": "00105cc0",
+          "function_name": "iS4aWbUonl0#D#A",
+          "function_present": true,
+          "ghidra_version": "12.1.2",
+          "instruction_count": 12,
+          "provider": "gta_v_libc",
+          "provider_label": "gta_v_libc",
+          "provider_sha256": "309cb9031209eb9b838216994d2c39613fcd65ec1eae493c4b784b9dacdd06bb",
+          "symbol_address": "00105cc0",
+          "symbol_external": false,
+          "symbol_name": "iS4aWbUonl0#D#A",
+          "symbol_type": "Function",
+          "thunk": false,
+          "thunk_target_entry": null,
+          "thunk_target_external": null,
+          "thunk_target_name": null
+        }
+      },
+      "registered_library": "libc",
+      "runtime": {
+        "direct_bridge_count": 4,
+        "lle_redirect_count": 0,
+        "runtime_symbol_addresses": [
+          "0x0000000805BEFCC0"
+        ],
+        "runtime_symbol_count": 4,
+        "trampoline_log_addresses": [],
+        "trampoline_log_count": 0
+      }
+    },
+    {
+      "catalog_symbol": "sincos",
+      "component": "Libc",
+      "disposition": "gen5_prefer_lle_fail_closed",
+      "library": "libc",
+      "module": "libc",
+      "nid": "jMB7EFyu30Y",
+      "provider_evidence": {
+        "gta_v_libc": {
+          "decompile_sha256": "44bc493a428cb557c7ecaa6104a68c70dd2d3ff0b1e805273e2eabe8ccb7c5b4",
+          "deterministic_across_runs": true,
+          "evidence_file": "remote-results/libc-family-40x2/job-023/evidence.json",
+          "evidence_file_sha256": "523a1563e76421ce29aec846be8382a405767a5b779d7d72312cebc5a0f227b5",
+          "function_body_addresses": 1196,
+          "function_body_sha256": "4888386bdb21f46e70ca5fe5bd648d5cecf32ab3fbde28a7cff24d59091d7c3a",
+          "function_entry": "0014dc20",
+          "function_name": "jMB7EFyu30Y#D#A",
+          "function_present": true,
+          "ghidra_version": "12.1.2",
+          "instruction_count": 259,
+          "provider": "gta_v_libc",
+          "provider_label": "gta_v_libc",
+          "provider_sha256": "309cb9031209eb9b838216994d2c39613fcd65ec1eae493c4b784b9dacdd06bb",
+          "symbol_address": "0014dc20",
+          "symbol_external": false,
+          "symbol_name": "jMB7EFyu30Y#D#A",
+          "symbol_type": "Function",
+          "thunk": false,
+          "thunk_target_entry": null,
+          "thunk_target_external": null,
+          "thunk_target_name": null
+        }
+      },
+      "registered_library": "libc",
+      "runtime": {
+        "direct_bridge_count": 4,
+        "lle_redirect_count": 0,
+        "runtime_symbol_addresses": [
+          "0x0000000805C37C20"
+        ],
+        "runtime_symbol_count": 4,
+        "trampoline_log_addresses": [],
+        "trampoline_log_count": 0
+      }
+    },
+    {
+      "catalog_symbol": "longjmp",
+      "component": "Libc",
+      "disposition": "gen5_prefer_lle_fail_closed",
+      "library": "libc",
+      "module": "libc",
+      "nid": "lKEN2IebgJ0",
+      "provider_evidence": {
+        "gta_v_libc": {
+          "decompile_sha256": "ca58b8189edfee1d72616a972a0847bf675ed9498af2a8eb4a6445aac333e027",
+          "deterministic_across_runs": true,
+          "evidence_file": "remote-results/libc-family-40x2/job-019/evidence.json",
+          "evidence_file_sha256": "9059deecd116cad6eccc13c9da6098c899c88c73036fa3d8f22f7ca3ecfaf4dc",
+          "function_body_addresses": 117,
+          "function_body_sha256": "28e65f6e3385e9b7021d52e1e3675046b750cbda2163ccf1dd8c34f5ff6e9048",
+          "function_entry": "00153cd0",
+          "function_name": "lKEN2IebgJ0#D#A",
+          "function_present": true,
+          "ghidra_version": "12.1.2",
+          "instruction_count": 35,
+          "provider": "gta_v_libc",
+          "provider_label": "gta_v_libc",
+          "provider_sha256": "309cb9031209eb9b838216994d2c39613fcd65ec1eae493c4b784b9dacdd06bb",
+          "symbol_address": "00153cd0",
+          "symbol_external": false,
+          "symbol_name": "lKEN2IebgJ0#D#A",
+          "symbol_type": "Function",
+          "thunk": false,
+          "thunk_target_entry": null,
+          "thunk_target_external": null,
+          "thunk_target_name": null
+        }
+      },
+      "registered_library": "libc",
+      "runtime": {
+        "direct_bridge_count": 4,
+        "lle_redirect_count": 4,
+        "runtime_symbol_addresses": [
+          "0x0000000805C3DCD0"
+        ],
+        "runtime_symbol_count": 4,
+        "trampoline_log_addresses": [],
+        "trampoline_log_count": 0
+      }
+    },
+    {
+      "catalog_symbol": "sceLibcMspaceMallocStats",
+      "component": "LibcInternal",
+      "disposition": "gen5_prefer_lle_fail_closed",
+      "library": "libSceLibcInternal",
+      "module": "libSceLibcInternal",
+      "nid": "mfHdJTIvhuo",
+      "provider_evidence": {
+        "gta_v_libc": {
+          "decompile_sha256": "e2eb3aaa68e9b6f2e6a28b2d2d9462b16c2941da8c1c48d3e9cd5439f037b6e5",
+          "deterministic_across_runs": true,
+          "evidence_file": "remote-results/deep-kernel-loaded-libc-40x2/job-029/evidence.json",
+          "evidence_file_sha256": "6ac8e81bba89eea4560fb93ebb465cba53e8d0d8f055f261e9fff457d0d4d051",
+          "function_body_addresses": 11,
+          "function_body_sha256": "d81f74073b1860ab0dd30b547bc9e6bc46ecaf55f108f78d8ea8c18e98b36d9b",
+          "function_entry": "0010f860",
+          "function_name": "mfHdJTIvhuo#D#A",
+          "function_present": true,
+          "ghidra_version": "12.1.2",
+          "instruction_count": 5,
+          "provider": "gta_v_libc",
+          "provider_label": "gta_v_libc_internal_audit",
+          "provider_sha256": "309cb9031209eb9b838216994d2c39613fcd65ec1eae493c4b784b9dacdd06bb",
+          "symbol_address": "0010f860",
+          "symbol_external": false,
+          "symbol_name": "mfHdJTIvhuo#D#A",
+          "symbol_type": "Function",
+          "thunk": false,
+          "thunk_target_entry": null,
+          "thunk_target_external": null,
+          "thunk_target_name": null
+        }
+      },
+      "registered_library": "libSceLibcInternal",
+      "runtime": {
+        "direct_bridge_count": 4,
+        "lle_redirect_count": 0,
+        "runtime_symbol_addresses": [
+          "0x0000000805BF9860"
+        ],
+        "runtime_symbol_count": 4,
+        "trampoline_log_addresses": [],
+        "trampoline_log_count": 0
+      }
+    },
+    {
+      "catalog_symbol": "_ZSt14_Xout_of_rangePKc",
+      "component": "Libc",
+      "disposition": "gen5_prefer_lle_fail_closed",
+      "library": "libc",
+      "module": "libc",
+      "nid": "ozMAr28BwSY",
+      "provider_evidence": {
+        "gta_v_libc": {
+          "decompile_sha256": "1b52db3349c8c61ed287c3223864fa210f75023e3d808933bbd6f6c0c52c6834",
+          "deterministic_across_runs": true,
+          "evidence_file": "remote-results/libc-family-40x2/job-012/evidence.json",
+          "evidence_file_sha256": "db18b5ab00460e2bf0dc4a68855f3690a90f8c7857403d05297f4859c420f074",
+          "function_body_addresses": 58,
+          "function_body_sha256": "70f7587d4fa44fd919e71a20a3817f28e0100ed29dfbb5c3b04a71c39bbcf011",
+          "function_entry": "00116600",
+          "function_name": "ozMAr28BwSY#D#A",
+          "function_present": true,
+          "ghidra_version": "12.1.2",
+          "instruction_count": 16,
+          "provider": "gta_v_libc",
+          "provider_label": "gta_v_libc",
+          "provider_sha256": "309cb9031209eb9b838216994d2c39613fcd65ec1eae493c4b784b9dacdd06bb",
+          "symbol_address": "00116600",
+          "symbol_external": false,
+          "symbol_name": "ozMAr28BwSY#D#A",
+          "symbol_type": "Function",
+          "thunk": false,
+          "thunk_target_entry": null,
+          "thunk_target_external": null,
+          "thunk_target_name": null
+        }
+      },
+      "registered_library": "libc",
+      "runtime": {
+        "direct_bridge_count": 4,
+        "lle_redirect_count": 4,
+        "runtime_symbol_addresses": [
+          "0x0000000805C00600"
+        ],
+        "runtime_symbol_count": 4,
+        "trampoline_log_addresses": [],
+        "trampoline_log_count": 0
+      }
+    },
+    {
+      "catalog_symbol": "_Getptoupper",
+      "component": "Libc",
+      "disposition": "gen5_prefer_lle_fail_closed",
+      "library": "libc",
+      "module": "libc",
+      "nid": "rcQCUr0EaRU",
+      "provider_evidence": {
+        "gta_v_libc": {
+          "decompile_sha256": "01ca7eed547af7f295871a575d8cf046c68cf7aa6cdacf03657b886906f1e0c3",
+          "deterministic_across_runs": true,
+          "evidence_file": "remote-results/libc-family-40x2/job-001/evidence.json",
+          "evidence_file_sha256": "b68d2a720c6a4fc2d25068fe95b85d0ea38d85d251faa600388c4525b5eeb0f7",
+          "function_body_addresses": 8,
+          "function_body_sha256": "083f13b497269b24f9aec95e593d31661f07d914e2ce6fbcc137e945b5186b16",
+          "function_entry": "0013abf0",
+          "function_name": "rcQCUr0EaRU#D#A",
+          "function_present": true,
+          "ghidra_version": "12.1.2",
+          "instruction_count": 2,
+          "provider": "gta_v_libc",
+          "provider_label": "gta_v_libc",
+          "provider_sha256": "309cb9031209eb9b838216994d2c39613fcd65ec1eae493c4b784b9dacdd06bb",
+          "symbol_address": "0013abf0",
+          "symbol_external": false,
+          "symbol_name": "rcQCUr0EaRU#D#A",
+          "symbol_type": "Function",
+          "thunk": false,
+          "thunk_target_entry": null,
+          "thunk_target_external": null,
+          "thunk_target_name": null
+        }
+      },
+      "registered_library": "libc",
+      "runtime": {
+        "direct_bridge_count": 4,
+        "lle_redirect_count": 4,
+        "runtime_symbol_addresses": [
+          "0x0000000805C24BF0"
+        ],
+        "runtime_symbol_count": 4,
+        "trampoline_log_addresses": [],
+        "trampoline_log_count": 0
+      }
+    },
+    {
+      "catalog_symbol": "_ZSt14_Xlength_errorPKc",
+      "component": "Libc",
+      "disposition": "gen5_prefer_lle_fail_closed",
+      "library": "libc",
+      "module": "libc",
+      "nid": "tQIo+GIPklo",
+      "provider_evidence": {
+        "gta_v_libc": {
+          "decompile_sha256": "d8c352bd2d2f48e536a31aeef31ac9e0b67415c5295ed111688a8876e8ccb474",
+          "deterministic_across_runs": true,
+          "evidence_file": "remote-results/libc-family-40x2/job-011/evidence.json",
+          "evidence_file_sha256": "8afd7c14f50fe4faf019fa574e4ec652ecd58227e0995f46c9b619b6419aeee6",
+          "function_body_addresses": 58,
+          "function_body_sha256": "cf38e8b4f3488af94d14926b2ab34c8071ae85b2cdbe2c497d4459c01b082948",
+          "function_entry": "00116520",
+          "function_name": "tQIo+GIPklo#D#A",
+          "function_present": true,
+          "ghidra_version": "12.1.2",
+          "instruction_count": 16,
+          "provider": "gta_v_libc",
+          "provider_label": "gta_v_libc",
+          "provider_sha256": "309cb9031209eb9b838216994d2c39613fcd65ec1eae493c4b784b9dacdd06bb",
+          "symbol_address": "00116520",
+          "symbol_external": false,
+          "symbol_name": "tQIo+GIPklo#D#A",
+          "symbol_type": "Function",
+          "thunk": false,
+          "thunk_target_entry": null,
+          "thunk_target_external": null,
+          "thunk_target_name": null
+        }
+      },
+      "registered_library": "libc",
+      "runtime": {
+        "direct_bridge_count": 4,
+        "lle_redirect_count": 4,
+        "runtime_symbol_addresses": [
+          "0x0000000805C00520"
+        ],
+        "runtime_symbol_count": 4,
+        "trampoline_log_addresses": [],
+        "trampoline_log_count": 0
+      }
+    },
+    {
+      "catalog_symbol": "_Stoul",
+      "component": "LibcInternal;Libc",
+      "disposition": "gen5_prefer_lle_fail_closed",
+      "library": "libSceLibcInternal;libc",
+      "module": "libSceLibcInternal;libc",
+      "nid": "zlfEH8FmyUA",
+      "provider_evidence": {
+        "gta_v_libc": {
+          "decompile_sha256": "5623d201bda46de8131b00a1f7d2b1e9dcece589a809b6b42694e2734c1bab70",
+          "deterministic_across_runs": true,
+          "evidence_file": "remote-results/libc-family-40x2/job-029/evidence.json",
+          "evidence_file_sha256": "5cc62b3be0bf70e0121ec1953901612833da915e1213f57638796abbdb3f33f6",
+          "function_body_addresses": 13,
+          "function_body_sha256": "6ebfedbaec496191c40590099787d42b425a6218308483307cf4c3ae660e80e1",
+          "function_entry": "0013d600",
+          "function_name": "zlfEH8FmyUA#D#A",
+          "function_present": true,
+          "ghidra_version": "12.1.2",
+          "instruction_count": 6,
+          "provider": "gta_v_libc",
+          "provider_label": "gta_v_libc",
+          "provider_sha256": "309cb9031209eb9b838216994d2c39613fcd65ec1eae493c4b784b9dacdd06bb",
+          "symbol_address": "0013d600",
+          "symbol_external": false,
+          "symbol_name": "zlfEH8FmyUA#D#A",
+          "symbol_type": "Function",
+          "thunk": false,
+          "thunk_target_entry": null,
+          "thunk_target_external": null,
+          "thunk_target_name": null
+        }
+      },
+      "registered_library": "libc",
+      "runtime": {
+        "direct_bridge_count": 8,
+        "lle_redirect_count": 4,
+        "runtime_symbol_addresses": [
+          "0x0000000805C27600"
+        ],
+        "runtime_symbol_count": 8,
+        "trampoline_log_addresses": [],
+        "trampoline_log_count": 0
+      }
+    },
+    {
+      "catalog_symbol": "__cxa_pure_virtual",
+      "component": "LibcInternal;Libc",
+      "disposition": "gen5_prefer_lle_fail_closed",
+      "library": "libSceLibcInternal;libc",
+      "module": "libSceLibcInternal;libc",
+      "nid": "zr094EQ39Ww",
+      "provider_evidence": {
+        "gta_v_libc": {
+          "decompile_sha256": "638a76677e38ce46005ef638380b5f69023a8dd942e33d8f8d358bc795493de1",
+          "deterministic_across_runs": true,
+          "evidence_file": "remote-results/libc-family-40x2/job-028/evidence.json",
+          "evidence_file_sha256": "4a2a64d8e3cb24d6b2dd82e37d3eafbcff669eb347557027002b72f6405b55d3",
+          "function_body_addresses": 20,
+          "function_body_sha256": "f8988400cd9033baf825b6ea48b535764e21436cadd786695d187c7c969bf0c3",
+          "function_entry": "00134fe0",
+          "function_name": "zr094EQ39Ww#D#A",
+          "function_present": true,
+          "ghidra_version": "12.1.2",
+          "instruction_count": 5,
+          "provider": "gta_v_libc",
+          "provider_label": "gta_v_libc",
+          "provider_sha256": "309cb9031209eb9b838216994d2c39613fcd65ec1eae493c4b784b9dacdd06bb",
+          "symbol_address": "00134fe0",
+          "symbol_external": false,
+          "symbol_name": "zr094EQ39Ww#D#A",
+          "symbol_type": "Function",
+          "thunk": false,
+          "thunk_target_entry": null,
+          "thunk_target_external": null,
+          "thunk_target_name": null
+        }
+      },
+      "registered_library": "libc",
+      "runtime": {
+        "direct_bridge_count": 8,
+        "lle_redirect_count": 4,
+        "runtime_symbol_addresses": [
+          "0x0000000805C1EFE0"
+        ],
+        "runtime_symbol_count": 8,
+        "trampoline_log_addresses": [],
+        "trampoline_log_count": 0
+      }
+    }
+  ],
+  "runtime_log_sha256": "421c0627d2fa265a608c98bd54d280153f54f611ddd240c0bdd1166e00dc9b88",
+  "source_hashes": {
+    "EVIDENCE.md": "70bce710805b582b134c923038ecf9a82329e24a7a2d4f955400ebcb32e87e0d",
+    "cleanup-proof-deep.txt": "66da95fde8c387f9d71ce1cb705c7301869b49c7959c2e6734b9ef9b815a1a87",
+    "cleanup-proof.txt": "bcfcd26bd2cb185f7d4538075268ad333299f3105f3b1d7899d80af931b69448",
+    "consolidated-nid-evidence.json": "fa845efcb3786257c57105f7c54d318d1f1b732a865ee30b37378fb79b4e33b3",
+    "data-import-disposition.csv": "6028eb14a42456f3aaedaf41d1c9a8c0d07ca47835e65e391acace3ded4cadf8",
+    "kernel-hle-contract-queue.csv": "8b9d1d6b7e66afa6d431bc8df186fd557ef8b02c18906a5cd0686b2dd589b7ce",
+    "libc-non-lle-contract-queue.csv": "f0add93f4100a99f556e6b871fdbc76bb4d20f606287e49f69b5da82251ad045",
+    "prefer-lle-include-candidates.csv": "1967c50f439cf71ea00c481bd86277a22251fc21988e41ff780d26b3c9f3c337",
+    "provider-coverage-summary.json": "9bc760c8cda928fd848d5dd93610cf95dca912f291d1ab9f7d9f404e3c82525e"
+  }
+}

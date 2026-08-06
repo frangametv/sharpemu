@@ -1,0 +1,326 @@
+{
+  "elf_base": 416,
+  "format": "sharpemu-ps5-self-reconstruction-v1",
+  "original_elf_type": 65048,
+  "output": "/private/tmp/sharpemu-gta-npcpp.J2JECN/libSceNpCppWebApi.elf",
+  "output_sha256": "e58144c96637b9f620846aa67d2df4987f96541214d7ece1d4eac2a0a10408aa",
+  "output_size": 7864967,
+  "payload_mappings": [
+    {
+      "destination_offset": 16384,
+      "nested_program_headers": [
+        0
+      ],
+      "program_header": 0,
+      "self_segment": 1,
+      "size": 4037058,
+      "source_offset": 10576
+    },
+    {
+      "destination_offset": 4063232,
+      "nested_program_headers": [
+        1,
+        2
+      ],
+      "program_header": 1,
+      "self_segment": 3,
+      "size": 1744108,
+      "source_offset": 4051072
+    },
+    {
+      "destination_offset": 5816320,
+      "nested_program_headers": [
+        3,
+        4,
+        6
+      ],
+      "program_header": 3,
+      "self_segment": 5,
+      "size": 9056,
+      "source_offset": 5795216
+    },
+    {
+      "destination_offset": 5832704,
+      "nested_program_headers": [
+        7
+      ],
+      "program_header": 7,
+      "self_segment": 7,
+      "size": 216,
+      "source_offset": 5804304
+    },
+    {
+      "destination_offset": 5838544,
+      "nested_program_headers": [
+        8,
+        9,
+        10
+      ],
+      "program_header": 8,
+      "self_segment": 9,
+      "size": 2026264,
+      "source_offset": 5808496
+    },
+    {
+      "destination_offset": 7864816,
+      "nested_program_headers": [
+        11
+      ],
+      "program_header": 11,
+      "self_segment": 11,
+      "size": 80,
+      "source_offset": 7834800
+    }
+  ],
+  "program_headers": [
+    {
+      "align": 16384,
+      "filesz": 4037058,
+      "flags": 1,
+      "index": 0,
+      "memsz": 4037058,
+      "offset": 16384,
+      "paddr": 0,
+      "type": 1,
+      "vaddr": 0
+    },
+    {
+      "align": 16384,
+      "filesz": 1744108,
+      "flags": 4,
+      "index": 1,
+      "memsz": 1744108,
+      "offset": 4063232,
+      "paddr": 4046848,
+      "type": 1,
+      "vaddr": 4046848
+    },
+    {
+      "align": 4,
+      "filesz": 337356,
+      "flags": 4,
+      "index": 2,
+      "memsz": 337356,
+      "offset": 4063232,
+      "paddr": 4046848,
+      "type": 1685382480,
+      "vaddr": 4046848
+    },
+    {
+      "align": 16384,
+      "filesz": 9056,
+      "flags": 6,
+      "index": 3,
+      "memsz": 9056,
+      "offset": 5816320,
+      "paddr": 5799936,
+      "type": 1,
+      "vaddr": 5799936
+    },
+    {
+      "align": 1,
+      "filesz": 9056,
+      "flags": 4,
+      "index": 4,
+      "memsz": 16384,
+      "offset": 5816320,
+      "paddr": 5799936,
+      "type": 1685382482,
+      "vaddr": 5799936
+    },
+    {
+      "align": 0,
+      "filesz": 0,
+      "flags": 4,
+      "index": 5,
+      "memsz": 0,
+      "offset": 0,
+      "paddr": 0,
+      "type": 7,
+      "vaddr": 0
+    },
+    {
+      "align": 8,
+      "filesz": 32,
+      "flags": 4,
+      "index": 6,
+      "memsz": 32,
+      "offset": 5825344,
+      "paddr": 5808960,
+      "type": 1627389954,
+      "vaddr": 5808960
+    },
+    {
+      "align": 16384,
+      "filesz": 216,
+      "flags": 6,
+      "index": 7,
+      "memsz": 5832,
+      "offset": 5832704,
+      "paddr": 5816320,
+      "type": 1,
+      "vaddr": 5816320
+    },
+    {
+      "align": 16384,
+      "filesz": 2026264,
+      "flags": 0,
+      "index": 8,
+      "memsz": 2026264,
+      "offset": 5838544,
+      "paddr": 5822160,
+      "type": 1,
+      "vaddr": 5822160
+    },
+    {
+      "align": 4,
+      "filesz": 36,
+      "flags": 0,
+      "index": 9,
+      "memsz": 36,
+      "offset": 7863936,
+      "paddr": 7847552,
+      "type": 4,
+      "vaddr": 7847552
+    },
+    {
+      "align": 8,
+      "filesz": 832,
+      "flags": 6,
+      "index": 10,
+      "memsz": 832,
+      "offset": 7863976,
+      "paddr": 7847592,
+      "type": 2,
+      "vaddr": 7847592
+    },
+    {
+      "align": 16,
+      "filesz": 80,
+      "flags": 0,
+      "index": 11,
+      "memsz": 0,
+      "offset": 7864816,
+      "paddr": 0,
+      "type": 1879047936,
+      "vaddr": 0
+    },
+    {
+      "align": 16,
+      "filesz": 39,
+      "flags": 0,
+      "index": 12,
+      "memsz": 32,
+      "offset": 7864928,
+      "paddr": 0,
+      "type": 1879047937,
+      "vaddr": 0
+    },
+    {
+      "align": 4,
+      "filesz": 24,
+      "flags": 0,
+      "index": 13,
+      "memsz": 0,
+      "offset": 7864896,
+      "paddr": 0,
+      "type": 4,
+      "vaddr": 0
+    }
+  ],
+  "reconstructed_elf_type": 3,
+  "section_table_cleared": true,
+  "self_segments": [
+    {
+      "file_offset": 2672,
+      "file_size": 7904,
+      "flags": 1114116,
+      "index": 0,
+      "memory_size": 7904
+    },
+    {
+      "file_offset": 10576,
+      "file_size": 4037058,
+      "flags": 10244,
+      "index": 1,
+      "memory_size": 4037058
+    },
+    {
+      "file_offset": 4047648,
+      "file_size": 3424,
+      "flags": 3211268,
+      "index": 2,
+      "memory_size": 3424
+    },
+    {
+      "file_offset": 4051072,
+      "file_size": 1744108,
+      "flags": 1058820,
+      "index": 3,
+      "memory_size": 1744108
+    },
+    {
+      "file_offset": 5795184,
+      "file_size": 32,
+      "flags": 5308420,
+      "index": 4,
+      "memory_size": 32
+    },
+    {
+      "file_offset": 5795216,
+      "file_size": 9056,
+      "flags": 3155972,
+      "index": 5,
+      "memory_size": 9056
+    },
+    {
+      "file_offset": 5804272,
+      "file_size": 32,
+      "flags": 7405572,
+      "index": 6,
+      "memory_size": 32
+    },
+    {
+      "file_offset": 5804304,
+      "file_size": 216,
+      "flags": 7350276,
+      "index": 7,
+      "memory_size": 216
+    },
+    {
+      "file_offset": 5804528,
+      "file_size": 3968,
+      "flags": 9502724,
+      "index": 8,
+      "memory_size": 3968
+    },
+    {
+      "file_offset": 5808496,
+      "file_size": 2026264,
+      "flags": 8398852,
+      "index": 9,
+      "memory_size": 2026264
+    },
+    {
+      "file_offset": 7834768,
+      "file_size": 32,
+      "flags": 11599876,
+      "index": 10,
+      "memory_size": 32
+    },
+    {
+      "file_offset": 7834800,
+      "file_size": 80,
+      "flags": 11544580,
+      "index": 11,
+      "memory_size": 80
+    }
+  ],
+  "source": "/Volumes/Untitled/games/sharpemu/Games/GTA V/sce_module/libSceNpCppWebApi.prx",
+  "source_sha256": "12e445a98b441989626489412e6adb0ba21e8b00cbbc94b117a92267f4a16ebf",
+  "source_size": 7834919,
+  "uncovered_nonempty_program_headers": [
+    12,
+    13
+  ]
+}

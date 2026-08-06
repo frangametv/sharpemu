@@ -4,7 +4,9 @@
 using SharpEmu.HLE;
 using SharpEmu.Libs.Kernel;
 using SharpEmu.Libs.Media;
+using SharpEmu.Libs.VideoOut;
 using System.Buffers.Binary;
+using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.Globalization;
 using System.Text;
@@ -26,10 +28,71 @@ public static class AvPlayerExports
     private const int StreamInfoSize = 32;
     private const int StreamInfoExSize = 32;
     private const int MaxGuestPathLength = 4096;
+    private const int VideoPitchAlignment = 256;
     private static readonly object StateGate = new();
     private static readonly HashSet<string> TracedOnce = new();
     private static readonly Dictionary<ulong, PlayerState> Players = new();
+    private static readonly ConcurrentDictionary<ulong, ulong> VideoBufferRanges = new();
+    private static readonly bool TraceVideoImages = string.Equals(
+        Environment.GetEnvironmentVariable("SHARPEMU_TRACE_AVPLAYER_IMAGES"),
+        "1",
+        StringComparison.Ordinal);
     private static int _traceCount;
+    private static int _videoPayloadTraceCount;
+
+    internal static bool ShouldTraceVideoBufferAddress(ulong address)
+    {
+        if (!TraceVideoImages || address == 0)
+        {
+            return false;
+        }
+
+        foreach (var (start, length) in VideoBufferRanges)
+        {
+            if (address >= start && address - start < length)
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    internal static bool ShouldTraceVideoBufferRange(ulong address, ulong length)
+    {
+        if (!TraceVideoImages || address == 0 || length == 0)
+        {
+            return false;
+        }
+
+        foreach (var (start, rangeLength) in VideoBufferRanges)
+        {
+            if (address <= start
+                    ? start - address < length
+                    : address - start < rangeLength)
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private static void RegisterVideoBuffer(ulong address, int size, int index, string source)
+    {
+        if (address == 0 || size <= 0)
+        {
+            return;
+        }
+
+        VideoBufferRanges[address] = checked((ulong)size);
+        if (TraceVideoImages)
+        {
+            Console.Error.WriteLine(
+                $"[AVPLAYER][TRACE] video_buffer index={index} source={source} " +
+                $"data=0x{address:X16} size={size}");
+        }
+    }
 
     private sealed class PlayerState : IDisposable
     {
@@ -856,9 +919,11 @@ public static class AvPlayerExports
             return false;
         }
 
-        var alignedWidth = AlignUp(player.Width, FramePitchAlignment);
-        var alignedHeight = AlignUp(player.Height, FrameHeightAlignment);
-        var bufferStride = GetVideoBufferSize(player);
+        var alignedWidth = AlignUp(player.Width, 16);
+        var alignedHeight = AlignUp(player.Height, 16);
+        var pitch = extended ? CalculateNv12Pitch(player.Width) : alignedWidth;
+        var bufferHeight = extended ? player.Height : alignedHeight;
+        var bufferStride = CalculateNv12BufferSize(pitch, bufferHeight);
         if (player.GuestBuffers[0] == 0)
         {
             if (!AllocateGuestVideoBuffers(ctx, player, bufferStride))
@@ -866,12 +931,34 @@ public static class AvPlayerExports
                 return false;
             }
             player.GuestBufferStride = bufferStride;
+            Trace(
+                $"video_layout ex={extended} width={player.Width} height={player.Height} " +
+                $"pitch={pitch} uv_offset={checked(pitch * bufferHeight)} size={bufferStride}");
         }
 
         var frameData = player.RawFrame;
-        if (!extended && (alignedWidth != player.Width || alignedHeight != player.Height))
+        if (extended)
         {
-            player.PaddedFrame ??= new byte[bufferStride];
+            if (player.PaddedFrame is null || player.PaddedFrame.Length != bufferStride)
+            {
+                player.PaddedFrame = new byte[bufferStride];
+            }
+            CopyNv12ToGuestBuffer(
+                player.RawFrame,
+                player.PaddedFrame,
+                player.Width,
+                player.Height,
+                player.Width,
+                player.Width,
+                pitch);
+            frameData = player.PaddedFrame;
+        }
+        else if (alignedWidth != player.Width || alignedHeight != player.Height)
+        {
+            if (player.PaddedFrame is null || player.PaddedFrame.Length != bufferStride)
+            {
+                player.PaddedFrame = new byte[bufferStride];
+            }
             player.PaddedFrame.AsSpan().Clear();
             for (var row = 0; row < player.Height; row++)
             {
@@ -895,6 +982,20 @@ public static class AvPlayerExports
         {
             return false;
         }
+        if (TraceVideoImages)
+        {
+            var traceIndex = Interlocked.Increment(ref _videoPayloadTraceCount);
+            if (traceIndex <= 16)
+            {
+                var summary = GuestImageUploadPayloadDiagnostics.Summarize(frameData);
+                Console.Error.WriteLine(
+                    $"[AVPLAYER][TRACE] video_payload index={traceIndex - 1} " +
+                    $"data=0x{bufferAddress:X16} bytes={frameData.Length} " +
+                    $"pitch={pitch} uv_offset={checked(pitch * bufferHeight)} " +
+                    $"nonzero_bytes={summary.NonzeroBytes}/{frameData.Length} " +
+                    $"hash=0x{summary.Hash:X16}");
+            }
+        }
 
         Span<byte> info = extended
             ? stackalloc byte[FrameInfoExSize]
@@ -907,17 +1008,49 @@ public static class AvPlayerExports
         BinaryPrimitives.WriteSingleLittleEndian(info[32..], 1.0f);
         if (extended)
         {
-            BinaryPrimitives.WriteUInt32LittleEndian(info[60..], checked((uint)player.Width));
+            BinaryPrimitives.WriteUInt32LittleEndian(info[60..], checked((uint)pitch));
             info[64] = 8;
             info[65] = 8;
         }
         return ctx.Memory.TryWrite(infoAddress, info);
     }
 
+    internal static int CalculateNv12Pitch(int width) =>
+        AlignUp(width, VideoPitchAlignment);
+
+    internal static int CalculateNv12BufferSize(int pitch, int height) =>
+        checked(pitch * height * 3 / 2);
+
     private static int GetVideoBufferSize(PlayerState player) =>
         checked(
             AlignUp(player.Width, FramePitchAlignment) *
             AlignUp(player.Height, FrameHeightAlignment) * 3 / 2);
+
+    internal static void CopyNv12ToGuestBuffer(
+        ReadOnlySpan<byte> source,
+        Span<byte> destination,
+        int width,
+        int height,
+        int sourceLumaStride,
+        int sourceChromaStride,
+        int destinationPitch)
+    {
+        var sourceChromaOffset = checked(sourceLumaStride * height);
+        var destinationChromaOffset = checked(destinationPitch * height);
+        var destinationSize = CalculateNv12BufferSize(destinationPitch, height);
+        destination[..destinationSize].Clear();
+
+        for (var row = 0; row < height; row++)
+        {
+            source.Slice(row * sourceLumaStride, width)
+                .CopyTo(destination.Slice(row * destinationPitch, width));
+        }
+        for (var row = 0; row < height / 2; row++)
+        {
+            source.Slice(sourceChromaOffset + (row * sourceChromaStride), width)
+                .CopyTo(destination.Slice(destinationChromaOffset + (row * destinationPitch), width));
+        }
+    }
 
     private static void EnsureGuestVideoBuffers(CpuContext ctx, PlayerState player)
     {
@@ -976,6 +1109,7 @@ public static class AvPlayerExports
                         break;
                     }
                     player.GuestBuffers[index] = buffer;
+                    RegisterVideoBuffer(buffer, bufferSize, index, "guest-callback");
                     Trace($"{kind}_buffer index={index} data=0x{buffer:X16} size={bufferSize}");
                 }
 
@@ -983,6 +1117,10 @@ public static class AvPlayerExports
                 {
                     return true;
                 }
+            }
+            if (!player.TextureAllocatorFailed)
+            {
+                return true;
             }
 
             player.TextureAllocatorFailed = true;
@@ -999,6 +1137,7 @@ public static class AvPlayerExports
         for (var index = 0; index < player.GuestBuffers.Length; index++)
         {
             player.GuestBuffers[index] = bufferBase + checked((ulong)(index * bufferSize));
+            RegisterVideoBuffer(player.GuestBuffers[index], bufferSize, index, "hle-fallback");
         }
         Console.Error.WriteLine("[AVPLAYER][WARN] Guest texture allocator unavailable; using generic HLE memory.");
         return true;

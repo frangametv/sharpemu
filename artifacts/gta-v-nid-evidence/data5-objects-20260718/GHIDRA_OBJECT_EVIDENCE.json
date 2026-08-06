@@ -1,0 +1,68 @@
+{
+  "schema_version": 1,
+  "evidence_policy": "Exact Gen5 provider images analyzed in Ghidra 12.1.2; no Kyty or other emulator source.",
+  "integration_base": "fc3b66d5bec6f6b1ffdf399754d70930aea88a60",
+  "source_artifact": "../rho-remaining90-contracts-20260718/consolidated-nid-evidence.json",
+  "objects": [
+    {
+      "nid": "djxxOmW6-aw",
+      "name": "__progname",
+      "logical_library": "libkernel",
+      "importers": ["sce_module/libc.prx"],
+      "relocation_count": 1,
+      "providers": [
+        {"label": "libkernel", "sha256": "0d91281f1d2cdcf4d8c2f4b920766b645ea086e679bd95074f30510178a706b0", "status": "symbol_without_function", "address": "00080250", "candidate_count": 1},
+        {"label": "libkernel_sys", "sha256": "aa8e3f506501af293673b2634669c8ae7b0ffb75e8058463d961b9660e1200b9", "status": "symbol_without_function", "address": "00084310", "candidate_count": 1},
+        {"label": "libkernel_web", "sha256": "dec1b24247218b5cf7becb936cabff83164e66c564ce1acf8faad0980442da04", "status": "symbol_without_function", "address": "0007c250", "candidate_count": 1}
+      ],
+      "resolution": "guest_authoritative_with_hle_fallback"
+    },
+    {
+      "nid": "P330P3dFF68",
+      "name": "Need_sceLibc",
+      "logical_library": "libc",
+      "importers": ["eboot.bin"],
+      "relocation_count": 2,
+      "providers": [
+        {"label": "gta_v_libc", "sha256": "309cb9031209eb9b838216994d2c39613fcd65ec1eae493c4b784b9dacdd06bb", "status": "symbol_without_function", "address": "001f3060", "candidate_count": 1}
+      ],
+      "resolution": "guest_authoritative_with_hle_fallback"
+    },
+    {
+      "nid": "ZT4ODD2Ts9o",
+      "name": "Need_sceLibcInternal",
+      "logical_library": "libSceLibcInternal",
+      "importers": ["sce_module/libSceJobManager.prx", "sce_module/libSceNpCppWebApi.prx"],
+      "relocation_count": 2,
+      "providers": [
+        {"label": "libSceLibcInternal", "sha256": "d85d61d42f7bb538caafa8b07066f36ec7553a0d6f442cc8138894f22b77370a", "status": "symbol_without_function", "address": "00168790", "candidate_count": 1},
+        {"label": "gta_v_libc_internal_audit", "sha256": "309cb9031209eb9b838216994d2c39613fcd65ec1eae493c4b784b9dacdd06bb", "status": "missing_symbol", "candidate_count": 0}
+      ],
+      "resolution": "guest_authoritative_with_hle_fallback"
+    },
+    {
+      "nid": "H8AprKeZtNg",
+      "name": "_Stderr",
+      "logical_library": "libc",
+      "importers": ["eboot.bin"],
+      "relocation_count": 1,
+      "providers": [
+        {"label": "gta_v_libc", "sha256": "309cb9031209eb9b838216994d2c39613fcd65ec1eae493c4b784b9dacdd06bb", "status": "symbol_without_function", "address": "00210480", "candidate_count": 3}
+      ],
+      "observed_pre_fix_runtime": {"direct_bridge_count": 4, "lle_redirect_count": 4, "mapped_address": "0x0000000805CFA480"},
+      "resolution": "guest_provider_required"
+    },
+    {
+      "nid": "2sWzhYqFH4E",
+      "name": "_Stdout",
+      "logical_library": "libc",
+      "importers": ["eboot.bin"],
+      "relocation_count": 1,
+      "providers": [
+        {"label": "gta_v_libc", "sha256": "309cb9031209eb9b838216994d2c39613fcd65ec1eae493c4b784b9dacdd06bb", "status": "symbol_without_function", "address": "002102b8", "candidate_count": 1}
+      ],
+      "observed_pre_fix_runtime": {"direct_bridge_count": 4, "lle_redirect_count": 4, "mapped_address": "0x0000000805CFA2B8"},
+      "resolution": "guest_provider_required"
+    }
+  ]
+}

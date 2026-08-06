@@ -36,8 +36,11 @@ internal sealed class MetalGuestGpuBackend : IGuestGpuBackend
         int imageBindingBase = 0,
         int scalarRegisterBufferIndex = -1,
         int requiredVertexOutputCount = 0,
-        ulong storageBufferOffsetAlignment = 1)
+        ulong storageBufferOffsetAlignment = 1,
+        IReadOnlyList<uint>? pixelInputControls = null)
     {
+        // The Metal translator does not yet expose explicit PS-input routing.
+        _ = pixelInputControls;
         shader = null;
         if (!Gen5MslTranslator.TryCompileVertexShader(
                 state,
@@ -70,9 +73,14 @@ internal sealed class MetalGuestGpuBackend : IGuestGpuBackend
         int scalarRegisterBufferIndex = -1,
         uint pixelInputEnable = 0,
         uint pixelInputAddress = 0,
-        IReadOnlyList<uint>? pixelInputCntl = null,
-        ulong storageBufferOffsetAlignment = 1)
+        ulong storageBufferOffsetAlignment = 1,
+        IReadOnlyList<uint>? pixelInputControls = null,
+        int gdsBufferIndex = -1)
     {
+        // Keep the cross-backend seam compatible while Metal's translator lacks
+        // explicit PS-input routing and guest GDS bindings.
+        _ = pixelInputControls;
+        _ = gdsBufferIndex;
         shader = null;
         if (!Gen5MslTranslator.TryCompilePixelShader(
                 state,
@@ -86,7 +94,7 @@ internal sealed class MetalGuestGpuBackend : IGuestGpuBackend
                 scalarRegisterBufferIndex,
                 pixelInputEnable,
                 pixelInputAddress,
-                pixelInputCntl,
+                pixelInputControls,
                 storageBufferOffsetAlignment))
         {
             return false;
@@ -107,7 +115,8 @@ internal sealed class MetalGuestGpuBackend : IGuestGpuBackend
         int totalGlobalBufferCount = -1,
         int initialScalarBufferIndex = -1,
         uint waveLaneCount = 32,
-        ulong storageBufferOffsetAlignment = 1)
+        ulong storageBufferOffsetAlignment = 1,
+        int gdsBufferIndex = -1)
     {
         shader = null;
         // Wave64 compute is emulated by the translator: cross-lane ops bridge
@@ -131,6 +140,35 @@ internal sealed class MetalGuestGpuBackend : IGuestGpuBackend
 
         shader = new MetalCompiledGuestShader(compiled);
         return true;
+    }
+
+    public bool TryCompileNggComputeShader(
+        Gen5ShaderState state,
+        Gen5ShaderEvaluation evaluation,
+        Gen5NggOutputLayout outputLayout,
+        out IGuestCompiledShader? shader,
+        out string error,
+        int globalBufferBase,
+        int totalGlobalBufferCount,
+        int imageBindingBase,
+        int initialScalarBufferIndex = -1,
+        ulong storageBufferOffsetAlignment = 1)
+    {
+        shader = null;
+        error = "NGG compute/raster lowering is not implemented by the Metal backend";
+        return false;
+    }
+
+    public bool TryCreateNggRasterVertexShader(
+        Gen5NggOutputLayout outputLayout,
+        int totalGlobalBufferCount,
+        IReadOnlyList<uint> pixelInputControls,
+        out IGuestCompiledShader? shader,
+        out string error)
+    {
+        shader = null;
+        error = "NGG compute/raster lowering is not implemented by the Metal backend";
+        return false;
     }
 
     public IGuestCompiledShader GetDepthOnlyFragmentShader() =>
@@ -386,6 +424,9 @@ internal sealed class MetalGuestGpuBackend : IGuestGpuBackend
     public long CurrentGuestWorkSequenceForDiagnostics =>
         MetalVideoPresenter.CurrentGuestWorkSequenceForDiagnostics;
 
+    public long CurrentThreadEnqueuedGuestWorkSequenceForDiagnostics =>
+        MetalVideoPresenter.CurrentThreadEnqueuedGuestWorkSequenceForDiagnostics;
+
     public bool IsGuestImageUploadKnown(ulong address, uint format, uint numberType) =>
         MetalVideoPresenter.IsGuestImageUploadKnown(address, format, numberType);
 
@@ -401,8 +442,13 @@ internal sealed class MetalGuestGpuBackend : IGuestGpuBackend
     public void SubmitGuestImageWrite(ulong address, byte[] pixels, uint rowOffset = 0) =>
         MetalVideoPresenter.SubmitGuestImageWrite(address, pixels);
 
-    public void RequestCpuWrittenGuestImageSync(ulong scopeAddress = 0, ulong scopeByteCount = ulong.MaxValue) =>
+    public void RequestCpuWrittenGuestImageSync(
+        ulong scopeAddress = 0,
+        ulong scopeByteCount = ulong.MaxValue) =>
         MetalVideoPresenter.RequestCpuWrittenGuestImageSync(scopeAddress, scopeByteCount);
+
+    public bool TrySubmitGuestImageCopy(ulong sourceAddress, ulong destinationAddress) =>
+        false;
 
     public bool TryGetGuestImageExtent(ulong address, out uint width, out uint height, out ulong byteCount) =>
         MetalVideoPresenter.TryGetGuestImageExtent(address, out width, out height, out byteCount);

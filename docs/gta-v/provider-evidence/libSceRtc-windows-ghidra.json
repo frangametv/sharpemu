@@ -1,0 +1,53 @@
+{
+  "executable_sha256": "2af66216f6717b56c484552fb096e0dda4d75b3b559ff58610ce65dff5be121b",
+  "format": "sharpemu-ghidra-selected-nid-functions-v1",
+  "function_count": 2,
+  "functions": [
+    {
+      "external": false,
+      "function_body_addresses": 966,
+      "function_body_sha256": "539173051360e78cb3fa8e707aacd82296e28f9fb87e358223bdbfeb111dede3",
+      "function_entry": "00001160",
+      "function_name": "99bMGglFW3I#C#A",
+      "function_present": true,
+      "instruction_count": 256,
+      "nid": "99bMGglFW3I",
+      "result_file": "libSceRtc-chunk-00.result.tsv",
+      "symbol": "99bMGglFW3I#C#A",
+      "symbol_address": "00001160",
+      "thunk": false,
+      "thunk_target": "",
+      "thunk_target_external": null,
+      "wave": "wave2"
+    },
+    {
+      "external": false,
+      "function_body_addresses": 10,
+      "function_body_sha256": "2041d1d35543ac932e6637851590645718fe9eb0b86f7533e51f776449e48c7f",
+      "function_entry": "00001fc0",
+      "function_name": "WJ3rqFwymew#C#A",
+      "function_present": true,
+      "instruction_count": 2,
+      "nid": "WJ3rqFwymew",
+      "result_file": "libSceRtc-chunk-00.result.tsv",
+      "symbol": "WJ3rqFwymew#C#A",
+      "symbol_address": "00001fc0",
+      "thunk": false,
+      "thunk_target": "",
+      "thunk_target_external": null,
+      "wave": "wave2"
+    }
+  ],
+  "ghidra_version": "12.1.2_PUBLIC_20260605",
+  "missing": [],
+  "program_name": "libSceRtc.sprx",
+  "provenance": {
+    "audit_sha256": "a28951db44df6f026715f9ab8e47b992cea172e396bc6d80b4383e00c14f2be6",
+    "evidence_policy": "Ghidra analysis of exact Gen5 provider ELFs only; no Kyty-derived contracts or implementations.",
+    "excluded_nids": [],
+    "recommendations_sha256": "f059a17f1440499c499311093ac225a428f19c5a8776c41ca609aecd670df7c5",
+    "summary_sha256": "e1e93ff2f5967daa1d6f838b08f4490de7144118032e0d4e413cb767ab50e0a2"
+  },
+  "target_count": 2,
+  "without_functions": []
+}

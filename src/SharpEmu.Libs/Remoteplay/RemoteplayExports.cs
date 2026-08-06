@@ -1,51 +1,67 @@
 // Copyright (C) 2026 SharpEmu Emulator Project
 // SPDX-License-Identifier: GPL-2.0-or-later
 
+using System.Buffers.Binary;
+using System.Threading;
 using SharpEmu.HLE;
 
 namespace SharpEmu.Libs.Remoteplay;
 
-// SharpEmu does not implement PS5 Remote Play. Titles still probe this API
-// during startup (initialize + connection-status checks while bringing up
-// pad/network subsystems). Without a handler they get ORBIS_GEN2_ERROR_NOT_FOUND
-// instead of a real status code. Reporting a clean "initialized, not connected"
-// state lets callers take their normal no-remote-play path.
 public static class RemoteplayExports
 {
-    private const int StatusDisconnected = 0;
+    private static int _initialized;
 
+    // Firmware 12.70 libSceRemoteplay.sprx SHA-256
+    // 7c33fa5c41b065bf7a3577dbb968af192dbc7768a84e706e2a98dcfa0d501d59.
+    // Ghidra entry 0x19b0 delegates initialization to the singleton at 0x29d0.
     [SysAbiExport(
         Nid = "k1SwgkMSOM8",
         ExportName = "sceRemoteplayInitialize",
         Target = Generation.Gen5,
-        LibraryName = "libSceRemoteplay")]
-    public static int RemoteplayInitialize(CpuContext ctx) => SetReturn(ctx, 0);
+        LibraryName = "libSceRemoteplay",
+        PreferLle = true)]
+    public static int Initialize(CpuContext ctx)
+    {
+        Interlocked.Exchange(ref _initialized, 1);
+        return ctx.SetReturn(OrbisGen2Result.ORBIS_GEN2_OK);
+    }
 
+    // Ghidra entry 0x19e0 delegates teardown to singleton routine 0x3390.
+    [SysAbiExport(
+        Nid = "BOwybKVa3Do",
+        ExportName = "sceRemoteplayTerminate",
+        Target = Generation.Gen5,
+        LibraryName = "libSceRemoteplay",
+        PreferLle = true)]
+    public static int Terminate(CpuContext ctx)
+    {
+        Interlocked.Exchange(ref _initialized, 0);
+        return ctx.SetReturn(OrbisGen2Result.ORBIS_GEN2_OK);
+    }
+
+    // Ghidra entry 0x1b30 delegates to 0x35e0. That routine writes its
+    // one-byte connection state to a uint32 output. With no host Remote Play
+    // transport attached, state zero is the firmware's disconnected result.
     [SysAbiExport(
         Nid = "g3PNjYKWqnQ",
         ExportName = "sceRemoteplayGetConnectionStatus",
         Target = Generation.Gen5,
-        LibraryName = "libSceRemoteplay")]
-    public static int RemoteplayGetConnectionStatus(CpuContext ctx)
+        LibraryName = "libSceRemoteplay",
+        PreferLle = true)]
+    public static int GetConnectionStatus(CpuContext ctx)
     {
-        var statusAddress = ctx[CpuRegister.Rsi];
-        if (statusAddress != 0)
+        var outputAddress = ctx[CpuRegister.Rsi];
+        if (outputAddress == 0)
         {
-            Span<byte> status = stackalloc byte[0x10];
-            status.Clear();
-            status[0] = StatusDisconnected;
-            if (!ctx.Memory.TryWrite(statusAddress, status))
-            {
-                return SetReturn(ctx, (int)OrbisGen2Result.ORBIS_GEN2_ERROR_MEMORY_FAULT);
-            }
+            return ctx.SetReturn(OrbisGen2Result.ORBIS_GEN2_ERROR_INVALID_ARGUMENT);
         }
 
-        return SetReturn(ctx, 0);
-    }
-
-    private static int SetReturn(CpuContext ctx, int result)
-    {
-        ctx[CpuRegister.Rax] = unchecked((ulong)result);
-        return result;
+        // The provider wrapper retries after initialization on a cold query.
+        Interlocked.CompareExchange(ref _initialized, 1, 0);
+        Span<byte> status = stackalloc byte[sizeof(uint)];
+        BinaryPrimitives.WriteUInt32LittleEndian(status, 0);
+        return ctx.Memory.TryWrite(outputAddress, status)
+            ? ctx.SetReturn(OrbisGen2Result.ORBIS_GEN2_OK)
+            : ctx.SetReturn(OrbisGen2Result.ORBIS_GEN2_ERROR_MEMORY_FAULT);
     }
 }

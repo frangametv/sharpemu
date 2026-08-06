@@ -1,0 +1,38 @@
+{
+  "executable_sha256": "fdb6ddc34e9d8c566421511c693294ca93ab1636f797f8fc705588b678fb1f6a",
+  "format": "sharpemu-ghidra-selected-nid-functions-v1",
+  "function_count": 1,
+  "functions": [
+    {
+      "external": false,
+      "function_body_addresses": 298,
+      "function_body_sha256": "923946f24727978a8a51412886c5207fab3be525194ada69bcc282e0fb49d419",
+      "function_entry": "00020f90",
+      "function_name": "YuOW3dDAKYc#I#A",
+      "function_present": true,
+      "instruction_count": 88,
+      "log_file": "audit-06-Http.log",
+      "nid": "YuOW3dDAKYc",
+      "result_file": "06-Http.result.tsv",
+      "symbol": "YuOW3dDAKYc#I#A",
+      "symbol_address": "00020f90",
+      "thunk": false,
+      "thunk_target": "",
+      "thunk_target_external": null
+    }
+  ],
+  "ghidra_version": "12.1.2_PUBLIC_20260605",
+  "missing": [],
+  "program_name": "libSceHttp.sprx",
+  "provenance": {
+    "audit_script_sha256": "f946f435e38dc99db306165473b180209d5db7e0581c6c52d3b417510f87dfa9",
+    "computer": "DESKTOP-RAAKAQJ",
+    "evidence_policy": "Ghidra analysis of exact Gen5 provider ELFs only; no Kyty or other emulator-derived source, contracts, or implementations.",
+    "log_sha256": "971ffda430ddc51cd9607479a9fac6d1c4974d76fc4a782532c8366e73616e8a",
+    "plan_sha256": "7b98c992e0d65d55d9743b30b320ad197f0bc52bb803d5654398a701a814d831",
+    "provider_role": "primary",
+    "result_sha256": "100f662652231156eb8971b962536636079fec9386a43f1018d70431c13c455f"
+  },
+  "target_count": 1,
+  "without_functions": []
+}

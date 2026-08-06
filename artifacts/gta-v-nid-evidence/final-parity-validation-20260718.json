@@ -1,0 +1,92 @@
+{
+  "format": "sharpemu-gta-v-final-parity-validation-v1",
+  "validated_commit": "d3c90e3686a61817f3f67193664a8dcad50308ff",
+  "pinned_inventory_sha256": "efb0a69b0e5e32274db2ca86558041318e9ba65011c0d94f3362629bf826f73a",
+  "tests": [
+    {
+      "name": "focused_gta_parity",
+      "command": "dotnet test tests/SharpEmu.Libs.Tests/SharpEmu.Libs.Tests.csproj -c Release --no-restore --nologo --filter \"FullyQualifiedName~GtaVGen5RegistrationParityTests|FullyQualifiedName~Libc35ExportsTests|FullyQualifiedName~GtaVKernelContractExportsTests|FullyQualifiedName~DataSymbolRegistrationTests\"",
+      "passed": 52,
+      "failed": 0,
+      "skipped": 0
+    },
+    {
+      "name": "SharpEmu.Libs.Tests",
+      "command": "dotnet test tests/SharpEmu.Libs.Tests/SharpEmu.Libs.Tests.csproj -c Release --no-restore --nologo",
+      "passed": 1068,
+      "failed": 0,
+      "skipped": 0
+    },
+    {
+      "name": "SharpEmu.SourceGenerators.Tests",
+      "command": "dotnet test tests/SharpEmu.SourceGenerators.Tests/SharpEmu.SourceGenerators.Tests.csproj -c Release --no-restore --nologo",
+      "passed": 36,
+      "failed": 0,
+      "skipped": 0
+    },
+    {
+      "name": "SharpEmu.ShaderCompiler.Tests",
+      "command": "dotnet test tests/SharpEmu.ShaderCompiler.Tests/SharpEmu.ShaderCompiler.Tests.csproj -c Release --no-restore --nologo",
+      "passed": 35,
+      "failed": 0,
+      "skipped": 0
+    },
+    {
+      "name": "SharpEmu.ShaderCompiler.Metal.Tests",
+      "command": "dotnet test tests/SharpEmu.ShaderCompiler.Metal.Tests/SharpEmu.ShaderCompiler.Metal.Tests.csproj -c Release --no-restore --nologo",
+      "passed": 27,
+      "failed": 0,
+      "skipped": 0
+    }
+  ],
+  "release_build": {
+    "command": "dotnet publish src/SharpEmu.CLI/SharpEmu.CLI.csproj -c Release -r win-x64 --self-contained true --no-restore --nologo -o /tmp/sharpemu-gta-d3c90e3.DJZwsn",
+    "succeeded": true,
+    "warnings": 65,
+    "errors": 0,
+    "runtime_identifier": "win-x64",
+    "self_contained": true,
+    "executable": "SharpEmu.exe",
+    "executable_sha256": "61db9b23ffb61c8889cf84b30385f8f038e7e4a6ecd8530c04b0daacab87cb03"
+  },
+  "current_runtime_smoke": {
+    "validated_commit": "b591baa1aab949e63c48d790b067d5beeb47b091",
+    "trace_scope": "ten-minute unfiltered Windows smoke plus short targeted mutex trace",
+    "target_mutex": "0x00000008045755C8",
+    "handoff_threads": [
+      "[RAGE] RenderThread",
+      "[RAGE] Main Thread"
+    ],
+    "target_mutex_permanent_starvation": false,
+    "snapshot_count": 61,
+    "main_import_delta": 45923560,
+    "render_import_delta": 4588828,
+    "traced_flips_enqueued": 64,
+    "traced_flips_presented": 64,
+    "stable_frame_sha256": "83e9d1f12db5a8aec7088b6b5b469cf2a6bf6ca9ac80ff61d4e89e06e3b82267",
+    "screen_checkpoint": "GTA V logo with green spinner",
+    "status": "alive_at_ten_minute_checkpoint",
+    "delta_from_0996": "no visual or normalized main/render throughput improvement"
+  },
+  "runtime": {
+    "historical": true,
+    "validated_commit": "4ea43616102ba8b2a5bf59b745cd3b758d05e110",
+    "description": "Historical pre-rebase 2026-07-18 Rosetta trace; this is not runtime validation of the gpu-bootstrap scheduler integration.",
+    "command": "set +e; SHARPEMU_LOG_ALL_IMPORTS=1 SHARPEMU_LOG_IMPORTS=1 gtimeout -s TERM 45 arch -x86_64 artifacts/publish/SharpEmu.CLI/Release/net10.0/osx-x64/SharpEmu --cpu-engine=native --log-level=info \"/Volumes/Untitled/games/sharpemu/Games/GTA V/eboot.bin\" > artifacts/gta-v-final-parity-x64.log 2>&1; rc=$?; set -e; echo \"exit=$rc\"",
+    "exit_capture": "rc=$?",
+    "compressed_log": "artifacts/gta-v-nid-evidence/final-parity-runtime-20260718/gta-v-final-parity-x64.log.gz",
+    "compressed_sha256": "68848eeaeb458489144abdb73c66a566f22fd3b40b57ad10f4e51c3a68012a1b",
+    "raw_sha256": "585ff7f6635ce07830b2078a46aa6e5cebdd8ddb1f83a0880b9fc40bf0b564f8",
+    "raw_bytes": 22997934,
+    "raw_lines": 127576,
+    "exit_code": 139,
+    "terminal_signal": [
+      "11",
+      "0x0000000805C273B7",
+      "0x0000000000000000",
+      "0"
+    ],
+    "terminal_guest_thread": "[RAGE] RenderThread",
+    "terminal_last_import": "enqPGLfmVNU"
+  }
+}

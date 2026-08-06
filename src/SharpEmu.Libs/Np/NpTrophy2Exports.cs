@@ -95,7 +95,8 @@ public static class NpTrophy2Exports
         Nid = "EwNylPdWUTM",
         ExportName = "sceNpTrophy2GetTrophyInfo",
         Target = Generation.Gen5,
-        LibraryName = "libSceNpTrophy2")]
+        LibraryName = "libSceNpTrophy2",
+        PreferLle = true)]
     public static int NpTrophy2GetTrophyInfo(CpuContext ctx) =>
         SetReturn(ctx, OrbisGen2Result.ORBIS_GEN2_ERROR_NOT_FOUND);
 

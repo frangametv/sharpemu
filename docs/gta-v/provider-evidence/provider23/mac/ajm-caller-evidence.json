@@ -1,0 +1,36 @@
+{
+  "format": "sharpemu-gta-v-ajm-static-caller-evidence-v1",
+  "evidence_policy": "Ghidra/KawaiiDRA only; no Kyty or other emulator source",
+  "ghidra_project": "/Users/mcruz/Developer/kawaiidra-mcp/projects/sharpemu_gta_v_target_60d39462",
+  "project_name": "sharpemu_gta_v_target_60d39462",
+  "binary_name": "gta_v_eboot_60d39462_sectionless.elf",
+  "original_eboot_sha256": "60d394626ac62acd1b20d205599b104bb51756d468d3878ad14c230bfe305c11",
+  "sectionless_derivative_sha256": "5895554dd1d96724a2801794b5da22880917729dce900aee920b810f8deb2ff9",
+  "image_base": "0x00100000",
+  "save_changes": false,
+  "imports": [
+    {
+      "nid": "39WxhR-ePew",
+      "catalog_symbol": "sceAjmBatchJobDecode",
+      "external_symbol": "EXTERNAL:0000006f",
+      "resolved_external_address": "0x05aea378",
+      "got_address": "0x03a2a630",
+      "plt_address": "0x031759d0",
+      "plt_instruction": "JMP qword ptr [0x03a2a630]",
+      "xrefs_to_plt": 0,
+      "direct_call_flow_matches": 0
+    },
+    {
+      "nid": "5tOfnaClcqM",
+      "catalog_symbol": "sceAjmBatchStart",
+      "external_symbol": "EXTERNAL:00000070",
+      "resolved_external_address": "0x05aea380",
+      "got_address": "0x03a2a638",
+      "plt_address": "0x031759e0",
+      "plt_instruction": "JMP qword ptr [0x03a2a638]",
+      "xrefs_to_plt": 0,
+      "direct_call_flow_matches": 0
+    }
+  ],
+  "conclusion": "Ghidra proves relocation/GOT/PLT presence but found no static eboot caller or direct call flow to either AJM PLT entry. The imports are not a proven runtime gate in the analyzed GTA V eboot."
+}

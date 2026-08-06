@@ -14,6 +14,10 @@ using SharpEmu.HLE;
 
 namespace SharpEmu.Core.Loader;
 
+// Attribution: substantial PS5 SELF-loading portions in this file were originally authored
+// by @xnetcat and later adapted in PR #216. Source snapshot:
+// https://github.com/xnetcat/sharpemu/tree/2497ea6799432ac2385a50f739eff2ce922d6fd4
+
 public sealed class SelfLoader : ISelfLoader
 {
     private const uint ElfMagic = 0x7F454C46;
@@ -92,6 +96,8 @@ public sealed class SelfLoader : ISelfLoader
 
     private static readonly IReadOnlyDictionary<ulong, string> EmptyImportStubs = new Dictionary<ulong, string>();
     private static readonly IReadOnlyDictionary<string, ulong> EmptyRuntimeSymbols =
+        new Dictionary<string, ulong>(StringComparer.Ordinal);
+    private static readonly IReadOnlyDictionary<string, ulong> EmptyRuntimeDataSymbols =
         new Dictionary<string, ulong>(StringComparer.Ordinal);
     private static readonly IReadOnlyList<ulong> EmptyInitializerFunctions = Array.Empty<ulong>();
     private static readonly int SelfHeaderSize = Unsafe.SizeOf<SelfHeader>();
@@ -264,6 +270,7 @@ public sealed class SelfLoader : ISelfLoader
             ? new Dictionary<ulong, string>()
             : new Dictionary<ulong, string>(importStubs);
         var runtimeSymbols = new Dictionary<string, ulong>(StringComparer.Ordinal);
+        var runtimeDataSymbols = new Dictionary<string, ulong>(StringComparer.Ordinal);
         RegisterRuntimeSymbolsAndHooks(
             imageData,
             loadContext,
@@ -272,13 +279,17 @@ public sealed class SelfLoader : ISelfLoader
             virtualMemory,
             imageBase,
             effectiveImportStubs,
-            runtimeSymbols);
+            runtimeSymbols,
+            runtimeDataSymbols);
         var finalizedImportStubs = effectiveImportStubs.Count == 0
             ? EmptyImportStubs
             : effectiveImportStubs;
         var finalizedRuntimeSymbols = runtimeSymbols.Count == 0
             ? EmptyRuntimeSymbols
             : runtimeSymbols;
+        var finalizedRuntimeDataSymbols = runtimeDataSymbols.Count == 0
+            ? EmptyRuntimeDataSymbols
+            : runtimeDataSymbols;
         CollectInitializerFunctions(
             imageData,
             loadContext,
@@ -331,7 +342,8 @@ public sealed class SelfLoader : ISelfLoader
             applicationInfo.Version,
             tlsModuleId,
             tlsInfo.MemorySize,
-            tlsInfo.StaticOffset);
+            tlsInfo.StaticOffset,
+            finalizedRuntimeDataSymbols);
     }
 
     private static (string? Title, string? TitleId, string? Version) TryLoadParamJson(
@@ -472,7 +484,7 @@ public sealed class SelfLoader : ISelfLoader
 
             var sourceOffset = header.FileSize == 0
                 ? 0UL
-                : ResolvePhysicalSegmentOffset(imageData.Length, loadContext, header, index);
+                : ResolvePhysicalSegmentOffset(imageData.Length, loadContext, programHeaders, header, index);
 
             var virtualAddress = header.VirtualAddress + imageBase;
 
@@ -594,6 +606,7 @@ public sealed class SelfLoader : ISelfLoader
         if (!TryLoadDynamicTableBytes(
                 imageData,
                 loadContext,
+                programHeaders,
                 virtualMemory,
                 imageBase,
                 dynamicHeader,
@@ -771,6 +784,16 @@ public sealed class SelfLoader : ISelfLoader
 
         foreach (var descriptor in descriptors)
         {
+            if (descriptor.ImportNid is not null &&
+                descriptor.IsDataImport &&
+                (descriptor.ValueKind != RelocationValueKind.Pointer ||
+                 descriptor.WriteKind != RelocationWriteKind.UInt64))
+            {
+                throw new InvalidDataException(
+                    $"Imported data NID '{descriptor.ImportNid}' uses unsupported " +
+                    $"relocation shape {descriptor.ValueKind}/{descriptor.WriteKind}.");
+            }
+
             ulong symbolValue;
             if (descriptor.ImportNid is null)
             {
@@ -778,7 +801,14 @@ public sealed class SelfLoader : ISelfLoader
             }
             else
             {
-                if (addressesByNid.TryGetValue(descriptor.ImportNid, out var stubAddress))
+                if (descriptor.IsDataImport)
+                {
+                    // Object relocations are rebound after all adjacent providers
+                    // load. Use S=0 until then so the initial cell still retains A;
+                    // an executable trap stub would turn an object into a call target.
+                    symbolValue = 0;
+                }
+                else if (addressesByNid.TryGetValue(descriptor.ImportNid, out var stubAddress))
                 {
                     symbolValue = stubAddress;
                 }
@@ -805,7 +835,7 @@ public sealed class SelfLoader : ISelfLoader
                 // A TLS offset (TPOFF64/DTPOFF64) is a signed displacement, not a
                 // mapped address, so a small or negative value here is expected.
             }
-            else if (targetValue < 0x1000 && !descriptor.IsWeak)
+            else if (targetValue < 0x1000 && !descriptor.IsWeak && !descriptor.IsDataImport)
             {
                 if (descriptor.ValueKind == RelocationValueKind.TlsModuleId)
                 {
@@ -1218,6 +1248,9 @@ public sealed class SelfLoader : ISelfLoader
         IReadOnlyList<RelocationDescriptor> descriptors,
         IModuleManager? moduleManager)
     {
+        var hasDataImport = false;
+        var hasFunctionImport = false;
+        var hasRequiredFunctionImport = false;
         for (var i = 0; i < descriptors.Count; i++)
         {
             var descriptor = descriptors[i];
@@ -1225,13 +1258,44 @@ public sealed class SelfLoader : ISelfLoader
             {
                 continue;
             }
-            if (!descriptor.IsWeak || moduleManager?.TryGetExport(nid, out _) == true)
+
+            if (descriptor.IsDataImport)
             {
-                return true;
+                hasDataImport = true;
+                continue;
             }
+
+            hasFunctionImport = true;
+            hasRequiredFunctionImport |= !descriptor.IsWeak;
         }
 
-        return false;
+        return EvaluateImportStubPolicy(
+            nid,
+            hasDataImport,
+            hasFunctionImport,
+            hasRequiredFunctionImport,
+            moduleManager?.TryGetExport(nid, out _) == true);
+    }
+
+    internal static bool EvaluateImportStubPolicy(
+        string nid,
+        bool hasDataImport,
+        bool hasFunctionImport,
+        bool hasRequiredFunctionImport,
+        bool hasRegisteredFunction)
+    {
+        if (hasDataImport && hasFunctionImport)
+        {
+            throw new InvalidDataException(
+                $"NID '{nid}' is imported as both an object and a function.");
+        }
+
+        if (hasDataImport || !hasFunctionImport)
+        {
+            return false;
+        }
+
+        return hasRequiredFunctionImport || hasRegisteredFunction;
     }
 
     private static void RegisterRuntimeSymbolsAndHooks(
@@ -1242,9 +1306,17 @@ public sealed class SelfLoader : ISelfLoader
         IVirtualMemory virtualMemory,
         ulong imageBase,
         IDictionary<ulong, string> importStubs,
-        IDictionary<string, ulong> runtimeSymbols)
+        IDictionary<string, ulong> runtimeSymbols,
+        IDictionary<string, ulong> runtimeDataSymbols)
     {
-        var sectionSymbols = RegisterSectionRuntimeSymbols(imageData, loadContext, elfHeader, imageBase, importStubs, runtimeSymbols);
+        var sectionSymbols = RegisterSectionRuntimeSymbols(
+            imageData,
+            loadContext,
+            elfHeader,
+            imageBase,
+            importStubs,
+            runtimeSymbols,
+            runtimeDataSymbols);
         var dynamicSymbols = RegisterDynamicRuntimeSymbols(
             imageData,
             loadContext,
@@ -1252,12 +1324,14 @@ public sealed class SelfLoader : ISelfLoader
             virtualMemory,
             imageBase,
             importStubs,
-            runtimeSymbols);
+            runtimeSymbols,
+            runtimeDataSymbols);
 
         if (sectionSymbols > 0 || dynamicSymbols > 0)
         {
             Console.Error.WriteLine(
-                $"[LOADER] Runtime symbol index populated: section={sectionSymbols}, dynamic={dynamicSymbols}, total={runtimeSymbols.Count}");
+                $"[LOADER] Runtime symbol index populated: section={sectionSymbols}, dynamic={dynamicSymbols}, " +
+                $"callable={runtimeSymbols.Count}, data={runtimeDataSymbols.Count}");
         }
     }
 
@@ -1284,6 +1358,7 @@ public sealed class SelfLoader : ISelfLoader
         if (!TryLoadDynamicTableBytes(
                 imageData,
                 loadContext,
+                programHeaders,
                 virtualMemory,
                 imageBase,
                 dynamicHeader,
@@ -1406,7 +1481,8 @@ public sealed class SelfLoader : ISelfLoader
                 descriptor.TargetAddress,
                 descriptor.Addend,
                 descriptor.ImportNid,
-                descriptor.IsDataImport));
+                descriptor.IsDataImport,
+                descriptor.IsWeak));
         }
 
         return importedRelocations.Count == 0
@@ -1420,7 +1496,8 @@ public sealed class SelfLoader : ISelfLoader
         ElfHeader elfHeader,
         ulong imageBase,
         IDictionary<ulong, string> importStubs,
-        IDictionary<string, ulong> runtimeSymbols)
+        IDictionary<string, ulong> runtimeSymbols,
+        IDictionary<string, ulong> runtimeDataSymbols)
     {
         if (elfHeader.SectionHeaderOffset == 0 ||
             elfHeader.SectionHeaderCount == 0 ||
@@ -1483,7 +1560,13 @@ public sealed class SelfLoader : ISelfLoader
                     continue;
                 }
 
-                if (RegisterRuntimeSymbol(runtimeSymbols, importStubs, symbolName, symbolAddress))
+                if (RegisterRuntimeSymbol(
+                        runtimeSymbols,
+                        runtimeDataSymbols,
+                        importStubs,
+                        symbolName,
+                        symbolAddress,
+                        GetSymbolType(symbol.Info) == SymbolTypeObject))
                 {
                     added++;
                 }
@@ -1500,7 +1583,8 @@ public sealed class SelfLoader : ISelfLoader
         IVirtualMemory virtualMemory,
         ulong imageBase,
         IDictionary<ulong, string> importStubs,
-        IDictionary<string, ulong> runtimeSymbols)
+        IDictionary<string, ulong> runtimeSymbols,
+        IDictionary<string, ulong> runtimeDataSymbols)
     {
         if (!TryGetProgramHeader(programHeaders, ProgramHeaderType.Dynamic, out var dynamicHeader, out var dynamicHeaderIndex))
         {
@@ -1515,6 +1599,7 @@ public sealed class SelfLoader : ISelfLoader
         if (!TryLoadDynamicTableBytes(
                 imageData,
                 loadContext,
+                programHeaders,
                 virtualMemory,
                 imageBase,
                 dynamicHeader,
@@ -1580,7 +1665,13 @@ public sealed class SelfLoader : ISelfLoader
                 continue;
             }
 
-            if (RegisterRuntimeSymbol(runtimeSymbols, importStubs, symbolName, symbolAddress))
+            if (RegisterRuntimeSymbol(
+                    runtimeSymbols,
+                    runtimeDataSymbols,
+                    importStubs,
+                    symbolName,
+                    symbolAddress,
+                    GetSymbolType(symbol.Info) == SymbolTypeObject))
             {
                 added++;
             }
@@ -1589,44 +1680,57 @@ public sealed class SelfLoader : ISelfLoader
         return added;
     }
 
-    private static bool RegisterRuntimeSymbol(
+    internal static bool RegisterRuntimeSymbol(
         IDictionary<string, ulong> runtimeSymbols,
+        IDictionary<string, ulong> runtimeDataSymbols,
         IDictionary<ulong, string> importStubs,
         string symbolName,
-        ulong symbolAddress)
+        ulong symbolAddress,
+        bool isData)
     {
         if (string.IsNullOrWhiteSpace(symbolName) || symbolAddress < 0x10000)
         {
             return false;
         }
 
-        var addedAny = false;
-        if (!runtimeSymbols.ContainsKey(symbolName))
+        var destination = isData ? runtimeDataSymbols : runtimeSymbols;
+        var addedAny = RegisterRuntimeSymbolAliases(destination, symbolName, symbolAddress);
+
+        if (!isData && string.Equals(symbolName, "kernel_dynlib_dlsym", StringComparison.Ordinal))
         {
-            runtimeSymbols[symbolName] = symbolAddress;
+            importStubs[symbolAddress] = RuntimeStubNids.KernelDynlibDlsym;
+        }
+
+        return addedAny;
+    }
+
+    private static bool RegisterRuntimeSymbolAliases(
+        IDictionary<string, ulong> destination,
+        string symbolName,
+        ulong symbolAddress)
+    {
+        var addedAny = false;
+        if (!destination.ContainsKey(symbolName))
+        {
+            destination[symbolName] = symbolAddress;
             addedAny = true;
         }
 
         var nid = ExtractNid(symbolName);
         if (!string.IsNullOrWhiteSpace(nid) &&
             !string.Equals(symbolName, nid, StringComparison.Ordinal) &&
-            !runtimeSymbols.ContainsKey(nid))
+            !destination.ContainsKey(nid))
         {
-            runtimeSymbols[nid] = symbolAddress;
+            destination[nid] = symbolAddress;
             addedAny = true;
         }
 
         if (symbolName.Length > 1 &&
             symbolName[0] == '_' &&
-            !runtimeSymbols.ContainsKey(symbolName[1..]))
+            !destination.ContainsKey(symbolName[1..]))
         {
-            runtimeSymbols[symbolName[1..]] = symbolAddress;
+            destination[symbolName[1..]] = symbolAddress;
             addedAny = true;
-        }
-
-        if (string.Equals(symbolName, "kernel_dynlib_dlsym", StringComparison.Ordinal))
-        {
-            importStubs[symbolAddress] = RuntimeStubNids.KernelDynlibDlsym;
         }
 
         return addedAny;
@@ -1659,6 +1763,7 @@ public sealed class SelfLoader : ISelfLoader
     private static bool TryLoadDynamicTableBytes(
         ReadOnlySpan<byte> imageData,
         LoadContext loadContext,
+        IReadOnlyList<ProgramHeader> programHeaders,
         IVirtualMemory virtualMemory,
         ulong imageBase,
         ProgramHeader dynamicHeader,
@@ -1677,7 +1782,12 @@ public sealed class SelfLoader : ISelfLoader
             return true;
         }
 
-        var dynamicOffset = ResolvePhysicalSegmentOffset(imageData.Length, loadContext, dynamicHeader, dynamicHeaderIndex);
+        var dynamicOffset = ResolvePhysicalSegmentOffset(
+            imageData.Length,
+            loadContext,
+            programHeaders,
+            dynamicHeader,
+            dynamicHeaderIndex);
         if (!TrySlice(imageData, dynamicOffset, dynamicHeader.FileSize, out dynamicTable))
         {
             dynamicTable = default;
@@ -2557,7 +2667,12 @@ public sealed class SelfLoader : ISelfLoader
         return true;
     }
 
-    private static ulong ResolvePhysicalSegmentOffset(int imageLength, LoadContext loadContext, ProgramHeader header, int headerIndex)
+    private static ulong ResolvePhysicalSegmentOffset(
+        int imageLength,
+        LoadContext loadContext,
+        IReadOnlyList<ProgramHeader> programHeaders,
+        ProgramHeader header,
+        int headerIndex)
     {
         if (!loadContext.IsSelf)
         {
@@ -2572,22 +2687,56 @@ public sealed class SelfLoader : ISelfLoader
                 out var offset,
                 out var resolveStatus))
         {
+            if (resolveStatus != SelfSegmentResolveStatus.NotFound)
+            {
+                throw CreateUnresolvedSelfSegmentException(headerIndex, resolveStatus);
+            }
+
+            if (TryResolveSelfContainingSegmentOffset(
+                    imageLength,
+                    loadContext.SelfSegments,
+                    programHeaders,
+                    header,
+                    headerIndex,
+                    out offset,
+                    out resolveStatus))
+            {
+                return offset;
+            }
+
+            // Do not let a raw ELF-relative fallback bypass an identified
+            // unavailable, encrypted, or compressed enclosing payload. The
+            // direct resolver still accepts an on-disk dumped payload via
+            // ResolvedDumped.
+            if (resolveStatus != SelfSegmentResolveStatus.NotFound)
+            {
+                throw CreateUnresolvedSelfSegmentException(headerIndex, resolveStatus);
+            }
+
             if (TryResolveSelfFallbackOffset(imageLength, loadContext, header, out var fallbackOffset))
             {
                 return fallbackOffset;
-            }
-
-            if (resolveStatus is SelfSegmentResolveStatus.Encrypted or SelfSegmentResolveStatus.Compressed)
-            {
-                throw new NotSupportedException(
-                    $"SELF segment for program header {headerIndex} is marked as {resolveStatus.ToString().ToLowerInvariant()} and no dumped payload could be resolved. " +
-                    "Runtime decryption is not implemented yet. Use a decrypted ELF/FSELF image.");
             }
 
             throw new NotSupportedException($"SELF segment mapping for program header {headerIndex} could not be resolved.");
         }
 
         return offset;
+    }
+
+    private static NotSupportedException CreateUnresolvedSelfSegmentException(
+        int headerIndex,
+        SelfSegmentResolveStatus resolveStatus)
+    {
+        if (resolveStatus == SelfSegmentResolveStatus.Unavailable)
+        {
+            return new NotSupportedException(
+                $"SELF segment mapping for program header {headerIndex} points outside the available payload.");
+        }
+
+        return new NotSupportedException(
+            $"SELF segment for program header {headerIndex} is marked as {resolveStatus.ToString().ToLowerInvariant()} and no dumped payload could be resolved. " +
+            "Runtime decryption is not implemented yet. Use a decrypted ELF/FSELF image.");
     }
 
     private static bool TryResolveSelfFallbackOffset(
@@ -2673,7 +2822,9 @@ public sealed class SelfLoader : ISelfLoader
 
             if (!TryIsInRange(imageLength, segment.Offset, header.FileSize))
             {
-                continue;
+                offset = 0;
+                status = SelfSegmentResolveStatus.Unavailable;
+                return false;
             }
 
             offset = segment.Offset;
@@ -2684,6 +2835,78 @@ public sealed class SelfLoader : ISelfLoader
         offset = 0;
         status = SelfSegmentResolveStatus.NotFound;
         return false;
+    }
+
+    private static bool TryResolveSelfContainingSegmentOffset(
+        int imageLength,
+        IReadOnlyList<SelfSegment> selfSegments,
+        IReadOnlyList<ProgramHeader> programHeaders,
+        ProgramHeader requestedHeader,
+        int requestedHeaderIndex,
+        out ulong offset,
+        out SelfSegmentResolveStatus status)
+    {
+        offset = 0;
+        status = SelfSegmentResolveStatus.NotFound;
+
+        if (!TryGetRangeEnd(requestedHeader.Offset, requestedHeader.FileSize, out var requestedEnd))
+        {
+            return false;
+        }
+
+        foreach (var segment in selfSegments)
+        {
+            if (!segment.IsBlocked || segment.ProgramHeaderId >= (ulong)programHeaders.Count)
+            {
+                continue;
+            }
+
+            var containerIndex = (int)segment.ProgramHeaderId;
+            if (containerIndex == requestedHeaderIndex)
+            {
+                continue;
+            }
+
+            var containerHeader = programHeaders[containerIndex];
+            if (!TryGetRangeEnd(containerHeader.Offset, containerHeader.FileSize, out var containerEnd) ||
+                requestedHeader.Offset < containerHeader.Offset ||
+                requestedEnd > containerEnd)
+            {
+                continue;
+            }
+
+            if (!TryResolveSelfSegmentOffset(
+                    imageLength,
+                    selfSegments,
+                    containerHeader,
+                    containerIndex,
+                    out var containerOffset,
+                    out var containerStatus))
+            {
+                status = containerStatus;
+                return false;
+            }
+
+            var delta = requestedHeader.Offset - containerHeader.Offset;
+            var candidateOffset = containerOffset + delta;
+            if (!TryIsInRange(imageLength, candidateOffset, requestedHeader.FileSize))
+            {
+                status = SelfSegmentResolveStatus.Unavailable;
+                return false;
+            }
+
+            offset = candidateOffset;
+            status = containerStatus;
+            return true;
+        }
+
+        return false;
+    }
+
+    private static bool TryGetRangeEnd(ulong offset, ulong size, out ulong end)
+    {
+        end = offset + size;
+        return end >= offset;
     }
 
     private static void ValidateElfHeader(ElfHeader header)
@@ -2835,6 +3058,7 @@ public sealed class SelfLoader : ISelfLoader
         ResolvedDumped = 2,
         Encrypted = 3,
         Compressed = 4,
+        Unavailable = 5,
     }
 
     [StructLayout(LayoutKind.Sequential, Pack = 1)]

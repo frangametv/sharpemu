@@ -79,6 +79,26 @@ public static class HttpExports
     }
 
     [SysAbiExport(
+        Nid = "XNUoD2B9a6A",
+        ExportName = "sceHttpSetIntOptionCompat1270",
+        Target = Generation.Gen5,
+        LibraryName = "libSceHttp")]
+    public static int HttpSetIntOptionCompat1270(CpuContext ctx)
+    {
+        var templateId = unchecked((int)ctx[CpuRegister.Rdi]);
+        var value = unchecked((int)ctx[CpuRegister.Rsi]);
+        if (!Templates.ContainsKey(templateId))
+        {
+            return ctx.SetReturn(HttpErrorInvalidId);
+        }
+
+        // Firmware 12.70's libSceHttp +0x14340 validates global HTTP state
+        // and writes integer option 10 on the template/request object.
+        TraceHttp("set_int_option_10", templateId, unchecked((ulong)value), 0, 0, 0);
+        return ctx.SetReturn(OrbisGen2Result.ORBIS_GEN2_OK);
+    }
+
+    [SysAbiExport(
         Nid = "Ik-KpLTlf7Q",
         ExportName = "sceHttpTerm",
         Target = Generation.Gen4 | Generation.Gen5,

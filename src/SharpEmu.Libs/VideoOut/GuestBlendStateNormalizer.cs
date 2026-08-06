@@ -12,6 +12,14 @@ internal static class GuestBlendStateNormalizer
         IReadOnlyList<bool> integerAttachments,
         out int normalizedCount)
     {
+        if (blends.Count == 0 && integerAttachments.Count > 0)
+        {
+            normalizedCount = integerAttachments.Count;
+            return Enumerable.Repeat(
+                GuestBlendState.Default,
+                integerAttachments.Count).ToArray();
+        }
+
         if (blends.Count != integerAttachments.Count)
         {
             throw new ArgumentException(

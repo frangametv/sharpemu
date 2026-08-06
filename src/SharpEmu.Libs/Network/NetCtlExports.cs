@@ -29,7 +29,8 @@ public static class NetCtlExports
     private const int NetCtlInfoHttpProxyServer = 20;
     private const int NetCtlInfoHttpProxyPort = 21;
     private const int NetCtlDeviceWired = 0;
-    private const int NetCtlLinkDisconnected = 0;
+    private const int NetCtlLinkConnected = 1;
+    private const int NetCtlStateIpObtained = 3;
     private const int NetCtlIpConfigStatic = 0;
     private static readonly object CallbackGate = new();
     private static readonly CallbackRegistration[] Callbacks = new CallbackRegistration[MaxCallbacks];
@@ -103,8 +104,11 @@ public static class NetCtlExports
             return ctx.SetReturn(NetCtlErrorInvalidAddress, typeof(long));
         }
 
+        // GTA V's SceNet bootstrap only advances after the initial state query
+        // reports IP_OBTAINED. This matches the immediately usable local network
+        // profile exposed by libSceNet in SharpEmu.
         Span<byte> stateBytes = stackalloc byte[sizeof(int)];
-        BinaryPrimitives.WriteInt32LittleEndian(stateBytes, 0);
+        BinaryPrimitives.WriteInt32LittleEndian(stateBytes, NetCtlStateIpObtained);
         return ctx.Memory.TryWrite(stateAddress, stateBytes)
             ? ctx.SetReturn(0, typeof(long))
             : ctx.SetReturn((int)OrbisGen2Result.ORBIS_GEN2_ERROR_MEMORY_FAULT, typeof(long));
@@ -172,7 +176,9 @@ public static class NetCtlExports
             NetCtlInfoDevice => WriteUInt32(ctx, infoAddress, NetCtlDeviceWired),
             NetCtlInfoEtherAddress => WriteZeroBytes(ctx, infoAddress, 6),
             NetCtlInfoMtu => WriteUInt32(ctx, infoAddress, 1500),
-            NetCtlInfoLink => WriteUInt32(ctx, infoAddress, NetCtlLinkDisconnected),
+            // GTA V's SceNetWorker (eboot 0x02B02700) polls LINK once per
+            // second and clears its global link-ready flag unless this is 1.
+            NetCtlInfoLink => WriteUInt32(ctx, infoAddress, NetCtlLinkConnected),
             NetCtlInfoIpConfig => WriteUInt32(ctx, infoAddress, NetCtlIpConfigStatic),
             NetCtlInfoDhcpHostname => WriteAsciiZ(ctx, infoAddress, string.Empty, 256),
             NetCtlInfoPppoeAuthName => WriteAsciiZ(ctx, infoAddress, string.Empty, 128),

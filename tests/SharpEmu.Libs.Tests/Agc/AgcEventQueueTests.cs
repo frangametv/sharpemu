@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 
 using System.Buffers.Binary;
+using System.Runtime.InteropServices;
 using SharpEmu.HLE;
 using SharpEmu.Libs.Kernel;
 using Xunit;
@@ -82,14 +83,7 @@ public sealed class AgcEventQueueTests
         Assert.Equal(1u, ReadUInt32(memory, eventsAddress + 0x0C));
         Assert.Equal(eventType, ReadUInt64(memory, eventsAddress + 0x10));
         Assert.Equal(userData, ReadUInt64(memory, eventsAddress + 0x18));
-
-        // Registrations live in process-wide static state, and a sibling test asserts that
-        // no graphics registration exists at all. Drop this one instead of relying on
-        // execution order.
-        ctx[CpuRegister.Rdi] = handle;
-        Assert.Equal(
-            (int)OrbisGen2Result.ORBIS_GEN2_OK,
-            KernelEventQueueCompatExports.KernelDeleteEqueue(ctx));
+        DeleteEqueue(ctx, handle);
     }
 
     [Fact]
@@ -117,6 +111,32 @@ public sealed class AgcEventQueueTests
             0x07);
 
         Assert.Equal(0, triggered);
+        DeleteEqueue(ctx, handle);
+    }
+
+    [Fact]
+    public void CreateEqueue_WritesHandleToNativeMappedGuestMemory()
+    {
+        var ctx = new CpuContext(new FakeCpuMemory(BaseAddress, MemorySize), Generation.Gen5);
+        ctx[CpuRegister.Rdi] = sizeof(ulong);
+        Assert.Equal(0, KernelMemoryCompatExports.Malloc(ctx));
+        var handleOutAddress = ctx[CpuRegister.Rax];
+        try
+        {
+            Marshal.WriteInt64(unchecked((nint)handleOutAddress), 0);
+            ctx[CpuRegister.Rdi] = handleOutAddress;
+            Assert.Equal(0, KernelEventQueueCompatExports.KernelCreateEqueue(ctx));
+
+            var handle = unchecked((ulong)Marshal.ReadInt64(unchecked((nint)handleOutAddress)));
+            Assert.NotEqual(0UL, handle);
+            ctx[CpuRegister.Rdi] = handle;
+            Assert.Equal(0, KernelEventQueueCompatExports.KernelDeleteEqueue(ctx));
+        }
+        finally
+        {
+            ctx[CpuRegister.Rdi] = handleOutAddress;
+            Assert.Equal(0, KernelMemoryCompatExports.Free(ctx));
+        }
     }
 
     [Fact]
@@ -533,8 +553,7 @@ public sealed class AgcEventQueueTests
     private static void DeleteEqueue(CpuContext ctx, ulong handle)
     {
         ctx[CpuRegister.Rdi] = handle;
-        Assert.Equal(
-            (int)OrbisGen2Result.ORBIS_GEN2_OK,
+        Assert.Equal((int)OrbisGen2Result.ORBIS_GEN2_OK,
             KernelEventQueueCompatExports.KernelDeleteEqueue(ctx));
     }
 }

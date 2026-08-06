@@ -46,6 +46,8 @@ public static class LibcStdioExports
 
     private static readonly object _ctypeTableGate = new();
     private static nint _ctypeTableBase;
+    private static nint _toLowerTableBase;
+    private static nint _cLocaleName;
 
     [SysAbiExport(
         Nid = "xeYO4u7uyJ0",
@@ -261,7 +263,10 @@ public static class LibcStdioExports
                     break;
                 }
 
-                if (!ctx.Memory.TryWrite(destination + totalRead, buffer.AsSpan(0, read)))
+                if (!KernelMemoryCompatExports.TryWriteCompat(
+                        ctx,
+                        destination + totalRead,
+                        buffer.AsSpan(0, read)))
                 {
                     ctx[CpuRegister.Rax] = totalRead / elementSize;
                     return (int)OrbisGen2Result.ORBIS_GEN2_ERROR_MEMORY_FAULT;
@@ -716,6 +721,33 @@ public static class LibcStdioExports
         return (int)OrbisGen2Result.ORBIS_GEN2_OK;
     }
 
+    [SysAbiExport(
+        Nid = "1uJgoVq3bQU",
+        ExportName = "_Getptolower",
+        Target = Generation.Gen4 | Generation.Gen5,
+        LibraryName = "libc")]
+    public static int GetPtolower(CpuContext ctx)
+    {
+        ctx[CpuRegister.Rax] = unchecked((ulong)EnsureToLowerTable());
+        return (int)OrbisGen2Result.ORBIS_GEN2_OK;
+    }
+
+    [SysAbiExport(
+        Nid = "PtsB1Q9wsFA",
+        ExportName = "setlocale",
+        Target = Generation.Gen4 | Generation.Gen5,
+        LibraryName = "libc")]
+    public static int SetLocale(CpuContext ctx)
+    {
+        lock (_ctypeTableGate)
+        {
+            _cLocaleName = _cLocaleName == 0 ? Marshal.StringToHGlobalAnsi("C") : _cLocaleName;
+            ctx[CpuRegister.Rax] = unchecked((ulong)_cLocaleName);
+        }
+
+        return (int)OrbisGen2Result.ORBIS_GEN2_OK;
+    }
+
     private static unsafe nint EnsureCtypeTable()
     {
         lock (_ctypeTableGate)
@@ -737,6 +769,29 @@ public static class LibcStdioExports
             // guest must point at the c == 0 entry, not the start of the allocation.
             _ctypeTableBase = storage - (CtypeTableLowerBound * sizeof(ushort));
             return _ctypeTableBase;
+        }
+    }
+
+    private static unsafe nint EnsureToLowerTable()
+    {
+        lock (_ctypeTableGate)
+        {
+            if (_toLowerTableBase != 0)
+            {
+                return _toLowerTableBase;
+            }
+
+            var storage = Marshal.AllocHGlobal(CtypeTableEntryCount * sizeof(ushort));
+            var entries = new Span<ushort>((void*)storage, CtypeTableEntryCount);
+            for (var i = 0; i < CtypeTableEntryCount; i++)
+            {
+                var c = i + CtypeTableLowerBound;
+                entries[i] = (ushort)(c is >= 'A' and <= 'Z' ? c + ('a' - 'A') : c & 0xFF);
+            }
+
+            // The guest indexes this table directly with a signed/unsigned byte value.
+            _toLowerTableBase = storage - (CtypeTableLowerBound * sizeof(ushort));
+            return _toLowerTableBase;
         }
     }
 

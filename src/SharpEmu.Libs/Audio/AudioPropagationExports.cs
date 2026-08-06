@@ -17,32 +17,8 @@ public static class AudioPropagationExports
 {
     private const int Ok = 0;
 
-    // QueryMemory reports the working-set size the caller must allocate before
-    // SystemCreate. rsi points at the out size/alignment; write a modest,
-    // aligned block so the caller's allocation succeeds.
-    [SysAbiExport(
-        Nid = "7xyAxrusLko",
-        ExportName = "sceAudioPropagationSystemQueryMemory",
-        Target = Generation.Gen5,
-        LibraryName = "libSceAudioPropagation")]
-    public static int SystemQueryMemory(CpuContext ctx)
-    {
-        var outAddress = ctx[CpuRegister.Rsi];
-        if (outAddress != 0)
-        {
-            // {size, alignment} — 1 MiB / 256 B covers the caller's allocation.
-            ctx.TryWriteUInt64(outAddress, 0x10_0000);
-            ctx.TryWriteUInt64(outAddress + sizeof(ulong), 0x100);
-        }
-
-        return ctx.SetReturn(Ok);
-    }
-
     [SysAbiExport(Nid = "GrA9ke1QT+E", ExportName = "sceAudioPropagationSystemQueryInfo", Target = Generation.Gen5, LibraryName = "libSceAudioPropagation")]
     public static int SystemQueryInfo(CpuContext ctx) => ctx.SetReturn(Ok);
-
-    [SysAbiExport(Nid = "aNEqtSHdUSo", ExportName = "sceAudioPropagationSystemCreate", Target = Generation.Gen5, LibraryName = "libSceAudioPropagation")]
-    public static int SystemCreate(CpuContext ctx) => ctx.SetReturn(Ok);
 
     [SysAbiExport(Nid = "x5VPqg5iyAk", ExportName = "sceAudioPropagationSystemDestroy", Target = Generation.Gen5, LibraryName = "libSceAudioPropagation")]
     public static int SystemDestroy(CpuContext ctx) => ctx.SetReturn(Ok);
@@ -59,23 +35,8 @@ public static class AudioPropagationExports
     [SysAbiExport(Nid = "B2KI2AachWE", ExportName = "sceAudioPropagationSystemLock", Target = Generation.Gen5, LibraryName = "libSceAudioPropagation")]
     public static int SystemLock(CpuContext ctx) => ctx.SetReturn(Ok);
 
-    [SysAbiExport(Nid = "kIdb+iQUzCs", ExportName = "sceAudioPropagationSystemSetAttributes", Target = Generation.Gen5, LibraryName = "libSceAudioPropagation")]
-    public static int SystemSetAttributes(CpuContext ctx) => ctx.SetReturn(Ok);
-
-    [SysAbiExport(Nid = "VlBT16890mA", ExportName = "sceAudioPropagationSystemSetRays", Target = Generation.Gen5, LibraryName = "libSceAudioPropagation")]
-    public static int SystemSetRays(CpuContext ctx) => ctx.SetReturn(Ok);
-
-    [SysAbiExport(Nid = "ht-QXT3zGxo", ExportName = "sceAudioPropagationSystemGetRays", Target = Generation.Gen5, LibraryName = "libSceAudioPropagation")]
-    public static int SystemGetRays(CpuContext ctx) => ctx.SetReturn(Ok);
-
-    [SysAbiExport(Nid = "CPLV6G-eXmk", ExportName = "sceAudioPropagationSystemRegisterMaterial", Target = Generation.Gen5, LibraryName = "libSceAudioPropagation")]
-    public static int SystemRegisterMaterial(CpuContext ctx) => ctx.SetReturn(Ok);
-
     [SysAbiExport(Nid = "XKCN4gpeYsM", ExportName = "sceAudioPropagationSystemUnregisterMaterial", Target = Generation.Gen5, LibraryName = "libSceAudioPropagation")]
     public static int SystemUnregisterMaterial(CpuContext ctx) => ctx.SetReturn(Ok);
-
-    [SysAbiExport(Nid = "8bI5h8req30", ExportName = "sceAudioPropagationRoomCreate", Target = Generation.Gen5, LibraryName = "libSceAudioPropagation")]
-    public static int RoomCreate(CpuContext ctx) => ctx.SetReturn(Ok);
 
     [SysAbiExport(Nid = "S0JwP2AFTTE", ExportName = "sceAudioPropagationRoomDestroy", Target = Generation.Gen5, LibraryName = "libSceAudioPropagation")]
     public static int RoomDestroy(CpuContext ctx) => ctx.SetReturn(Ok);

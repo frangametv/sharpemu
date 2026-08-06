@@ -9,9 +9,9 @@ namespace SharpEmu.HLE;
 public static class HleDataSymbols
 {
     private const string StackChkGuardNid = "f7uOxY9mM1U";
-    private const string ProgNameNid = "djxxOmW6-aw";
-    private const string LibcNeedFlagNid = "P330P3dFF68";
-    private const string LibcInternalNeedFlagNid = "ZT4ODD2Ts9o";
+    private const string ProgNameNid = DataSymbolRegistry.ProgNameNid;
+    private const string LibcNeedFlagNid = DataSymbolRegistry.LibcNeedFlagNid;
+    private const string LibcInternalNeedFlagNid = DataSymbolRegistry.LibcInternalNeedFlagNid;
     private const int ProgNameMaxBytes = 511;
     // Terminator canaries reserve the low byte as NUL. Keep the process data
     // symbol and every per-thread TLS copy byte-for-byte identical.

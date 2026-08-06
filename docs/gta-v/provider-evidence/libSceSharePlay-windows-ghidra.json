@@ -1,0 +1,53 @@
+{
+  "executable_sha256": "d41598603a31066e405fb2f60e5d848b36d12b0b109c3862f8d5eba93ae0ddb4",
+  "format": "sharpemu-ghidra-selected-nid-functions-v1",
+  "function_count": 2,
+  "functions": [
+    {
+      "external": false,
+      "function_body_addresses": 18,
+      "function_body_sha256": "4c9b995fce41246925481c2d956f3e3a313feef94b30b2768de1076da79aa14e",
+      "function_entry": "00000a90",
+      "function_name": "UaLjloJinow#D#A",
+      "function_present": true,
+      "instruction_count": 6,
+      "nid": "UaLjloJinow",
+      "result_file": "libSceSharePlay-chunk-00.result.tsv",
+      "symbol": "UaLjloJinow#D#A",
+      "symbol_address": "00000a90",
+      "thunk": false,
+      "thunk_target": "",
+      "thunk_target_external": null,
+      "wave": "wave2"
+    },
+    {
+      "external": false,
+      "function_body_addresses": 36,
+      "function_body_sha256": "458968885a14c9cf0c1800dc95f0dd7357bb2e3a27af513e2016b822cb217751",
+      "function_entry": "00000a60",
+      "function_name": "isruqthpYcw#D#A",
+      "function_present": true,
+      "instruction_count": 14,
+      "nid": "isruqthpYcw",
+      "result_file": "libSceSharePlay-chunk-00.result.tsv",
+      "symbol": "isruqthpYcw#D#A",
+      "symbol_address": "00000a60",
+      "thunk": false,
+      "thunk_target": "",
+      "thunk_target_external": null,
+      "wave": "wave2"
+    }
+  ],
+  "ghidra_version": "12.1.2_PUBLIC_20260605",
+  "missing": [],
+  "program_name": "libSceSharePlay.sprx",
+  "provenance": {
+    "audit_sha256": "a28951db44df6f026715f9ab8e47b992cea172e396bc6d80b4383e00c14f2be6",
+    "evidence_policy": "Ghidra analysis of exact Gen5 provider ELFs only; no Kyty-derived contracts or implementations.",
+    "excluded_nids": [],
+    "recommendations_sha256": "f059a17f1440499c499311093ac225a428f19c5a8776c41ca609aecd670df7c5",
+    "summary_sha256": "e1e93ff2f5967daa1d6f838b08f4490de7144118032e0d4e413cb767ab50e0a2"
+  },
+  "target_count": 2,
+  "without_functions": []
+}

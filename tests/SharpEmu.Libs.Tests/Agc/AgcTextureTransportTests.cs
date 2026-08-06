@@ -100,6 +100,7 @@ public sealed class AgcTextureTransportTests
             DstSelect: 0xFAC,
             TileMode: 0,
             Pitch: 8,
+            SourceOffset: 0,
             Sampler: default,
             Type: type,
             Depth: depth);

@@ -261,6 +261,16 @@ public static partial class Gen5MslTranslator
                 return false;
             }
 
+            if (instruction.Opcode == "ImageBvhIntersectRay")
+            {
+                for (uint component = 0; component < 4; component++)
+                {
+                    StoreVector(image.VectorData + component, "0xFFFFFFFFu");
+                }
+
+                return true;
+            }
+
             // The resolving instruction may differ from the one that defined the
             // binding (a store can dominate a load's binding); fold its access in.
             MarkImageBindingAccess(bindingIndex, instruction.Opcode);

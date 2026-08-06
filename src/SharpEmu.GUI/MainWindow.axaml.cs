@@ -204,6 +204,7 @@ public partial class MainWindow : Window
         GameList.DoubleTapped += OnGameListDoubleTapped;
         SearchBox.TextChanged += (_, _) => RefreshVisibleGames();
         ConsoleSearchBox.TextChanged += (_, _) => RefreshVisibleConsoleLines();
+        SystemUiButton.Click += async (_, _) => await BootSystemUiAsync();
         OpenFileButton.Click += async (_, _) => await OpenFileAsync();
         LaunchButton.Click += (_, _) =>
         {
@@ -2294,6 +2295,44 @@ public partial class MainWindow : Window
 
     // ---- Launching ----
 
+    private async Task BootSystemUiAsync()
+    {
+        if (_isRunning)
+        {
+            return;
+        }
+
+        var folders = await StorageProvider.OpenFolderPickerAsync(new FolderPickerOpenOptions
+        {
+            Title = "Select the extracted system-software filesystem root",
+            AllowMultiple = false,
+        });
+        var rootFolder = folders.FirstOrDefault();
+        var systemRoot = rootFolder?.TryGetLocalPath();
+        if (string.IsNullOrWhiteSpace(systemRoot))
+        {
+            return;
+        }
+
+        var files = await StorageProvider.OpenFilePickerAsync(new FilePickerOpenOptions
+        {
+            Title = "Select the System UI entry executable",
+            AllowMultiple = false,
+            SuggestedStartLocation = rootFolder,
+            FileTypeFilter = new[]
+            {
+                new FilePickerFileType("System executables") { Patterns = new[] { "*.self", "*.elf", "*.bin" } },
+                FilePickerFileTypes.All,
+            },
+        });
+
+        var entryPath = files.FirstOrDefault()?.TryGetLocalPath();
+        if (!string.IsNullOrWhiteSpace(entryPath))
+        {
+            Launch(entryPath, "System UI", systemRoot: systemRoot);
+        }
+    }
+
     private async Task OpenFileAsync()
     {
         var files = await StorageProvider.OpenFilePickerAsync(new FilePickerOpenOptions
@@ -2323,7 +2362,11 @@ public partial class MainWindow : Window
         }
     }
 
-    private void Launch(string ebootPath, string displayName, string? titleId = null)
+    private void Launch(
+        string ebootPath,
+        string displayName,
+        string? titleId = null,
+        string? systemRoot = null)
     {
         if (_isRunning)
         {
@@ -2396,12 +2439,18 @@ public partial class MainWindow : Window
             CpuEngine = CpuExecutionEngine.NativeOnly,
             StrictDynlibResolution = effective.StrictDynlibResolution,
             ImportTraceLimit = Math.Max(0, effective.ImportTraceLimit),
+            BootMode = string.IsNullOrWhiteSpace(systemRoot)
+                ? SharpEmuBootMode.Game
+                : SharpEmuBootMode.SystemUi,
+            SystemRoot = systemRoot,
         };
 
         _isRunning = true;
         _isStopping = false;
         _runningGameName = displayName;
-        _runningGameTitleId = resolvedTitleId;
+        _runningGameTitleId = string.IsNullOrWhiteSpace(systemRoot)
+            ? resolvedTitleId
+            : null;
         _runningSinceUnixSeconds = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
         UpdateRunButtons();
         UpdateDiscordPresence();
@@ -2585,6 +2634,12 @@ public partial class MainWindow : Window
             arguments.Add($"--trace-imports={launch.RuntimeOptions.ImportTraceLimit}");
         }
 
+        if (launch.RuntimeOptions.BootMode == SharpEmuBootMode.SystemUi)
+        {
+            arguments.Add("--system-ui");
+            arguments.Add($"--system-root={launch.RuntimeOptions.SystemRoot}");
+        }
+
         arguments.Add($"--window-mode={launch.Settings.WindowMode.ToLowerInvariant()}");
         arguments.Add($"--resolution={launch.Settings.Resolution}");
         arguments.Add($"--display={launch.Settings.DisplayIndex}");
@@ -2677,6 +2732,7 @@ public partial class MainWindow : Window
             GameList.SelectedItem is GameEntry game &&
             !string.IsNullOrWhiteSpace(game.TitleId);
         OpenFileButton.IsEnabled = !_isRunning;
+        SystemUiButton.IsEnabled = !_isRunning;
     }
 
     // ---- Console ----

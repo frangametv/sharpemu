@@ -22,12 +22,19 @@ public sealed class AjmExportsTests : IDisposable
     private const int InvalidParameter = unchecked((int)0x80930005);
     private const int CodecAlreadyRegistered = unchecked((int)0x80930009);
     private const int CodecNotRegistered = unchecked((int)0x8093000A);
+    private const int MalformedBatch = unchecked((int)0x80930011);
+    private const int JobCreationError = unchecked((int)0x80930012);
     private const ulong MemoryBase = 0x1_0000_0000;
     private const ulong ContextAddress = MemoryBase + 0x100;
     private const ulong InstanceAddress = MemoryBase + 0x200;
     private const ulong BatchInfoAddress = MemoryBase + 0x300;
     private const ulong StatisticsAddress = MemoryBase + 0x400;
     private const ulong BatchBufferAddress = MemoryBase + 0x500;
+    private const ulong BatchAddress = MemoryBase + 0x300;
+    private const ulong DescriptorBase = MemoryBase + 0x500;
+    private const ulong StackAddress = MemoryBase + 0xE00;
+    private const ulong BatchErrorAddress = MemoryBase + 0xE40;
+    private const ulong BatchIdAddress = MemoryBase + 0xE80;
 
     private readonly FakeCpuMemory _memory = new(MemoryBase, 0x1000);
     private readonly CpuContext _ctx;
@@ -312,6 +319,202 @@ public sealed class AjmExportsTests : IDisposable
     }
 
     [Fact]
+    public void BatchJobDecode_AppendsExactNativeDescriptor()
+    {
+        const ulong cursor = 0x20;
+        const uint instanceId = 0xABCDE;
+        const uint inputSize = 0x3C0;
+        const uint outputSize = 0x780;
+        var descriptorAddress = DescriptorBase + cursor;
+        var inputAddress = MemoryBase + 0x800;
+        var outputAddress = MemoryBase + 0xA00;
+        var sidebandAddress = MemoryBase + 0xC00;
+
+        WriteUInt64(BatchAddress, DescriptorBase);
+        WriteUInt64(BatchAddress + 0x08, cursor);
+        WriteUInt64(BatchAddress + 0x10, 0x100);
+        WriteUInt64(BatchAddress + 0x18, 0xAAAAAAAAAAAAAAAA);
+        WriteUInt64(BatchAddress + 0x20, 0xBBBBBBBBBBBBBBBB);
+
+        Span<byte> originalDescriptor = stackalloc byte[0x40];
+        originalDescriptor.Fill(0xCC);
+        Assert.True(_memory.TryWrite(descriptorAddress, originalDescriptor));
+
+        _ctx[CpuRegister.Rdi] = BatchAddress;
+        _ctx[CpuRegister.Rsi] = instanceId;
+        _ctx[CpuRegister.Rdx] = inputAddress;
+        _ctx[CpuRegister.Rcx] = inputSize;
+        _ctx[CpuRegister.R8] = outputAddress;
+        _ctx[CpuRegister.R9] = outputSize;
+        _ctx[CpuRegister.Rsp] = StackAddress;
+        WriteUInt64(StackAddress, 0x8000000012345678);
+        WriteUInt64(StackAddress + sizeof(ulong), sidebandAddress);
+
+        Assert.Equal(0, AjmExports.AjmBatchJobDecode(_ctx));
+        Assert.Equal(cursor + 0x40, ReadUInt64(BatchAddress + 0x08));
+        Assert.Equal(descriptorAddress, ReadUInt64(BatchAddress + 0x18));
+        Assert.Equal(0UL, ReadUInt64(BatchAddress + 0x20));
+
+        Assert.Equal((0xCCCCCCCCu & 0xFC000030u) | (instanceId << 6), ReadUInt32(descriptorAddress));
+        Assert.Equal(0x38u, ReadUInt32(descriptorAddress + 0x04));
+        Assert.Equal((0xCCCCCCCCu & 0xFFFFFFE0u) | 0x01u, ReadUInt32(descriptorAddress + 0x08));
+        Assert.Equal(inputSize, ReadUInt32(descriptorAddress + 0x0C));
+        Assert.Equal(inputAddress, ReadUInt64(descriptorAddress + 0x10));
+        Assert.Equal((0xCCCCCCCCu & 0xFC000030u) | 0x00200004u, ReadUInt32(descriptorAddress + 0x18));
+        Assert.Equal(0x1000u, ReadUInt32(descriptorAddress + 0x1C));
+        Assert.Equal((0xCCCCCCCCu & 0xFFFFFFE0u) | 0x11u, ReadUInt32(descriptorAddress + 0x20));
+        Assert.Equal(outputSize, ReadUInt32(descriptorAddress + 0x24));
+        Assert.Equal(outputAddress, ReadUInt64(descriptorAddress + 0x28));
+        Assert.Equal((0xCCCCCCCCu & 0xFFFFFFE0u) | 0x12u, ReadUInt32(descriptorAddress + 0x30));
+        Assert.Equal(0x20u, ReadUInt32(descriptorAddress + 0x34));
+        Assert.Equal(sidebandAddress, ReadUInt64(descriptorAddress + 0x38));
+    }
+
+    [Fact]
+    public void BatchInitialize_WritesAndResetsExactNativeBuilder()
+    {
+        Fill(BatchAddress, 0x28, 0xCC);
+        _ctx[CpuRegister.Rdi] = DescriptorBase;
+        _ctx[CpuRegister.Rsi] = 0x100;
+        _ctx[CpuRegister.Rdx] = BatchAddress;
+
+        Assert.Equal(0, AjmExports.AjmBatchInitialize(_ctx));
+        Assert.Equal(DescriptorBase, ReadUInt64(BatchAddress));
+        Assert.Equal(0UL, ReadUInt64(BatchAddress + 0x08));
+        Assert.Equal(0x100UL, ReadUInt64(BatchAddress + 0x10));
+        Assert.Equal(0UL, ReadUInt64(BatchAddress + 0x18));
+        Assert.Equal(0UL, ReadUInt64(BatchAddress + 0x20));
+
+        var export = Assert.Single(
+            SharpEmu.Generated.SysAbiExportRegistry.CreateExports(Generation.Gen5),
+            candidate => candidate.Nid == "MmpF1XsQiHw");
+        Assert.True(export.PreferLle);
+    }
+
+    [Fact]
+    public void BatchInitialize_AllowsZeroCapacityAndRejectsNullPointersWithoutWrites()
+    {
+        Fill(BatchAddress, 0x28, 0xCC);
+        _ctx[CpuRegister.Rdi] = DescriptorBase;
+        _ctx[CpuRegister.Rsi] = 0;
+        _ctx[CpuRegister.Rdx] = BatchAddress;
+        Assert.Equal(0, AjmExports.AjmBatchInitialize(_ctx));
+        Assert.Equal(DescriptorBase, ReadUInt64(BatchAddress));
+        Assert.Equal(0UL, ReadUInt64(BatchAddress + 0x10));
+
+        Fill(BatchAddress, 0x28, 0xCC);
+        _ctx[CpuRegister.Rdi] = 0;
+        _ctx[CpuRegister.Rdx] = BatchAddress;
+        Assert.Equal(InvalidParameter, AjmExports.AjmBatchInitialize(_ctx));
+        Assert.All(ReadBytes(BatchAddress, 0x28), value => Assert.Equal(0xCC, value));
+
+        _ctx[CpuRegister.Rdi] = DescriptorBase;
+        _ctx[CpuRegister.Rdx] = 0;
+        Assert.Equal(InvalidParameter, AjmExports.AjmBatchInitialize(_ctx));
+    }
+
+    [Fact]
+    public void BatchJobDecode_CapacityFailureAdvancesCursorWithoutRollback()
+    {
+        WriteUInt64(BatchAddress, DescriptorBase);
+        WriteUInt64(BatchAddress + 0x08, 0xE0);
+        WriteUInt64(BatchAddress + 0x10, 0x100);
+        WriteUInt64(BatchAddress + 0x18, 0xAAAAAAAAAAAAAAAA);
+        WriteUInt64(BatchAddress + 0x20, 0xBBBBBBBBBBBBBBBB);
+        _ctx[CpuRegister.Rdi] = BatchAddress;
+
+        Assert.Equal(unchecked((int)0x80930012), AjmExports.AjmBatchJobDecode(_ctx));
+        Assert.Equal(0x120UL, ReadUInt64(BatchAddress + 0x08));
+        Assert.Equal(0xAAAAAAAAAAAAAAAAUL, ReadUInt64(BatchAddress + 0x18));
+        Assert.Equal(0xBBBBBBBBBBBBBBBBUL, ReadUInt64(BatchAddress + 0x20));
+    }
+
+    [Fact]
+    public void BatchJobDecode_NullBuilderReturnsInvalidParameter()
+    {
+        _ctx[CpuRegister.Rdi] = 0;
+
+        Assert.Equal(InvalidParameter, AjmExports.AjmBatchJobDecode(_ctx));
+    }
+
+    [Fact]
+    public void BatchStart_OverCapacityReportsExactNativeCreationError()
+    {
+        WriteUInt64(BatchAddress, DescriptorBase);
+        WriteUInt64(BatchAddress + 0x08, 0x101);
+        WriteUInt64(BatchAddress + 0x10, 0x100);
+        WriteUInt64(BatchAddress + 0x18, 0xAAAAAAAAAAAAAAAA);
+        WriteUInt64(BatchAddress + 0x20, 0xBBBBBBBBBBBBBBBB);
+        Fill(BatchErrorAddress, 0x20, 0xCC);
+        WriteUInt32(BatchIdAddress, 0xDEADBEEF);
+
+        _ctx[CpuRegister.Rdi] = uint.MaxValue;
+        _ctx[CpuRegister.Rsi] = BatchAddress;
+        _ctx[CpuRegister.Rdx] = 7;
+        _ctx[CpuRegister.Rcx] = BatchErrorAddress;
+        _ctx[CpuRegister.R8] = BatchIdAddress;
+
+        Assert.Equal(MalformedBatch, AjmExports.AjmBatchStart(_ctx));
+        Assert.Equal(unchecked((uint)JobCreationError), ReadUInt32(BatchErrorAddress));
+        Assert.Equal(0xCCCCCCCCu, ReadUInt32(BatchErrorAddress + 0x04));
+        Assert.Equal(0xAAAAAAAAAAAAAAAAUL, ReadUInt64(BatchErrorAddress + 0x08));
+        Assert.Equal(0u, ReadUInt32(BatchErrorAddress + 0x10));
+        Assert.Equal(0xCCCCCCCCu, ReadUInt32(BatchErrorAddress + 0x14));
+        Assert.Equal(0xBBBBBBBBBBBBBBBBUL, ReadUInt64(BatchErrorAddress + 0x18));
+        Assert.Equal(0xDEADBEEFu, ReadUInt32(BatchIdAddress));
+    }
+
+    [Fact]
+    public void BatchStartAndWait_CompleteDecodeOnceAndEmitSilence()
+    {
+        const uint inputSize = 0x40;
+        const uint outputSize = 0x80;
+        const uint sidebandSize = 0x20;
+        var inputAddress = MemoryBase + 0x800;
+        var outputAddress = MemoryBase + 0x900;
+        var sidebandAddress = MemoryBase + 0xA00;
+        var contextId = Initialize();
+
+        _ctx[CpuRegister.Rdi] = DescriptorBase;
+        _ctx[CpuRegister.Rsi] = 0x100;
+        _ctx[CpuRegister.Rdx] = BatchAddress;
+        Assert.Equal(0, AjmExports.AjmBatchInitialize(_ctx));
+        Fill(DescriptorBase, 0x40, 0);
+        Fill(outputAddress, unchecked((int)outputSize), 0xCC);
+        Fill(sidebandAddress, unchecked((int)sidebandSize), 0xCC);
+
+        _ctx[CpuRegister.Rdi] = BatchAddress;
+        _ctx[CpuRegister.Rsi] = 1;
+        _ctx[CpuRegister.Rdx] = inputAddress;
+        _ctx[CpuRegister.Rcx] = inputSize;
+        _ctx[CpuRegister.R8] = outputAddress;
+        _ctx[CpuRegister.R9] = outputSize;
+        _ctx[CpuRegister.Rsp] = StackAddress;
+        WriteUInt64(StackAddress + sizeof(ulong), sidebandAddress);
+        Assert.Equal(0, AjmExports.AjmBatchJobDecode(_ctx));
+        Assert.Equal(sidebandSize, ReadUInt32(DescriptorBase + 0x34));
+
+        _ctx[CpuRegister.Rdi] = contextId;
+        _ctx[CpuRegister.Rsi] = BatchAddress;
+        _ctx[CpuRegister.Rdx] = 3;
+        _ctx[CpuRegister.Rcx] = BatchErrorAddress;
+        _ctx[CpuRegister.R8] = BatchIdAddress;
+        Assert.Equal(0, AjmExports.AjmBatchStart(_ctx));
+
+        var batchId = ReadUInt32(BatchIdAddress);
+        Assert.NotEqual(0u, batchId);
+        Assert.All(ReadBytes(outputAddress, unchecked((int)outputSize)), value => Assert.Equal(0, value));
+        Assert.All(ReadBytes(sidebandAddress, unchecked((int)sidebandSize)), value => Assert.Equal(0, value));
+
+        _ctx[CpuRegister.Rdi] = contextId;
+        _ctx[CpuRegister.Rsi] = batchId;
+        _ctx[CpuRegister.Rdx] = 1000;
+        _ctx[CpuRegister.Rcx] = BatchErrorAddress;
+        Assert.Equal(0, AjmExports.AjmBatchWait(_ctx));
+        Assert.Equal(InvalidParameter, AjmExports.AjmBatchWait(_ctx));
+    }
+
+    [Fact]
     public void InstanceLifecycleExports_RegisterForBothGenerations()
     {
         foreach (var generation in new[] { Generation.Gen4, Generation.Gen5 })
@@ -384,13 +587,6 @@ public sealed class AjmExportsTests : IDisposable
         return AjmExports.AjmInstanceDestroy(_ctx);
     }
 
-    private uint ReadUInt32(ulong address)
-    {
-        Span<byte> value = stackalloc byte[sizeof(uint)];
-        Assert.True(_memory.TryRead(address, value));
-        return BinaryPrimitives.ReadUInt32LittleEndian(value);
-    }
-
     private void InitializeBatch(ulong bufferAddress, ulong bufferSize, ulong infoAddress)
     {
         _ctx[CpuRegister.Rdi] = bufferAddress;
@@ -399,24 +595,19 @@ public sealed class AjmExportsTests : IDisposable
         Assert.Equal(0, AjmExports.AjmBatchInitialize(_ctx));
     }
 
-    /// <summary>
-    /// Places the seventh, eighth and ninth SysV arguments where the export reads
-    /// them: just past the return address slot at [rsp].
-    /// </summary>
     private void WriteStackArgs(ulong outputCount, ulong sidebandAddress, ulong sidebandSize)
     {
-        const ulong stackAddress = MemoryBase + 0xA00;
-        _ctx[CpuRegister.Rsp] = stackAddress;
-        WriteUInt64(stackAddress + 8, outputCount);
-        WriteUInt64(stackAddress + 16, sidebandAddress);
-        WriteUInt64(stackAddress + 24, sidebandSize);
+        _ctx[CpuRegister.Rsp] = StackAddress;
+        WriteUInt64(StackAddress + 8, outputCount);
+        WriteUInt64(StackAddress + 16, sidebandAddress);
+        WriteUInt64(StackAddress + 24, sidebandSize);
     }
 
-    private void WriteUInt64(ulong address, ulong value)
+    private uint ReadUInt32(ulong address)
     {
-        Span<byte> bytes = stackalloc byte[sizeof(ulong)];
-        BinaryPrimitives.WriteUInt64LittleEndian(bytes, value);
-        Assert.True(_memory.TryWrite(address, bytes));
+        Span<byte> value = stackalloc byte[sizeof(uint)];
+        Assert.True(_memory.TryRead(address, value));
+        return BinaryPrimitives.ReadUInt32LittleEndian(value);
     }
 
     private ulong ReadUInt64(ulong address)
@@ -426,17 +617,31 @@ public sealed class AjmExportsTests : IDisposable
         return BinaryPrimitives.ReadUInt64LittleEndian(value);
     }
 
-    private byte[] ReadBytes(ulong address, int length)
+    private byte[] ReadBytes(ulong address, int size)
     {
-        var value = new byte[length];
-        Assert.True(_memory.TryRead(address, value));
-        return value;
+        var bytes = new byte[size];
+        Assert.True(_memory.TryRead(address, bytes));
+        return bytes;
+    }
+
+    private void Fill(ulong address, int size, byte value)
+    {
+        var bytes = new byte[size];
+        Array.Fill(bytes, value);
+        Assert.True(_memory.TryWrite(address, bytes));
     }
 
     private void WriteUInt32(ulong address, uint value)
     {
         Span<byte> bytes = stackalloc byte[sizeof(uint)];
         BinaryPrimitives.WriteUInt32LittleEndian(bytes, value);
+        Assert.True(_memory.TryWrite(address, bytes));
+    }
+
+    private void WriteUInt64(ulong address, ulong value)
+    {
+        Span<byte> bytes = stackalloc byte[sizeof(ulong)];
+        BinaryPrimitives.WriteUInt64LittleEndian(bytes, value);
         Assert.True(_memory.TryWrite(address, bytes));
     }
 }

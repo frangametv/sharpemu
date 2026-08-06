@@ -17,6 +17,7 @@ public interface INativeCpuBackend
         Generation generation,
         IReadOnlyDictionary<ulong, string> importStubs,
         IReadOnlyDictionary<string, ulong> runtimeSymbols,
+        IReadOnlyDictionary<string, ulong> runtimeDataSymbols,
         CpuExecutionOptions executionOptions,
         out OrbisGen2Result result);
 }

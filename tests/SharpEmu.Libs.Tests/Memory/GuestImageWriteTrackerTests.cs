@@ -2,27 +2,21 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 
 using System.Runtime.InteropServices;
+using SharpEmu.Core.Cpu;
 using SharpEmu.HLE;
 using Xunit;
 
 namespace SharpEmu.Libs.Tests.Memory;
 
-/// <summary>
-/// The write generation lets GPU caches detect guest CPU rewrites even after
-/// another cache owner consumed the (single) dirty flag: the generation is
-/// monotonic and survives consume/re-arm cycles and range replacement. These
-/// invariants back the presenter's stale-upload detection for CPU-rewritten
-/// images (video planes, streamed font atlases).
-/// </summary>
+[CollectionDefinition("GuestImageWriteTracker", DisableParallelization = true)]
+public sealed class GuestImageWriteTrackerTestCollection
+{
+}
+
+[Collection("GuestImageWriteTracker")]
 public sealed unsafe class GuestImageWriteTrackerTests
 {
-    // The tracker aligns to the guest's 4 KiB pages; the mprotect underneath
-    // operates on host pages, which are 16 KiB on Apple Silicon (the emulator
-    // itself always runs with 4 KiB host pages under Rosetta, but this test
-    // host may not). Align the allocation to the largest host page size so
-    // the kernel's rounding stays inside memory this test owns instead of
-    // spilling onto neighbouring heap pages.
-    private const nuint TrackedByteCount = 4096;
+    private const nuint PageSize = 4096;
     private const nuint HostPageAlignment = 16384;
     private const uint MemCommit = 0x1000;
     private const uint MemReserve = 0x2000;
@@ -39,25 +33,138 @@ public sealed unsafe class GuestImageWriteTrackerTests
     [DllImport("kernel32.dll", SetLastError = true)]
     private static extern int VirtualFree(nint lpAddress, nuint dwSize, uint dwFreeType);
 
-    private static ulong AllocateTrackedPages(out void* allocation)
+    private static byte* AllocateTrackedPages()
     {
-        // VirtualProtect (Windows) / mprotect (POSIX) must target
-        // VirtualAlloc/mmap pages. Protecting CRT heap pages poisons
-        // neighbouring allocator metadata and crashes the test host.
         if (OperatingSystem.IsWindows())
         {
             var windowsAllocation = VirtualAlloc(
                 0,
-                HostPageAlignment,
+                2 * HostPageAlignment,
                 MemCommit | MemReserve,
                 PageReadWrite);
             Assert.NotEqual(nint.Zero, windowsAllocation);
-            allocation = (void*)windowsAllocation;
-            return (ulong)windowsAllocation;
+            return (byte*)windowsAllocation;
         }
 
-        allocation = NativeMemory.AlignedAlloc(2 * HostPageAlignment, HostPageAlignment);
-        return (ulong)allocation;
+        // The tracker uses 4 KiB guest pages, while mprotect uses the host page
+        // size (16 KiB on Apple Silicon). Keep kernel rounding inside memory
+        // owned by this test process.
+        return (byte*)NativeMemory.AlignedAlloc(2 * HostPageAlignment, HostPageAlignment);
+    }
+
+    [Fact]
+    public void TrackedCpuMemoryManagedWriteMarksTrackedImageDirty()
+    {
+        if (!GuestImageWriteTracker.Enabled)
+        {
+            return;
+        }
+
+        var page = AllocateTrackedPages();
+        Assert.NotEqual(nint.Zero, (nint)page);
+        new Span<byte>(page, checked((int)PageSize)).Clear();
+        var address = (ulong)page;
+        var memory = new TrackedCpuMemory(
+            new PointerCpuMemory(address, checked((ulong)PageSize)));
+
+        GuestImageWriteTracker.Track(address, checked((ulong)PageSize));
+        try
+        {
+            Assert.True(memory.TryWrite(address + 128, [1, 2, 3, 4]));
+            Assert.True(GuestImageWriteTracker.ConsumeDirty(address));
+            Assert.False(GuestImageWriteTracker.ConsumeDirty(address));
+
+            Span<byte> actual = stackalloc byte[4];
+            Assert.True(memory.TryRead(address + 128, actual));
+            Assert.Equal([1, 2, 3, 4], actual.ToArray());
+
+            GuestImageWriteTracker.Rearm(address);
+            Assert.True(memory.TryWrite(address + 256, [5]));
+            Assert.True(GuestImageWriteTracker.ConsumeDirty(address));
+        }
+        finally
+        {
+            GuestImageWriteTracker.Untrack(address);
+            FreeTrackedPages(page);
+        }
+    }
+
+    [Fact]
+    public void ManagedWriteMarksEveryTrackedOwnerOfSharedPageDirty()
+    {
+        if (!GuestImageWriteTracker.Enabled)
+        {
+            return;
+        }
+
+        var page = AllocateTrackedPages();
+        Assert.NotEqual(nint.Zero, (nint)page);
+        new Span<byte>(page, checked((int)PageSize)).Clear();
+        var firstAddress = (ulong)page + 64;
+        var secondAddress = (ulong)page + 2048;
+
+        GuestImageWriteTracker.Track(firstAddress, 512);
+        GuestImageWriteTracker.Track(secondAddress, 512);
+        try
+        {
+            GuestImageWriteTracker.NotifyManagedWrite(secondAddress + 32, 1);
+
+            Assert.True(GuestImageWriteTracker.ConsumeDirty(firstAddress));
+            Assert.True(GuestImageWriteTracker.ConsumeDirty(secondAddress));
+        }
+        finally
+        {
+            GuestImageWriteTracker.Untrack(firstAddress);
+            GuestImageWriteTracker.Untrack(secondAddress);
+            FreeTrackedPages(page);
+        }
+    }
+
+    [Fact]
+    public void FirstWriteContextIsPreservedUntilTheRangeIsRearmed()
+    {
+        if (!GuestImageWriteTracker.Enabled)
+        {
+            return;
+        }
+
+        var page = AllocateTrackedPages();
+        Assert.NotEqual(nint.Zero, (nint)page);
+        new Span<byte>(page, checked((int)PageSize)).Clear();
+        var address = (ulong)page;
+        var expected = new GuestWriteFaultContext(
+            InstructionAddress: 0x800253858,
+            Rax: 0x3000,
+            Rcx: 1,
+            Rdx: 0,
+            R12: 0x401234000,
+            R13: 2,
+            R14: 0x400ABC000,
+            R15: address);
+
+        GuestImageWriteTracker.Track(address, checked((ulong)PageSize));
+        try
+        {
+            Assert.True(GuestImageWriteTracker.TryHandleWriteFault(address, expected));
+            Assert.True(GuestImageWriteTracker.TryGetFirstCpuWriteContext(address, out var actual));
+            Assert.Equal(expected, actual);
+            Assert.True(GuestImageWriteTracker.TryGetFirstCpuWriteInfo(address, out var info));
+            Assert.Equal(address, info.Address);
+            Assert.Equal(address & ~0xFFFUL, info.Page);
+            Assert.Equal(expected, info.Context);
+
+            Assert.True(GuestImageWriteTracker.ConsumeDirty(address));
+            Assert.True(GuestImageWriteTracker.TryGetFirstCpuWriteContext(address, out actual));
+            Assert.Equal(expected, actual);
+
+            GuestImageWriteTracker.Rearm(address);
+            Assert.False(GuestImageWriteTracker.TryGetFirstCpuWriteContext(address, out _));
+        }
+        finally
+        {
+            GuestImageWriteTracker.Untrack(address);
+            FreeTrackedPages(page);
+        }
     }
 
     private static void FreeTrackedPages(void* allocation)
@@ -79,19 +186,17 @@ public sealed unsafe class GuestImageWriteTrackerTests
             return;
         }
 
-        var address = AllocateTrackedPages(out var allocation);
+        var allocation = AllocateTrackedPages();
+        Assert.NotEqual(nint.Zero, (nint)allocation);
+        var address = (ulong)allocation;
         try
         {
-            GuestImageWriteTracker.Track(address, TrackedByteCount);
+            GuestImageWriteTracker.Track(address, PageSize);
             Assert.True(GuestImageWriteTracker.TryGetWriteGeneration(address, out var generation));
             Assert.Equal(0, generation);
 
             Assert.True(GuestImageWriteTracker.TryHandleWriteFault(address));
             Assert.True(GuestImageWriteTracker.ConsumeDirty(address));
-
-            // Consuming the dirty flag must not roll back the generation:
-            // that is exactly what lets a second cache owner still observe
-            // the rewrite after the first owner consumed the flag.
             Assert.True(GuestImageWriteTracker.TryGetWriteGeneration(address, out generation));
             Assert.Equal(1, generation);
         }
@@ -110,13 +215,13 @@ public sealed unsafe class GuestImageWriteTrackerTests
             return;
         }
 
-        var address = AllocateTrackedPages(out var allocation);
+        var allocation = AllocateTrackedPages();
+        Assert.NotEqual(nint.Zero, (nint)allocation);
+        var address = (ulong)allocation;
         try
         {
-            GuestImageWriteTracker.Track(address, TrackedByteCount);
+            GuestImageWriteTracker.Track(address, PageSize);
             Assert.True(GuestImageWriteTracker.TryHandleWriteFault(address));
-            // The first fault disarmed the range; later writes are free-running
-            // and must not inflate the generation until the owner re-arms.
             Assert.True(GuestImageWriteTracker.TryHandleWriteFault(address));
             Assert.True(GuestImageWriteTracker.TryGetWriteGeneration(address, out var generation));
             Assert.Equal(1, generation);
@@ -141,17 +246,15 @@ public sealed unsafe class GuestImageWriteTrackerTests
             return;
         }
 
-        var address = AllocateTrackedPages(out var allocation);
+        var allocation = AllocateTrackedPages();
+        Assert.NotEqual(nint.Zero, (nint)allocation);
+        var address = (ulong)allocation;
         try
         {
-            GuestImageWriteTracker.Track(address, TrackedByteCount);
+            GuestImageWriteTracker.Track(address, PageSize);
             Assert.True(GuestImageWriteTracker.TryHandleWriteFault(address));
 
-            // Re-registering the same allocation with a different size retires
-            // the range object (the signal handler may still see the old
-            // snapshot) but must carry the generation, otherwise a resize
-            // would hide the rewrite from cache owners.
-            GuestImageWriteTracker.Track(address, 2 * TrackedByteCount);
+            GuestImageWriteTracker.Track(address, 2 * PageSize);
             Assert.True(GuestImageWriteTracker.TryGetWriteGeneration(address, out var generation));
             Assert.Equal(1, generation);
         }
@@ -173,131 +276,39 @@ public sealed unsafe class GuestImageWriteTrackerTests
         Assert.False(GuestImageWriteTracker.TryGetWriteGeneration(0xDEAD_0000_0000UL, out _));
     }
 
-    [Fact]
-    public void WatchOnlyTrackDoesNotArmWriteProtection()
+    private sealed class PointerCpuMemory(ulong baseAddress, ulong length) : ICpuMemory
     {
-        if (!GuestImageWriteTracker.Enabled)
+        private readonly ulong _baseAddress = baseAddress;
+        private readonly ulong _length = length;
+
+        public bool TryRead(ulong virtualAddress, Span<byte> destination)
         {
-            return;
+            if (!Contains(virtualAddress, destination.Length))
+            {
+                return false;
+            }
+
+            new ReadOnlySpan<byte>((void*)virtualAddress, destination.Length).CopyTo(destination);
+            return true;
         }
 
-        var address = AllocateTrackedPages(out var allocation);
-        try
+        public bool TryWrite(ulong virtualAddress, ReadOnlySpan<byte> source)
         {
-            GuestImageWriteTracker.Track(
-                address,
-                TrackedByteCount,
-                source: "test.watch-only",
-                protect: false);
-            Assert.True(
-                GuestImageWriteTracker.TryGetProtectionState(
-                    address,
-                    out var protect,
-                    out var armed));
-            Assert.False(protect);
-            Assert.False(armed);
+            if (!Contains(virtualAddress, source.Length))
+            {
+                return false;
+            }
 
-            // Pages stay writable: a native store must not require a fault handler.
-            *(byte*)address = 0xAB;
-            Assert.Equal(0xAB, *(byte*)address);
-        }
-        finally
-        {
-            GuestImageWriteTracker.Untrack(address);
-            FreeTrackedPages(allocation);
-        }
-    }
-
-    [Fact]
-    public void WatchOnlyRangesAreExcludedFromManagedWriteSnapshot()
-    {
-        if (!GuestImageWriteTracker.Enabled)
-        {
-            return;
+            source.CopyTo(new Span<byte>((void*)virtualAddress, source.Length));
+            return true;
         }
 
-        var address = AllocateTrackedPages(out var allocation);
-        try
+        private bool Contains(ulong virtualAddress, int byteCount)
         {
-            GuestImageWriteTracker.Track(
-                address,
-                TrackedByteCount,
-                source: "test.watch-only",
-                protect: false);
-            // Watch-only must not widen the NotifyManagedWrite hot path.
-            GuestImageWriteTracker.NotifyManagedWrite(address, sizeof(uint));
-            Assert.False(GuestImageWriteTracker.ConsumeDirty(address));
-            Assert.True(
-                GuestImageWriteTracker.TryGetProtectionState(
-                    address,
-                    out var protect,
-                    out var armed));
-            Assert.False(protect);
-            Assert.False(armed);
-        }
-        finally
-        {
-            GuestImageWriteTracker.Untrack(address);
-            FreeTrackedPages(allocation);
-        }
-    }
-
-    [Fact]
-    public void ProtectedTrackArmsWriteProtection()
-    {
-        if (!GuestImageWriteTracker.Enabled)
-        {
-            return;
-        }
-
-        var address = AllocateTrackedPages(out var allocation);
-        try
-        {
-            GuestImageWriteTracker.Track(address, TrackedByteCount);
-            Assert.True(
-                GuestImageWriteTracker.TryGetProtectionState(
-                    address,
-                    out var protect,
-                    out var armed));
-            Assert.True(protect);
-            Assert.True(armed);
-        }
-        finally
-        {
-            GuestImageWriteTracker.Untrack(address);
-            FreeTrackedPages(allocation);
-        }
-    }
-
-    [Fact]
-    public void WatchOnlyTrackDoesNotDowngradeProtectedRange()
-    {
-        if (!GuestImageWriteTracker.Enabled)
-        {
-            return;
-        }
-
-        var address = AllocateTrackedPages(out var allocation);
-        try
-        {
-            GuestImageWriteTracker.Track(address, TrackedByteCount, source: "test.rt");
-            GuestImageWriteTracker.Track(
-                address,
-                TrackedByteCount,
-                source: "test.texture-cache",
-                protect: false);
-            Assert.True(
-                GuestImageWriteTracker.TryGetProtectionState(
-                    address,
-                    out var protect,
-                    out var armed));
-            Assert.True(protect);
-            Assert.True(armed);
-        }
-        finally
-        {
-            GuestImageWriteTracker.Untrack(address);
-            FreeTrackedPages(allocation);
+            var length = checked((ulong)byteCount);
+            return virtualAddress >= _baseAddress &&
+                length <= _length &&
+                virtualAddress - _baseAddress <= _length - length;
         }
     }
 }

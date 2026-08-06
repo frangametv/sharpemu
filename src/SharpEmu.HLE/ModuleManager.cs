@@ -12,6 +12,8 @@ public sealed class ModuleManager : IModuleManager
     private readonly ConcurrentDictionary<string, Delegate> _dispatchTable = new(StringComparer.Ordinal);
     private readonly ConcurrentDictionary<string, ExportedFunction> _exportTable = new(StringComparer.Ordinal);
     private readonly ConcurrentDictionary<string, ExportedFunction> _exportNameTable = new(StringComparer.Ordinal);
+    private readonly ConcurrentDictionary<string, DataSymbolRegistration> _dataSymbolTable = new(StringComparer.Ordinal);
+    private readonly ConcurrentDictionary<string, DataSymbolRegistration> _dataSymbolNameTable = new(StringComparer.Ordinal);
     private readonly object _registrationGate = new();
     private readonly HashSet<Assembly> _warmupAssemblies = new();
     private bool _isFrozen;
@@ -30,6 +32,12 @@ public sealed class ModuleManager : IModuleManager
             var registeredCount = 0;
             foreach (var export in exports)
             {
+                if (_dataSymbolTable.ContainsKey(export.Nid))
+                {
+                    throw new InvalidOperationException(
+                        $"NID '{export.Nid}' ({export.Name}) is already registered as a data symbol.");
+                }
+
                 if (!_dispatchTable.TryAdd(export.Nid, export.Function))
                 {
                     Console.Error.WriteLine($"[HLE] Duplicate NID '{export.Nid}' ({export.Name}) — already registered, skipping.");
@@ -41,6 +49,41 @@ public sealed class ModuleManager : IModuleManager
                 // The warm sweep in Freeze() covers every assembly that contributed a
                 // handler (generated thunks resolve to their home assembly too).
                 _warmupAssemblies.Add(export.Function.Method.Module.Assembly);
+                registeredCount++;
+            }
+
+            return registeredCount;
+        }
+    }
+
+    public int RegisterDataSymbols(IReadOnlyList<DataSymbolRegistration> registrations)
+    {
+        ArgumentNullException.ThrowIfNull(registrations);
+
+        lock (_registrationGate)
+        {
+            if (_isFrozen)
+            {
+                throw new InvalidOperationException("Module registration is frozen.");
+            }
+
+            var registeredCount = 0;
+            foreach (var registration in registrations)
+            {
+                if (_exportTable.ContainsKey(registration.Nid) || _dispatchTable.ContainsKey(registration.Nid))
+                {
+                    throw new InvalidOperationException(
+                        $"NID '{registration.Nid}' ({registration.Name}) is already registered as a callable export.");
+                }
+
+                if (!_dataSymbolTable.TryAdd(registration.Nid, registration))
+                {
+                    Console.Error.WriteLine(
+                        $"[HLE] Duplicate data NID '{registration.Nid}' ({registration.Name}) — already registered, skipping.");
+                    continue;
+                }
+
+                _dataSymbolNameTable.TryAdd(registration.Name, registration);
                 registeredCount++;
             }
 
@@ -62,6 +105,7 @@ public sealed class ModuleManager : IModuleManager
     // Run every HLE type's initializer and JIT its methods here first, on a host thread.
     private void WarmHleTypeInitializers()
     {
+        var warmupStarted = System.Diagnostics.Stopwatch.GetTimestamp();
         Assembly[] assemblies;
         lock (_registrationGate)
         {
@@ -76,6 +120,7 @@ public sealed class ModuleManager : IModuleManager
         var failed = 0;
         var jitted = 0;
         var jitFailed = 0;
+        var methodsToPrepare = new List<RuntimeMethodHandle>(24_000);
         foreach (var assembly in assemblies)
         {
             Type[] types;
@@ -109,7 +154,9 @@ public sealed class ModuleManager : IModuleManager
                     failed++;
                 }
 
-                // Force-JIT (not execute) every method so no guest thread compiles one first.
+                // Collect every method after all class constructors have run. The
+                // runtime supports concurrent JIT compilation, but class initializer
+                // order is observable and therefore remains deliberately serial.
                 MethodBase[] members;
                 try
                 {
@@ -131,8 +178,7 @@ public sealed class ModuleManager : IModuleManager
 
                     try
                     {
-                        RuntimeHelpers.PrepareMethod(member.MethodHandle);
-                        jitted++;
+                        methodsToPrepare.Add(member.MethodHandle);
                     }
                     catch
                     {
@@ -142,8 +188,63 @@ public sealed class ModuleManager : IModuleManager
             }
         }
 
+        var warmupWorkers = GetWarmupWorkerCount();
+        if (warmupWorkers == 1)
+        {
+            foreach (var methodHandle in methodsToPrepare)
+            {
+                try
+                {
+                    RuntimeHelpers.PrepareMethod(methodHandle);
+                    jitted++;
+                }
+                catch
+                {
+                    jitFailed++;
+                }
+            }
+        }
+        else
+        {
+            Parallel.ForEach(
+                methodsToPrepare,
+                new ParallelOptions { MaxDegreeOfParallelism = warmupWorkers },
+                methodHandle =>
+                {
+                    try
+                    {
+                        RuntimeHelpers.PrepareMethod(methodHandle);
+                        Interlocked.Increment(ref jitted);
+                    }
+                    catch
+                    {
+                        Interlocked.Increment(ref jitFailed);
+                    }
+                });
+        }
+
+        var warmupSeconds = System.Diagnostics.Stopwatch.GetElapsedTime(warmupStarted).TotalSeconds;
+
         Console.Error.WriteLine(
-            $"[HLE] Warmed {warmed} type initializers ({failed} threw) + JIT-compiled {jitted} methods ({jitFailed} skipped) across {assemblies.Length} HLE assemblies, plus {bclWarmed} framework type initializers.");
+            $"[HLE] Warmed {warmed} type initializers ({failed} threw) + JIT-compiled {jitted} methods ({jitFailed} skipped) across {assemblies.Length} HLE assemblies, plus {bclWarmed} framework type initializers using {warmupWorkers} worker(s) in {warmupSeconds:F3}s.");
+    }
+
+    private static int GetWarmupWorkerCount()
+    {
+        return SelectWarmupWorkerCount(
+            Environment.ProcessorCount,
+            Environment.GetEnvironmentVariable("SHARPEMU_HLE_WARMUP_WORKERS"));
+    }
+
+    internal static int SelectWarmupWorkerCount(int processorCount, string? configuredValue)
+    {
+        var hostLimit = Math.Max(1, processorCount);
+        if (int.TryParse(configuredValue, out var configuredWorkers))
+        {
+            return Math.Clamp(configuredWorkers, 1, hostLimit);
+        }
+
+        return Math.Min(hostLimit, 8);
     }
 
     // Framework .cctors too (but not JIT — the BCL is too large).
@@ -260,6 +361,18 @@ public sealed class ModuleManager : IModuleManager
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(exportName);
         return _exportNameTable.TryGetValue(exportName, out export!);
+    }
+
+    public bool TryGetDataSymbol(string nid, out DataSymbolRegistration registration)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(nid);
+        return _dataSymbolTable.TryGetValue(nid, out registration!);
+    }
+
+    public bool TryGetDataSymbolByName(string name, out DataSymbolRegistration registration)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(name);
+        return _dataSymbolNameTable.TryGetValue(name, out registration!);
     }
 
     public OrbisGen2Result Dispatch(string nid, CpuContext context)

@@ -1,0 +1,53 @@
+{
+  "executable_sha256": "1c2924a5c0fa156299cda9e9ba55433690f7372f809464c0fc4ba6e33d3a569b",
+  "format": "sharpemu-ghidra-selected-nid-functions-v1",
+  "function_count": 2,
+  "functions": [
+    {
+      "external": false,
+      "function_body_addresses": 77,
+      "function_body_sha256": "f588ce6834af24e75e90a09a5982623072ad70f86c3f1921acefeb6eea2fb6e2",
+      "function_entry": "00000650",
+      "function_name": "gDm5a6GSE94#F#A",
+      "function_present": true,
+      "instruction_count": 22,
+      "nid": "gDm5a6GSE94",
+      "result_file": "libScePlayerInvitationDialog-chunk-00.result.tsv",
+      "symbol": "gDm5a6GSE94#F#A",
+      "symbol_address": "00000650",
+      "thunk": false,
+      "thunk_target": "",
+      "thunk_target_external": null,
+      "wave": "wave2"
+    },
+    {
+      "external": false,
+      "function_body_addresses": 120,
+      "function_body_sha256": "1255b1f879acf89d0509db882e1c8dd8400bddd663a60b58ac738c02827bdb77",
+      "function_entry": "00000430",
+      "function_name": "kFhuwHrIUqs#F#A",
+      "function_present": true,
+      "instruction_count": 33,
+      "nid": "kFhuwHrIUqs",
+      "result_file": "libScePlayerInvitationDialog-chunk-00.result.tsv",
+      "symbol": "kFhuwHrIUqs#F#A",
+      "symbol_address": "00000430",
+      "thunk": false,
+      "thunk_target": "",
+      "thunk_target_external": null,
+      "wave": "wave2"
+    }
+  ],
+  "ghidra_version": "12.1.2_PUBLIC_20260605",
+  "missing": [],
+  "program_name": "libScePlayerInvitationDialog.sprx",
+  "provenance": {
+    "audit_sha256": "a28951db44df6f026715f9ab8e47b992cea172e396bc6d80b4383e00c14f2be6",
+    "evidence_policy": "Ghidra analysis of exact Gen5 provider ELFs only; no Kyty-derived contracts or implementations.",
+    "excluded_nids": [],
+    "recommendations_sha256": "f059a17f1440499c499311093ac225a428f19c5a8776c41ca609aecd670df7c5",
+    "summary_sha256": "e1e93ff2f5967daa1d6f838b08f4490de7144118032e0d4e413cb767ab50e0a2"
+  },
+  "target_count": 2,
+  "without_functions": []
+}

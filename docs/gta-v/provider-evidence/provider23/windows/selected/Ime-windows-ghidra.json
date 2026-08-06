@@ -1,0 +1,38 @@
+{
+  "executable_sha256": "a9fb46b1809ab3f849b82b98b23c273b28e4794a4380185c3dcc472f06ec446e",
+  "format": "sharpemu-ghidra-selected-nid-functions-v1",
+  "function_count": 1,
+  "functions": [
+    {
+      "external": false,
+      "function_body_addresses": 377,
+      "function_body_sha256": "e92a81f9970e7bd9f82ef3a38a3108ad59b0ed1c1263f2480dc708633e1eb408",
+      "function_entry": "00005590",
+      "function_name": "PMVehSlfZ94#G#A",
+      "function_present": true,
+      "instruction_count": 96,
+      "log_file": "audit-07-Ime.log",
+      "nid": "PMVehSlfZ94",
+      "result_file": "07-Ime.result.tsv",
+      "symbol": "PMVehSlfZ94#G#A",
+      "symbol_address": "00005590",
+      "thunk": false,
+      "thunk_target": "",
+      "thunk_target_external": null
+    }
+  ],
+  "ghidra_version": "12.1.2_PUBLIC_20260605",
+  "missing": [],
+  "program_name": "libSceIme.sprx",
+  "provenance": {
+    "audit_script_sha256": "f946f435e38dc99db306165473b180209d5db7e0581c6c52d3b417510f87dfa9",
+    "computer": "DESKTOP-RAAKAQJ",
+    "evidence_policy": "Ghidra analysis of exact Gen5 provider ELFs only; no Kyty or other emulator-derived source, contracts, or implementations.",
+    "log_sha256": "dc82d4538f1d2dcd2f486e367cb62548be0b77fb33c8e27827bb261614ecaa3f",
+    "plan_sha256": "7b98c992e0d65d55d9743b30b320ad197f0bc52bb803d5654398a701a814d831",
+    "provider_role": "primary",
+    "result_sha256": "a444a2b1d1226c3d583034e8be24ad21e5bed5b9d369fb3f3f86082845de590e"
+  },
+  "target_count": 1,
+  "without_functions": []
+}

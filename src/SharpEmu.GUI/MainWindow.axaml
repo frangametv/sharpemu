@@ -147,6 +147,7 @@ SPDX-License-Identifier: GPL-2.0-or-later
                    PlaceholderText="{Binding [Library.SearchWatermark], Source={x:Static local:Localization.Instance}}"
                    Width="240"
                    VerticalAlignment="Center" />
+          <Button x:Name="SystemUiButton" Classes="ghost" Content="Boot System UI…" VerticalAlignment="Center" />
           <Button x:Name="OpenFileButton"
                   Classes="ghost"
                   Content="{Binding [Library.OpenFile], Source={x:Static local:Localization.Instance}}"

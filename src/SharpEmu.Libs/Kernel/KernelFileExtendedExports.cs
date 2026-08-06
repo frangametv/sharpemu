@@ -2,11 +2,16 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 
 using SharpEmu.HLE;
+using SharpEmu.Libs.Media;
 using System.Buffers.Binary;
 using System.Collections.Concurrent;
 using System.Threading;
 
 namespace SharpEmu.Libs.Kernel;
+
+// Attribution: substantial PS5 extended-file compatibility portions in this file were
+// originally authored by @xnetcat and later adapted in PR #216. Source snapshot:
+// https://github.com/xnetcat/sharpemu/tree/2497ea6799432ac2385a50f739eff2ce922d6fd4
 
 /// <summary>
 /// Positional and scatter/gather file I/O, synchronization, renaming, fcntl,
@@ -86,9 +91,52 @@ public static partial class KernelMemoryCompatExports
             return (int)OrbisGen2Result.ORBIS_GEN2_ERROR_INVALID_ARGUMENT;
         }
 
+        LogIoTrace(
+            "pread",
+            stream.Name,
+            $"fd={fd} offset={offset} req={requested} read={read} " +
+            $"preview='{PreviewIoBytes(buffer, read, 64)}' hex={PreviewIoHex(buffer, read, 32)}");
+
         if (read > 0 && !ctx.Memory.TryWrite(bufferAddress, buffer.AsSpan(0, read)))
         {
+            LogIoTrace(
+                "pread",
+                stream.Name,
+                $"fd={fd} offset={offset} req={requested} read={read} " +
+                $"guest=0x{bufferAddress:X16} result=memory_fault");
             return (int)OrbisGen2Result.ORBIS_GEN2_ERROR_MEMORY_FAULT;
+        }
+
+        if (read > 0)
+        {
+            try
+            {
+                _ = ctx.TryReadUInt64(ctx[CpuRegister.Rsp], out var returnRip);
+                // GTA V's observed VFS pread wrapper saves its caller return at
+                // rsp+0x50. Capture it only as best-effort Bink diagnostics; a
+                // failed guest read leaves the value zero and never affects I/O.
+                _ = ctx.TryReadUInt64(ctx[CpuRegister.Rsp] + 0x50, out var callerReturnRip);
+                // Detection is observational: pread still returns the exact host
+                // bytes/count. A validated result exposes Skip/Dummy/Native policy
+                // for a later caller-contract A/B without changing this syscall.
+                _ = HostMovieBridge.ObserveGuestMovieRange(
+                    stream.Name,
+                    stream.Length,
+                    fd,
+                    offset,
+                    requested,
+                    read,
+                    bufferAddress,
+                    ctx.Rip,
+                    returnRip,
+                    callerReturnRip,
+                    buffer.AsSpan(0, read));
+            }
+            catch (Exception ex) when (ex is IOException or NotSupportedException or ObjectDisposedException)
+            {
+                // The file read and guest write already succeeded. Diagnostics
+                // must never change positional-I/O behavior.
+            }
         }
 
         ctx[CpuRegister.Rax] = unchecked((ulong)read);

@@ -1,0 +1,36 @@
+{
+  "executable_sha256": "c7f70f6582a315df1f1f5541100bf83c78f179ce8736e6a2dca39acc0ee1c95e",
+  "format": "sharpemu-ghidra-selected-nid-functions-v1",
+  "function_count": 1,
+  "functions": [
+    {
+      "external": false,
+      "function_body_addresses": 183,
+      "function_body_sha256": "70c588f1f34ccdeab5210e96a0aa22d4b57ab4ebf8950de438deec34ebd8f8ba",
+      "function_entry": "00000880",
+      "function_name": "-qLsfDAywIY#C#A",
+      "function_present": true,
+      "instruction_count": 53,
+      "nid": "-qLsfDAywIY",
+      "result_file": "libSceAjm-chunk-00.result.tsv",
+      "symbol": "-qLsfDAywIY#C#A",
+      "symbol_address": "00000880",
+      "thunk": false,
+      "thunk_target": "",
+      "thunk_target_external": null,
+      "wave": "wave2"
+    }
+  ],
+  "ghidra_version": "12.1.2_PUBLIC_20260605",
+  "missing": [],
+  "program_name": "libSceAjm.sprx",
+  "provenance": {
+    "audit_sha256": "a28951db44df6f026715f9ab8e47b992cea172e396bc6d80b4383e00c14f2be6",
+    "evidence_policy": "Ghidra analysis of exact Gen5 provider ELFs only; no Kyty-derived contracts or implementations.",
+    "excluded_nids": [],
+    "recommendations_sha256": "f059a17f1440499c499311093ac225a428f19c5a8776c41ca609aecd670df7c5",
+    "summary_sha256": "e1e93ff2f5967daa1d6f838b08f4490de7144118032e0d4e413cb767ab50e0a2"
+  },
+  "target_count": 1,
+  "without_functions": []
+}

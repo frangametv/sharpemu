@@ -13,6 +13,140 @@ namespace SharpEmu.Libs.Tests.Ampr;
 public sealed class AprStreamingContractTests
 {
     [Fact]
+    public void ResolveWithEmptyPrefix_UsesRecoveredOutputWidthsAndLow32Count()
+    {
+        const ulong memoryBase = 0x1_0000_0000;
+        const ulong prefixAddress = memoryBase + 0x100;
+        const ulong pathListAddress = memoryBase + 0x200;
+        const ulong pathAddress = memoryBase + 0x300;
+        const ulong idsAddress = memoryBase + 0x800;
+        const ulong sizesAddress = memoryBase + 0x900;
+        byte[] fileContents = [1, 3, 5, 7, 9];
+        var temporaryDirectory = Directory.CreateTempSubdirectory("sharpemu-apr-empty-prefix-");
+        var hostPath = Path.Combine(temporaryDirectory.FullName, "asset.bin");
+        var mountPoint = $"/sharpemu_apr_empty_{Guid.NewGuid():N}";
+
+        try
+        {
+            File.WriteAllBytes(hostPath, fileContents);
+            KernelMemoryCompatExports.RegisterGuestPathMount(mountPoint, temporaryDirectory.FullName);
+            var memory = new FakeCpuMemory(memoryBase, 0x2000);
+            var context = new CpuContext(memory, Generation.Gen5);
+            memory.WriteCString(prefixAddress, string.Empty);
+            memory.WriteCString(pathAddress, $"{mountPoint}/asset.bin");
+            WriteUInt64(memory, pathListAddress, pathAddress);
+            context[CpuRegister.Rdi] = prefixAddress;
+            context[CpuRegister.Rsi] = pathListAddress;
+            context[CpuRegister.Rdx] = 0x1_0000_0001;
+            context[CpuRegister.Rcx] = idsAddress;
+            context[CpuRegister.R8] = sizesAddress;
+
+            Assert.Equal(
+                0,
+                Gen5KernelContractExports.AprResolveFilepathsWithPrefixToIdsAndFileSizes(context));
+
+            Assert.NotEqual(uint.MaxValue, ReadUInt32(memory, idsAddress));
+            Assert.Equal((ulong)fileContents.Length, ReadUInt64(memory, sizesAddress));
+        }
+        finally
+        {
+            KernelMemoryCompatExports.UnregisterGuestPathMount(mountPoint);
+            temporaryDirectory.Delete(recursive: true);
+        }
+    }
+
+    [Fact]
+    public void ResolveWithPrefix_CombinesPathsAndContinuesPastMissingFiles()
+    {
+        const ulong memoryBase = 0x1_0000_0000;
+        const ulong prefixAddress = memoryBase + 0x100;
+        const ulong pathListAddress = memoryBase + 0x200;
+        const ulong firstPathAddress = memoryBase + 0x300;
+        const ulong secondPathAddress = memoryBase + 0x400;
+        const ulong idsAddress = memoryBase + 0x800;
+        const ulong sizesAddress = memoryBase + 0x900;
+        byte[] fileContents = [2, 4, 6, 8];
+        var temporaryDirectory = Directory.CreateTempSubdirectory("sharpemu-apr-prefix-");
+        var hostPath = Path.Combine(temporaryDirectory.FullName, "asset.bin");
+        var mountPoint = $"/sharpemu_apr_prefix_{Guid.NewGuid():N}";
+
+        try
+        {
+            File.WriteAllBytes(hostPath, fileContents);
+            KernelMemoryCompatExports.RegisterGuestPathMount(mountPoint, temporaryDirectory.FullName);
+            var memory = new FakeCpuMemory(memoryBase, 0x2000);
+            var context = new CpuContext(memory, Generation.Gen5);
+            memory.WriteCString(prefixAddress, mountPoint + "/");
+            memory.WriteCString(firstPathAddress, "asset.bin");
+            memory.WriteCString(secondPathAddress, "missing.bin");
+            WriteUInt64(memory, pathListAddress, firstPathAddress);
+            WriteUInt64(memory, pathListAddress + sizeof(ulong), secondPathAddress);
+            context[CpuRegister.Rdi] = prefixAddress;
+            context[CpuRegister.Rsi] = pathListAddress;
+            context[CpuRegister.Rdx] = 2;
+            context[CpuRegister.Rcx] = idsAddress;
+            context[CpuRegister.R8] = sizesAddress;
+
+            Assert.Equal(
+                0,
+                Gen5KernelContractExports.AprResolveFilepathsWithPrefixToIdsAndFileSizes(context));
+
+            Assert.NotEqual(uint.MaxValue, ReadUInt32(memory, idsAddress));
+            Assert.Equal(uint.MaxValue, ReadUInt32(memory, idsAddress + sizeof(uint)));
+            Assert.Equal((ulong)fileContents.Length, ReadUInt64(memory, sizesAddress));
+            Assert.Equal(0UL, ReadUInt64(memory, sizesAddress + sizeof(ulong)));
+        }
+        finally
+        {
+            KernelMemoryCompatExports.UnregisterGuestPathMount(mountPoint);
+            temporaryDirectory.Delete(recursive: true);
+        }
+    }
+
+    [Theory]
+    [InlineData(true, false, false)]
+    [InlineData(false, true, false)]
+    [InlineData(false, false, true)]
+    public void ResolveWithRequiredNullPointer_ReturnsKernelEfault(
+        bool nullPrefix,
+        bool nullPathList,
+        bool nullSizes)
+    {
+        const ulong memoryBase = 0x1_0000_0000;
+        const ulong prefixAddress = memoryBase + 0x100;
+        const ulong pathListAddress = memoryBase + 0x200;
+        const ulong sizesAddress = memoryBase + 0x300;
+        var memory = new FakeCpuMemory(memoryBase, 0x1000);
+        var context = new CpuContext(memory, Generation.Gen5);
+        context[CpuRegister.Rdi] = nullPrefix ? 0 : prefixAddress;
+        context[CpuRegister.Rsi] = nullPathList ? 0 : pathListAddress;
+        context[CpuRegister.Rdx] = 1;
+        context[CpuRegister.R8] = nullSizes ? 0 : sizesAddress;
+
+        Assert.Equal(
+            unchecked((int)0x8002000E),
+            Gen5KernelContractExports.AprResolveFilepathsWithPrefixToIdsAndFileSizes(context));
+    }
+
+    [Theory]
+    [InlineData(0UL)]
+    [InlineData(1025UL)]
+    public void ResolveWithInvalidCount_ReturnsInvalidArgument(ulong count)
+    {
+        const ulong memoryBase = 0x1_0000_0000;
+        var memory = new FakeCpuMemory(memoryBase, 0x1000);
+        var context = new CpuContext(memory, Generation.Gen5);
+        context[CpuRegister.Rdi] = memoryBase + 0x100;
+        context[CpuRegister.Rsi] = memoryBase + 0x200;
+        context[CpuRegister.Rdx] = count;
+        context[CpuRegister.R8] = memoryBase + 0x300;
+
+        Assert.Equal(
+            (int)OrbisGen2Result.ORBIS_GEN2_ERROR_INVALID_ARGUMENT,
+            Gen5KernelContractExports.AprResolveFilepathsWithPrefixToIdsAndFileSizes(context));
+    }
+
+    [Fact]
     public void ResolveStatAndReadFile_UsesSharedAprFileId()
     {
         const ulong memoryBase = 0x1_0000_0000;
@@ -71,6 +205,7 @@ public sealed class AprStreamingContractTests
             context[CpuRegister.Rdx] = 0x100;
 
             Assert.Equal(0, AmprExports.CommandBufferConstructor(context));
+            Assert.Equal(0, AmprExports.CommandBufferSetBuffer(context));
 
             const ulong readOffset = 2;
             const ulong readSize = 4;
@@ -386,4 +521,5 @@ public sealed class AprStreamingContractTests
         BinaryPrimitives.WriteUInt64LittleEndian(bytes, value);
         Assert.True(memory.TryWrite(address, bytes));
     }
+
 }

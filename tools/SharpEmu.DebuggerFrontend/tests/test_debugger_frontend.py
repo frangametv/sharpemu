@@ -280,7 +280,7 @@ class FrontendHttpTests(unittest.TestCase):
             })
             self.assertTrue(launched["connected"])
             self.assertTrue(launched["emulator"]["running"])
-            self.assertEqual(str(eboot), launched["emulator"]["eboot"])
+            self.assertEqual(str(eboot.resolve()), launched["emulator"]["eboot"])
 
             stopped = self.post("/api/stop-emulator", {})
             self.assertFalse(stopped["connected"])

@@ -32,6 +32,7 @@ public interface ICpuDispatcher
         Generation generation,
         IReadOnlyDictionary<ulong, string>? importStubs = null,
         IReadOnlyDictionary<string, ulong>? runtimeSymbols = null,
+        IReadOnlyDictionary<string, ulong>? runtimeDataSymbols = null,
         string processImageName = "eboot.bin",
         CpuExecutionOptions executionOptions = default);
 
@@ -40,6 +41,7 @@ public interface ICpuDispatcher
         Generation generation,
         IReadOnlyDictionary<ulong, string>? importStubs = null,
         IReadOnlyDictionary<string, ulong>? runtimeSymbols = null,
+        IReadOnlyDictionary<string, ulong>? runtimeDataSymbols = null,
         string moduleName = "module",
         CpuExecutionOptions executionOptions = default);
 }

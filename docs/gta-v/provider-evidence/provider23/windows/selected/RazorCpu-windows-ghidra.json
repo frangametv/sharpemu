@@ -1,0 +1,72 @@
+{
+  "executable_sha256": "3f7958cd6c115830ebd151ef3d5daf0bdd898dd89e93c5612d8f7546d9254fe9",
+  "format": "sharpemu-ghidra-selected-nid-functions-v1",
+  "function_count": 3,
+  "functions": [
+    {
+      "external": false,
+      "function_body_addresses": 1264,
+      "function_body_sha256": "55c1837b78f85f92f6e6f77a0ef9f3e5b5eec021a164e258bdc6d4db6731dc1a",
+      "function_entry": "00006e00",
+      "function_name": "9FowWFMEIM8#C#A",
+      "function_present": true,
+      "instruction_count": 331,
+      "log_file": "audit-12-RazorCpu.log",
+      "nid": "9FowWFMEIM8",
+      "result_file": "12-RazorCpu.result.tsv",
+      "symbol": "9FowWFMEIM8#C#A",
+      "symbol_address": "00006e00",
+      "thunk": false,
+      "thunk_target": "",
+      "thunk_target_external": null
+    },
+    {
+      "external": false,
+      "function_body_addresses": 1206,
+      "function_body_sha256": "63ff4d717d0b7efa6c38ad656950550e5f34be800fe3095c40fa0f2fcae68106",
+      "function_entry": "00007810",
+      "function_name": "KP+TBWGHlgs#C#A",
+      "function_present": true,
+      "instruction_count": 315,
+      "log_file": "audit-12-RazorCpu.log",
+      "nid": "KP+TBWGHlgs",
+      "result_file": "12-RazorCpu.result.tsv",
+      "symbol": "KP+TBWGHlgs#C#A",
+      "symbol_address": "00007810",
+      "thunk": false,
+      "thunk_target": "",
+      "thunk_target_external": null
+    },
+    {
+      "external": false,
+      "function_body_addresses": 1312,
+      "function_body_sha256": "0ba5c62e3f8f8ba9092759919b1d3ce167bf64b4e3851c6f1ae5d5b993b90130",
+      "function_entry": "000072f0",
+      "function_name": "dnEdyY4+klQ#C#A",
+      "function_present": true,
+      "instruction_count": 334,
+      "log_file": "audit-12-RazorCpu.log",
+      "nid": "dnEdyY4+klQ",
+      "result_file": "12-RazorCpu.result.tsv",
+      "symbol": "dnEdyY4+klQ#C#A",
+      "symbol_address": "000072f0",
+      "thunk": false,
+      "thunk_target": "",
+      "thunk_target_external": null
+    }
+  ],
+  "ghidra_version": "12.1.2_PUBLIC_20260605",
+  "missing": [],
+  "program_name": "libSceRazorCpu.sprx",
+  "provenance": {
+    "audit_script_sha256": "f946f435e38dc99db306165473b180209d5db7e0581c6c52d3b417510f87dfa9",
+    "computer": "DESKTOP-RAAKAQJ",
+    "evidence_policy": "Ghidra analysis of exact Gen5 provider ELFs only; no Kyty or other emulator-derived source, contracts, or implementations.",
+    "log_sha256": "20ea150c474fdfccea6d2ce079495bec5d3aa1d7883af89762c0bc694c8c716b",
+    "plan_sha256": "7b98c992e0d65d55d9743b30b320ad197f0bc52bb803d5654398a701a814d831",
+    "provider_role": "primary",
+    "result_sha256": "351b4ff860da48e636ace7a44513d8d1ff4113b4aec9d81565bae11de07b62fd"
+  },
+  "target_count": 3,
+  "without_functions": []
+}

@@ -1,0 +1,483 @@
+{
+  "schema_version": 1,
+  "run": {
+    "source": "ASTRO_BOT_UNRESOLVED_NIDS.csv pre-implementation snapshot plus success-unmasked runtime imports",
+    "created_at": "2026-07-17T08:26:57Z",
+    "completed_at": "2026-07-17T11:55:18Z",
+    "followup_completed_at": "2026-07-18T02:43:38Z",
+    "base_sha": "2e00076b244442487b59d1cbbfe5f5b677b525ae",
+    "integration_branch": "codex/astro-nid-swarm",
+    "integration_sha": "61cea567975317f6c839183feecd75a39dd9f744",
+    "games": ["ASTRO BOT", "Dreaming Sarah"],
+    "final_runtime": {
+      "run": "artifacts/astro-bot/runs/20260717-074330-all-nids-setrays/run.json",
+      "log": "artifacts/astro-bot/runs/20260717-074330-all-nids-setrays/attempt-02.log",
+      "milestone": "GAME: Level has started: title_controller_ship",
+      "unresolved_nids": ["WAzWTZm1H+I"],
+      "excluded_subsystem": "SaveData",
+      "audio_failures": 0,
+      "native_exceptions": 0
+    },
+    "followup_runtime": {
+      "run": "artifacts/astro-bot/runs/20260717-224009-savedata-transferring-mount-pass/run.json",
+      "log": "artifacts/astro-bot/runs/20260717-224009-savedata-transferring-mount-pass/attempt-01.log",
+      "milestone": "savedata.transferring_mount",
+      "request": {
+        "user_id": 268435456,
+        "title_id": "PPSA01325",
+        "directory": "sce_sdmemory",
+        "fingerprint": "non-null"
+      },
+      "result": "0x809F0008 source save not found",
+      "unresolved_nids": [],
+      "fatal_or_native_errors": 0,
+      "known_rendering_regression": "opening art followed by black frame; unchanged from pinned base"
+    },
+    "regressions": [
+      {
+        "game": "Dreaming Sarah",
+        "passed": true,
+        "run": "artifacts/astro-bot/runs/20260717-080215-dreaming-sarah-final-gate-c2-boot/run.json",
+        "log": "artifacts/astro-bot/runs/20260717-080215-dreaming-sarah-final-gate-c2-boot/attempt-01.log",
+        "milestone": "----END C2 BOOT----",
+        "elapsed_seconds": 13.762,
+        "completed_resources": 58,
+        "unresolved_nids": [],
+        "fatal_or_native_errors": 0,
+        "published_binary_sha256": "ff0a992b900b1bb748602fc513fab0fdde3eb96d28509b70f42d6ea836b4cedd"
+      }
+    ],
+    "success_unmasked_nids": [
+      {"nid": "SUEVes8gvmw", "symbol": "sceRudpSetEventHandler"},
+      {"nid": "Sygnk9dr5WQ", "symbol": "sceShareRegisterContentEventCallback"},
+      {"nid": "6PBNpsgyaxw", "symbol": "sceRudpEnableInternalIOThread"},
+      {"nid": "VlBT16890mA", "symbol": "sceAudioPropagationSystemSetRays"}
+    ],
+    "supporting_lifecycle_exports": [
+      {"nid": "3hBvwqEwqj8", "symbol": "sceRudpEnd", "commit": "6fa70b1"},
+      {"nid": "0IL1keINExQ", "symbol": "sceShareTerminate", "commit": "4f191f8"}
+    ],
+    "validation": {
+      "libs": "419 passed",
+      "shader_compiler": "27 passed",
+      "source_generators": "33 passed",
+      "registration_audit": "21 of 21 target NIDs registered exactly once",
+      "followup_libs": "567 passed",
+      "followup_shader_compiler": "34 passed",
+      "followup_source_generators": "33 passed",
+      "followup_release_osx_x64": "passed with zero warnings and errors",
+      "format": "18 changed C# files verified; pre-existing AgcExports.cs formatting debt excluded",
+      "diff_check": "passed"
+    }
+  },
+  "items": [
+    {
+      "nid": "ZIXln2K3XMk",
+      "symbol": "sceAcmContextCreate",
+      "component": "ACM",
+      "library": "libSceAcm",
+      "generation": "Gen5",
+      "cluster": "acm",
+      "observations": [{"game": "ASTRO BOT", "calls": 1, "source": "ASTRO_BOT_UNRESOLVED_NIDS.csv"}],
+      "status": "game-verified",
+      "priority": {"calls": 1, "criticality": "boot-path", "cross_game_fanout": 1},
+      "evidence": {"aerolib_name": "sceAcmContextCreate", "binary_hash": "9628f08eb81939d77192af7e983f7414779fe7f9c277bb28b08cddf49c7f445f", "reference_functions": ["decrypted libSceAcm.sprx export"], "call_sites": [], "confidence": "high", "conflicts": []},
+      "contract": {"signature": "int sceAcmContextCreate(int32_t *context)", "returns": ["firmware ACM errors and success"], "output_writes": ["initializes caller slot before device open; writes descriptor on success"], "validation_rules": ["null/unwritable output rejected"], "state_transitions": ["allocates one synchronized ACM descriptor"], "ownership": ["caller owns output slot"], "synchronization": ["descriptor allocator lock"]},
+      "implementation": {"worktree": "/Users/mcruz/.codex/worktrees/sharpemu-astro-font-nids", "branch": "codex/astro-nid-swarm", "commit": "829ba5f", "files": ["src/SharpEmu.Libs/Acm/AcmExports.cs", "tests/SharpEmu.Libs.Tests/Acm/AcmExportsTests.cs"]},
+      "validation": {"branch": "focused ACM tests passed", "integration": "exact suites passed at 61cea56", "games": [{"game": "ASTRO BOT", "passed": true, "run": "artifacts/astro-bot/runs/20260717-074330-all-nids-setrays/attempt-02.log"}]},
+      "blockers": []
+    },
+    {
+      "nid": "BfBDZGbti7A",
+      "symbol": "sceAgcGetIsTrinityMode",
+      "component": "AGC",
+      "library": "libSceAgc",
+      "generation": "Gen5",
+      "cluster": "agc",
+      "observations": [{"game": "ASTRO BOT", "calls": 1, "source": "ASTRO_BOT_UNRESOLVED_NIDS.csv"}],
+      "status": "game-verified",
+      "priority": {"calls": 1, "criticality": "boot-path", "cross_game_fanout": 1},
+      "evidence": {"aerolib_name": "sceAgcGetIsTrinityMode", "binary_hash": "110df81f759ae3dffcc9b5e3fa062c74058518631847641b8e08a54f6b8b6e2d", "reference_functions": ["decrypted libSceAgc.sprx export"], "call_sites": [], "confidence": "high", "conflicts": []},
+      "contract": {"signature": "void sceAgcGetIsTrinityMode(bool *isTrinity)", "returns": ["void ABI preserves incoming RAX"], "output_writes": ["writes false for base Prospero"], "validation_rules": ["firmware-style best-effort one-byte write"], "state_transitions": [], "ownership": ["caller owns output byte"], "synchronization": []},
+      "implementation": {"worktree": "/Users/mcruz/.codex/worktrees/sharpemu-astro-font-nids", "branch": "codex/astro-nid-swarm", "commit": "829ba5f", "files": ["src/SharpEmu.Libs/Agc/AgcExports.cs", "tests/SharpEmu.Libs.Tests/Agc/AgcRecoveredExportsTests.cs"]},
+      "validation": {"branch": "focused AGC tests passed", "integration": "exact suites passed at 61cea56", "games": [{"game": "ASTRO BOT", "passed": true, "run": "artifacts/astro-bot/runs/20260717-074330-all-nids-setrays/attempt-02.log"}]},
+      "blockers": []
+    },
+    {
+      "nid": "dolOmWH+huQ",
+      "symbol": "unknown_dolOmWH_huQ",
+      "component": "AGC",
+      "library": "libSceAgc",
+      "generation": "Gen5",
+      "cluster": "agc",
+      "observations": [{"game": "ASTRO BOT", "calls": 33, "source": "ASTRO_BOT_UNRESOLVED_NIDS.csv"}],
+      "status": "game-verified",
+      "priority": {"calls": 33, "criticality": "shader-setup", "cross_game_fanout": 1},
+      "evidence": {"aerolib_name": null, "binary_hash": "110df81f759ae3dffcc9b5e3fa062c74058518631847641b8e08a54f6b8b6e2d", "reference_functions": ["direct decrypted AGC export body"], "call_sites": ["ASTRO combined-shader setup"], "confidence": "high", "conflicts": []},
+      "contract": {"signature": "int unknown_dolOmWH_huQ(uint64_t outSizes[2], const AgcShader *first, const AgcShader *second)", "returns": ["success, memory fault, or incompatible shader pair"], "output_writes": ["combined register storage size and alignment"], "validation_rules": ["valid 5/7 or 4/6 shader-type pairing"], "state_transitions": [], "ownership": ["caller owns shaders and output"], "synchronization": []},
+      "implementation": {"worktree": "/Users/mcruz/.codex/worktrees/sharpemu-astro-font-nids", "branch": "codex/astro-nid-swarm", "commit": "829ba5f", "files": ["src/SharpEmu.Libs/Agc/AgcExports.cs", "tests/SharpEmu.Libs.Tests/Agc/AgcRecoveredExportsTests.cs"]},
+      "validation": {"branch": "focused AGC tests passed", "integration": "exact suites passed at 61cea56", "games": [{"game": "ASTRO BOT", "passed": true, "run": "artifacts/astro-bot/runs/20260717-074330-all-nids-setrays/attempt-02.log"}]},
+      "blockers": []
+    },
+    {
+      "nid": "fd5Bp5tGTgo",
+      "symbol": "unknown_fd5Bp5tGTgo",
+      "component": "AGC",
+      "library": "libSceAgc",
+      "generation": "Gen5",
+      "cluster": "agc",
+      "observations": [{"game": "ASTRO BOT", "calls": 33, "source": "ASTRO_BOT_UNRESOLVED_NIDS.csv"}],
+      "status": "game-verified",
+      "priority": {"calls": 33, "criticality": "shader-setup", "cross_game_fanout": 1},
+      "evidence": {"aerolib_name": null, "binary_hash": "110df81f759ae3dffcc9b5e3fa062c74058518631847641b8e08a54f6b8b6e2d", "reference_functions": ["direct decrypted AGC export body"], "call_sites": ["ASTRO combined-shader setup"], "confidence": "high", "conflicts": []},
+      "contract": {"signature": "int unknown_fd5Bp5tGTgo(AgcShader *out, const AgcShader *first, const AgcShader *second, void *registerBuffer)", "returns": ["success, memory fault, or incompatible shader pair"], "output_writes": ["materializes combined shader metadata and register storage"], "validation_rules": ["valid shader pairing and writable buffers"], "state_transitions": [], "ownership": ["caller supplies storage"], "synchronization": []},
+      "implementation": {"worktree": "/Users/mcruz/.codex/worktrees/sharpemu-astro-font-nids", "branch": "codex/astro-nid-swarm", "commit": "829ba5f", "files": ["src/SharpEmu.Libs/Agc/AgcExports.cs", "tests/SharpEmu.Libs.Tests/Agc/AgcRecoveredExportsTests.cs"]},
+      "validation": {"branch": "focused AGC tests passed", "integration": "exact suites passed at 61cea56", "games": [{"game": "ASTRO BOT", "passed": true, "run": "artifacts/astro-bot/runs/20260717-074330-all-nids-setrays/attempt-02.log"}]},
+      "blockers": []
+    },
+    {
+      "nid": "ht-QXT3zGxo",
+      "symbol": "sceAudioPropagationSystemGetRays",
+      "component": "AudioPropagation",
+      "library": "libSceAudioPropagation",
+      "generation": "Gen5",
+      "cluster": "audio-propagation",
+      "observations": [{"game": "ASTRO BOT", "calls": 291, "source": "ASTRO_BOT_UNRESOLVED_NIDS.csv"}],
+      "status": "game-verified",
+      "priority": {"calls": 291, "criticality": "per-frame-audio", "cross_game_fanout": 1},
+      "evidence": {"aerolib_name": "sceAudioPropagationSystemGetRays", "binary_hash": "9a83257983dd85244f4838f3a2f392749f93297e1a5034fb3fec782d5afdcc5e", "reference_functions": ["wrapper RVA 0x4540", "handle lookup RVA 0xF6B0"], "call_sites": ["AudioPropagationContext.cpp:136"], "confidence": "high", "conflicts": []},
+      "contract": {"signature": "int sceAudioPropagationSystemGetRays(uint64_t system, SceAudioPropagationRay rays[64], uint32_t *count)", "returns": ["0 or 0x8A700001/2/3/7"], "output_writes": ["validated D7/0x58 ray records and result count"], "validation_rules": ["process-global full handle; non-null pointers; input capacity 64; all record headers valid"], "state_transitions": ["associates returned record addresses with source slots"], "ownership": ["caller owns ray array"], "synchronization": ["system-state lock"]},
+      "implementation": {"worktree": "/Users/mcruz/.codex/worktrees/sharpemu-astro-font-nids", "branch": "codex/astro-nid-swarm", "commit": "c53cc63", "files": ["src/SharpEmu.Libs/AudioPropagation/AudioPropagationExports.cs", "src/SharpEmu.Libs/AudioPropagation/AudioPropagationState.cs", "tests/SharpEmu.Libs.Tests/AudioPropagation/AudioPropagationExportsTests.cs"]},
+      "validation": {"branch": "26 AudioPropagation tests passed", "integration": "exact suites passed at 61cea56", "games": [{"game": "ASTRO BOT", "passed": true, "run": "artifacts/astro-bot/runs/20260717-074330-all-nids-setrays/attempt-02.log", "notes": "zero GetRays failures or asserts"}]},
+      "blockers": []
+    },
+    {
+      "nid": "CPLV6G-eXmk",
+      "symbol": "sceAudioPropagationSystemRegisterMaterial",
+      "component": "AudioPropagation",
+      "library": "libSceAudioPropagation",
+      "generation": "Gen5",
+      "cluster": "audio-propagation",
+      "observations": [{"game": "ASTRO BOT", "calls": 23, "source": "ASTRO_BOT_UNRESOLVED_NIDS.csv"}],
+      "status": "game-verified",
+      "priority": {"calls": 23, "criticality": "audio-scene-setup", "cross_game_fanout": 1},
+      "evidence": {"aerolib_name": "sceAudioPropagationSystemRegisterMaterial", "binary_hash": "9a83257983dd85244f4838f3a2f392749f93297e1a5034fb3fec782d5afdcc5e", "reference_functions": ["decrypted material wrapper and core"], "call_sites": [], "confidence": "high", "conflicts": []},
+      "contract": {"signature": "int sceAudioPropagationSystemRegisterMaterial(uint64_t system, const SceAudioPropagationMaterial *material, uint64_t *outHandle)", "returns": ["firmware AudioPropagation status"], "output_writes": ["material handle on success only"], "validation_rules": ["system handle, D1/0x40 material header, capacity, writable output"], "state_transitions": ["registers material atomically"], "ownership": ["system retains modeled material state"], "synchronization": ["registry and system-state locks"]},
+      "implementation": {"worktree": "/Users/mcruz/.codex/worktrees/sharpemu-astro-font-nids", "branch": "codex/astro-nid-swarm", "commit": "9f1a543", "files": ["src/SharpEmu.Libs/AudioPropagation/AudioPropagationExports.cs", "src/SharpEmu.Libs/AudioPropagation/AudioPropagationState.cs", "tests/SharpEmu.Libs.Tests/AudioPropagation/AudioPropagationExportsTests.cs"]},
+      "validation": {"branch": "26 AudioPropagation tests passed", "integration": "exact suites passed at 61cea56", "games": [{"game": "ASTRO BOT", "passed": true, "run": "artifacts/astro-bot/runs/20260717-074330-all-nids-setrays/attempt-02.log"}]},
+      "blockers": []
+    },
+    {
+      "nid": "VlBT16890mA",
+      "symbol": "sceAudioPropagationSystemSetRays",
+      "component": "AudioPropagation",
+      "library": "libSceAudioPropagation",
+      "generation": "Gen5",
+      "cluster": "audio-propagation",
+      "observations": [{"game": "ASTRO BOT", "calls": 284, "source": "artifacts/astro-bot/runs/20260717-072208-all-nids-audio-fixed/attempt-01.log"}],
+      "status": "game-verified",
+      "priority": {"calls": 284, "criticality": "per-frame-audio", "cross_game_fanout": 1},
+      "evidence": {"aerolib_name": "sceAudioPropagationSystemSetRays", "binary_hash": "9a83257983dd85244f4838f3a2f392749f93297e1a5034fb3fec782d5afdcc5e", "reference_functions": ["wrapper RVA 0x4600", "core RVA 0xE910", "handle lookup RVA 0xF6B0"], "call_sites": ["AudioPropagationContext.cpp:142"], "confidence": "high", "conflicts": []},
+      "contract": {"signature": "int sceAudioPropagationSystemSetRays(uint64_t system, const SceAudioPropagationRay *rays, uint32_t count)", "returns": ["0 or 0x8A700001/2/3/7 via EAX"], "output_writes": ["none to caller ray array"], "validation_rules": ["handle, null, zero count, then 4-byte tag and 8-byte size per 0x58 record in exact order"], "state_transitions": ["consumes matched outstanding ray results under system lock; unmatched arrays are no-op success"], "ownership": ["caller retains read-only array"], "synchronization": ["system mutex"]},
+      "implementation": {"worktree": "/Users/mcruz/.codex/worktrees/sharpemu-astro-font-nids", "branch": "codex/astro-nid-swarm", "commit": "61cea56", "files": ["src/SharpEmu.Libs/AudioPropagation/AudioPropagationExports.cs", "tests/SharpEmu.Libs.Tests/AudioPropagation/AudioPropagationExportsTests.cs"]},
+      "validation": {"branch": "26 AudioPropagation tests passed after independent review", "integration": "exact suites passed at 61cea56", "games": [{"game": "ASTRO BOT", "passed": true, "run": "artifacts/astro-bot/runs/20260717-074330-all-nids-setrays/attempt-02.log", "notes": "zero SetRays failures or asserts"}]},
+      "blockers": []
+    },
+    {
+      "nid": "7xyAxrusLko",
+      "symbol": "sceAudioPropagationSystemQueryMemory",
+      "component": "AudioPropagation",
+      "library": "libSceAudioPropagation",
+      "generation": "Gen5",
+      "cluster": "audio-propagation",
+      "observations": [{"game": "ASTRO BOT", "calls": 5, "source": "ASTRO_BOT_UNRESOLVED_NIDS.csv"}],
+      "status": "game-verified",
+      "priority": {"calls": 5, "criticality": "audio-initialization", "cross_game_fanout": 1},
+      "evidence": {"aerolib_name": "sceAudioPropagationSystemQueryMemory", "binary_hash": "9a83257983dd85244f4838f3a2f392749f93297e1a5034fb3fec782d5afdcc5e", "reference_functions": ["decrypted query-memory wrapper"], "call_sites": [], "confidence": "high", "conflicts": []},
+      "contract": {"signature": "int sceAudioPropagationSystemQueryMemory(const Config *config, MemoryInfo *memoryInfo)", "returns": ["firmware AudioPropagation status"], "output_writes": ["required primary and secondary sizes"], "validation_rules": ["D4/0x30 memory-info and D5/0x38 config ordering"], "state_transitions": [], "ownership": ["caller owns structures"], "synchronization": []},
+      "implementation": {"worktree": "/Users/mcruz/.codex/worktrees/sharpemu-astro-font-nids", "branch": "codex/astro-nid-swarm", "commit": "9f1a543", "files": ["src/SharpEmu.Libs/AudioPropagation/AudioPropagationExports.cs", "tests/SharpEmu.Libs.Tests/AudioPropagation/AudioPropagationExportsTests.cs"]},
+      "validation": {"branch": "26 AudioPropagation tests passed", "integration": "exact suites passed at 61cea56", "games": [{"game": "ASTRO BOT", "passed": true, "run": "artifacts/astro-bot/runs/20260717-074330-all-nids-setrays/attempt-02.log"}]},
+      "blockers": []
+    },
+    {
+      "nid": "8bI5h8req30",
+      "symbol": "sceAudioPropagationRoomCreate",
+      "component": "AudioPropagation",
+      "library": "libSceAudioPropagation",
+      "generation": "Gen5",
+      "cluster": "audio-propagation",
+      "observations": [{"game": "ASTRO BOT", "calls": 5, "source": "ASTRO_BOT_UNRESOLVED_NIDS.csv"}],
+      "status": "game-verified",
+      "priority": {"calls": 5, "criticality": "audio-scene-setup", "cross_game_fanout": 1},
+      "evidence": {"aerolib_name": "sceAudioPropagationRoomCreate", "binary_hash": "9a83257983dd85244f4838f3a2f392749f93297e1a5034fb3fec782d5afdcc5e", "reference_functions": ["room-create wrapper", "handle lookup RVA 0xF6B0"], "call_sites": [], "confidence": "high", "conflicts": []},
+      "contract": {"signature": "int sceAudioPropagationRoomCreate(uint64_t system, uint64_t *outRoom)", "returns": ["firmware AudioPropagation status"], "output_writes": ["room handle on success only"], "validation_rules": ["valid system and writable output; room capacity"], "state_transitions": ["allocates room slot"], "ownership": ["system retains room state"], "synchronization": ["registry and system-state locks"]},
+      "implementation": {"worktree": "/Users/mcruz/.codex/worktrees/sharpemu-astro-font-nids", "branch": "codex/astro-nid-swarm", "commit": "c53cc63", "files": ["src/SharpEmu.Libs/AudioPropagation/AudioPropagationExports.cs", "src/SharpEmu.Libs/AudioPropagation/AudioPropagationState.cs", "tests/SharpEmu.Libs.Tests/AudioPropagation/AudioPropagationExportsTests.cs"]},
+      "validation": {"branch": "26 AudioPropagation tests passed", "integration": "exact suites passed at 61cea56", "games": [{"game": "ASTRO BOT", "passed": true, "run": "artifacts/astro-bot/runs/20260717-074330-all-nids-setrays/attempt-02.log"}]},
+      "blockers": []
+    },
+    {
+      "nid": "aNEqtSHdUSo",
+      "symbol": "sceAudioPropagationSystemCreate",
+      "component": "AudioPropagation",
+      "library": "libSceAudioPropagation",
+      "generation": "Gen5",
+      "cluster": "audio-propagation",
+      "observations": [{"game": "ASTRO BOT", "calls": 5, "source": "ASTRO_BOT_UNRESOLVED_NIDS.csv"}],
+      "status": "game-verified",
+      "priority": {"calls": 5, "criticality": "audio-initialization", "cross_game_fanout": 1},
+      "evidence": {"aerolib_name": "sceAudioPropagationSystemCreate", "binary_hash": "9a83257983dd85244f4838f3a2f392749f93297e1a5034fb3fec782d5afdcc5e", "reference_functions": ["system-create wrapper RVA 0x4240"], "call_sites": [], "confidence": "high", "conflicts": []},
+      "contract": {"signature": "int sceAudioPropagationSystemCreate(const Config *config, const MemoryInfo *memoryInfo, uint64_t *outSystem)", "returns": ["firmware AudioPropagation status"], "output_writes": ["system handle and caller-provided backing initialization on success"], "validation_rules": ["config, memory-info, sizes, backing readability, capacity"], "state_transitions": ["registers process-global full handle"], "ownership": ["caller supplies backing; module owns handle state"], "synchronization": ["registry lock"]},
+      "implementation": {"worktree": "/Users/mcruz/.codex/worktrees/sharpemu-astro-font-nids", "branch": "codex/astro-nid-swarm", "commit": "c53cc63", "files": ["src/SharpEmu.Libs/AudioPropagation/AudioPropagationExports.cs", "src/SharpEmu.Libs/AudioPropagation/AudioPropagationState.cs", "tests/SharpEmu.Libs.Tests/AudioPropagation/AudioPropagationExportsTests.cs"]},
+      "validation": {"branch": "26 AudioPropagation tests passed", "integration": "exact suites passed at 61cea56", "games": [{"game": "ASTRO BOT", "passed": true, "run": "artifacts/astro-bot/runs/20260717-074330-all-nids-setrays/attempt-02.log"}]},
+      "blockers": []
+    },
+    {
+      "nid": "kIdb+iQUzCs",
+      "symbol": "sceAudioPropagationSystemSetAttributes",
+      "component": "AudioPropagation",
+      "library": "libSceAudioPropagation",
+      "generation": "Gen5",
+      "cluster": "audio-propagation",
+      "observations": [{"game": "ASTRO BOT", "calls": 1, "source": "ASTRO_BOT_UNRESOLVED_NIDS.csv"}],
+      "status": "game-verified",
+      "priority": {"calls": 1, "criticality": "audio-scene-setup", "cross_game_fanout": 1},
+      "evidence": {"aerolib_name": "sceAudioPropagationSystemSetAttributes", "binary_hash": "9a83257983dd85244f4838f3a2f392749f93297e1a5034fb3fec782d5afdcc5e", "reference_functions": ["set-attributes wrapper", "handle lookup RVA 0xF6B0"], "call_sites": [], "confidence": "high", "conflicts": []},
+      "contract": {"signature": "int sceAudioPropagationSystemSetAttributes(uint64_t system, const Attribute *attributes, uint32_t count)", "returns": ["firmware AudioPropagation status"], "output_writes": ["none on failure"], "validation_rules": ["full handle and per-type attribute size/value/reference checks"], "state_transitions": ["atomically replaces modeled attributes"], "ownership": ["copies caller attributes"], "synchronization": ["system-state lock"]},
+      "implementation": {"worktree": "/Users/mcruz/.codex/worktrees/sharpemu-astro-font-nids", "branch": "codex/astro-nid-swarm", "commit": "c53cc63", "files": ["src/SharpEmu.Libs/AudioPropagation/AudioPropagationExports.cs", "src/SharpEmu.Libs/AudioPropagation/AudioPropagationState.cs", "tests/SharpEmu.Libs.Tests/AudioPropagation/AudioPropagationExportsTests.cs"]},
+      "validation": {"branch": "26 AudioPropagation tests passed", "integration": "exact suites passed at 61cea56", "games": [{"game": "ASTRO BOT", "passed": true, "run": "artifacts/astro-bot/runs/20260717-074330-all-nids-setrays/attempt-02.log"}]},
+      "blockers": []
+    },
+    {
+      "nid": "00oCq0RwSAY",
+      "symbol": "_ZN3sce4Json11Initializer27setGlobalNullAccessCallBackEPFRKNS0_5ValueENS0_9ValueTypeEPS3_PvES7_",
+      "component": "JSON",
+      "library": "libSceJson2",
+      "generation": "Gen5",
+      "cluster": "json",
+      "observations": [{"game": "ASTRO BOT", "calls": 1, "source": "ASTRO_BOT_UNRESOLVED_NIDS.csv"}],
+      "status": "game-verified",
+      "priority": {"calls": 1, "criticality": "boot-path", "cross_game_fanout": 1},
+      "evidence": {"aerolib_name": "_ZN3sce4Json11Initializer27setGlobalNullAccessCallBackEPFRKNS0_5ValueENS0_9ValueTypeEPS3_PvES7_", "binary_hash": "1ca532e78ed5e02c553e99ebb01751df6baaefa0bd6481c69db56e08536ba06c", "reference_functions": ["decrypted libSceJson2 wrapper and global slot"], "call_sites": [], "confidence": "high", "conflicts": []},
+      "contract": {"signature": "void sce::Json::Initializer::setGlobalNullAccessCallBack(NullAccessCallback callback, void *userdata)", "returns": ["void ABI"], "output_writes": [], "validation_rules": ["callback and userdata pair retained exactly"], "state_transitions": ["replaces global callback pair"], "ownership": ["non-owning callback pointers"], "synchronization": ["global callback lock"]},
+      "implementation": {"worktree": "/Users/mcruz/.codex/worktrees/sharpemu-astro-font-nids", "branch": "codex/astro-nid-swarm", "commit": "6f67ab9", "files": ["src/SharpEmu.Libs/Json/JsonExports.cs", "tests/SharpEmu.Libs.Tests/Json/JsonExportRegistrationTests.cs"]},
+      "validation": {"branch": "focused JSON tests passed", "integration": "exact suites passed at 61cea56", "games": [{"game": "ASTRO BOT", "passed": true, "run": "artifacts/astro-bot/runs/20260717-074330-all-nids-setrays/attempt-02.log"}]},
+      "blockers": []
+    },
+    {
+      "nid": "mkgXxsoxWHg",
+      "symbol": "sceKernelClearVirtualRangeName",
+      "component": "Kernel",
+      "library": "libKernel",
+      "generation": "Gen5",
+      "cluster": "kernel",
+      "observations": [{"game": "ASTRO BOT", "calls": 2, "source": "ASTRO_BOT_UNRESOLVED_NIDS.csv"}],
+      "status": "game-verified",
+      "priority": {"calls": 2, "criticality": "memory-management", "cross_game_fanout": 1},
+      "evidence": {"aerolib_name": "sceKernelClearVirtualRangeName", "binary_hash": "0d91281f1d2cdcf4d8c2f4b920766b645ea086e679bd95074f30510178a706b0", "reference_functions": ["decrypted libkernel wrapper"], "call_sites": [], "confidence": "high", "conflicts": []},
+      "contract": {"signature": "int64_t sceKernelClearVirtualRangeName(uint64_t address, uint64_t length)", "returns": ["0 or converted kernel errno"], "output_writes": [], "validation_rules": ["nonzero range, no overflow, fully contained mapping"], "state_transitions": ["removes mapped-region name"], "ownership": ["does not alter mapping"], "synchronization": ["kernel memory-state lock"]},
+      "implementation": {"worktree": "/Users/mcruz/.codex/worktrees/sharpemu-astro-font-nids", "branch": "codex/astro-nid-swarm", "commit": "0d2fbbc", "files": ["src/SharpEmu.Libs/Kernel/KernelCoreServicesCompatExports.cs", "tests/SharpEmu.Libs.Tests/Kernel/KernelCoreServicesCompatExportsTests.cs"]},
+      "validation": {"branch": "focused Kernel tests passed", "integration": "exact suites passed at 61cea56", "games": [{"game": "ASTRO BOT", "passed": true, "run": "artifacts/astro-bot/runs/20260717-074330-all-nids-setrays/attempt-02.log"}]},
+      "blockers": []
+    },
+    {
+      "nid": "n1-v6FgU7MQ",
+      "symbol": "sceKernelConfiguredFlexibleMemorySize",
+      "component": "Kernel",
+      "library": "libKernel",
+      "generation": "Gen5",
+      "cluster": "kernel",
+      "observations": [{"game": "ASTRO BOT", "calls": 1, "source": "ASTRO_BOT_UNRESOLVED_NIDS.csv"}],
+      "status": "game-verified",
+      "priority": {"calls": 1, "criticality": "memory-management", "cross_game_fanout": 1},
+      "evidence": {"aerolib_name": "sceKernelConfiguredFlexibleMemorySize", "binary_hash": "0d91281f1d2cdcf4d8c2f4b920766b645ea086e679bd95074f30510178a706b0", "reference_functions": ["decrypted libkernel wrapper"], "call_sites": [], "confidence": "high", "conflicts": []},
+      "contract": {"signature": "int64_t sceKernelConfiguredFlexibleMemorySize(uint64_t *outSize)", "returns": ["0 or memory fault"], "output_writes": ["configured flexible-memory byte size"], "validation_rules": ["writable eight-byte output"], "state_transitions": [], "ownership": ["caller owns output"], "synchronization": []},
+      "implementation": {"worktree": "/Users/mcruz/.codex/worktrees/sharpemu-astro-font-nids", "branch": "codex/astro-nid-swarm", "commit": "0d2fbbc", "files": ["src/SharpEmu.Libs/Kernel/KernelCoreServicesCompatExports.cs", "tests/SharpEmu.Libs.Tests/Kernel/KernelCoreServicesCompatExportsTests.cs"]},
+      "validation": {"branch": "focused Kernel tests passed", "integration": "exact suites passed at 61cea56", "games": [{"game": "ASTRO BOT", "passed": true, "run": "artifacts/astro-bot/runs/20260717-074330-all-nids-setrays/attempt-02.log"}]},
+      "blockers": []
+    },
+    {
+      "nid": "4llLk7YJRTE",
+      "symbol": "sceNpUniversalDataSystemEventPropertyArraySetString",
+      "component": "NpUniversalDataSystem",
+      "library": "libSceNpUniversalDataSystem",
+      "generation": "Gen5",
+      "cluster": "np-universal-data-system",
+      "observations": [{"game": "ASTRO BOT", "calls": 1, "source": "ASTRO_BOT_UNRESOLVED_NIDS.csv"}],
+      "status": "game-verified",
+      "priority": {"calls": 1, "criticality": "telemetry-property", "cross_game_fanout": 1},
+      "evidence": {"aerolib_name": "sceNpUniversalDataSystemEventPropertyArraySetString", "binary_hash": "0ae12163797cb01f26cca884db98b3a4b137c84143e173021676e854da9ca6bb", "reference_functions": ["decrypted setter wrapper and property helpers"], "call_sites": [], "confidence": "high", "conflicts": []},
+      "contract": {"signature": "int64_t sceNpUniversalDataSystemEventPropertyArraySetString(void *propertyArray, const char *value)", "returns": ["success or NP invalid/not-initialized/property errors"], "output_writes": ["atomically materializes property node/backing state"], "validation_rules": ["initialized service, valid property tag/backing, strict UTF-8 string"], "state_transitions": ["appends string property without partial allocation"], "ownership": ["HLE owns modeled node allocations"], "synchronization": ["property-array lock"]},
+      "implementation": {"worktree": "/Users/mcruz/.codex/worktrees/sharpemu-astro-font-nids", "branch": "codex/astro-nid-swarm", "commit": "da111b6", "files": ["src/SharpEmu.Libs/Np/NpUniversalDataSystemExports.cs", "tests/SharpEmu.Libs.Tests/Np/NpUniversalDataSystemExportsTests.cs"]},
+      "validation": {"branch": "focused NP tests passed", "integration": "exact suites passed at 61cea56", "games": [{"game": "ASTRO BOT", "passed": true, "run": "artifacts/astro-bot/runs/20260717-074330-all-nids-setrays/attempt-02.log"}]},
+      "blockers": []
+    },
+    {
+      "nid": "znaWI0gpuo8",
+      "symbol": "scePadGetTriggerEffectState",
+      "component": "Pad",
+      "library": "libScePad",
+      "generation": "Gen5",
+      "cluster": "pad",
+      "observations": [{"game": "ASTRO BOT", "calls": 338, "source": "ASTRO_BOT_UNRESOLVED_NIDS.csv"}],
+      "status": "game-verified",
+      "priority": {"calls": 338, "criticality": "per-frame-input", "cross_game_fanout": 1},
+      "evidence": {"aerolib_name": "scePadGetTriggerEffectState", "binary_hash": "9396eb7947760db43eec22be66cc40f2a5e999be09645412cb92020b1e9dfe34", "reference_functions": ["decrypted libScePad wrapper and backend call"], "call_sites": [], "confidence": "high", "conflicts": []},
+      "contract": {"signature": "int scePadGetTriggerEffectState(int handle, uint32_t state[2])", "returns": ["success, pad error, or memory fault"], "output_writes": ["left and right trigger-effect state"], "validation_rules": ["positive handle and writable eight-byte output"], "state_transitions": [], "ownership": ["caller owns output"], "synchronization": ["pad backend lookup lock"]},
+      "implementation": {"worktree": "/Users/mcruz/.codex/worktrees/sharpemu-astro-font-nids", "branch": "codex/astro-nid-swarm", "commit": "829ba5f", "files": ["src/SharpEmu.Libs/Pad/PadExports.cs", "tests/SharpEmu.Libs.Tests/Pad/PadExportsTests.cs"]},
+      "validation": {"branch": "focused Pad tests passed", "integration": "exact suites passed at 61cea56", "games": [{"game": "ASTRO BOT", "passed": true, "run": "artifacts/astro-bot/runs/20260717-074330-all-nids-setrays/attempt-02.log"}]},
+      "blockers": []
+    },
+    {
+      "nid": "amuBfI-AQc4",
+      "symbol": "sceRudpInit",
+      "component": "RUDP",
+      "library": "libSceRudp",
+      "generation": "Gen4|Gen5",
+      "cluster": "rudp",
+      "observations": [{"game": "ASTRO BOT", "calls": 1, "source": "ASTRO_BOT_UNRESOLVED_NIDS.csv"}],
+      "status": "game-verified",
+      "priority": {"calls": 1, "criticality": "network-initialization", "cross_game_fanout": 1},
+      "evidence": {"aerolib_name": "sceRudpInit", "binary_hash": "a13fdbcb36acae55635c2d1b2c1ab449186e9e959f333567eef4ca840642f950", "reference_functions": ["decrypted RUDP init wrapper/core"], "call_sites": [], "confidence": "high", "conflicts": []},
+      "contract": {"signature": "int sceRudpInit(void *buffer, uint64_t bufferSize)", "returns": ["0 or 0x80770001/10/22 and allocator errors via EAX"], "output_writes": ["uses caller allocator backing"], "validation_rules": ["not already initialized, non-null and sufficiently large readable/writable buffer"], "state_transitions": ["retains backing and marks module initialized"], "ownership": ["caller retains buffer lifetime"], "synchronization": ["RUDP state lock"]},
+      "implementation": {"worktree": "/Users/mcruz/.codex/worktrees/sharpemu-astro-font-nids", "branch": "codex/astro-nid-swarm", "commit": "829ba5f", "files": ["src/SharpEmu.Libs/Rudp/RudpExports.cs", "tests/SharpEmu.Libs.Tests/Rudp/RudpExportsTests.cs"]},
+      "validation": {"branch": "focused RUDP tests passed", "integration": "exact suites passed at 61cea56", "games": [{"game": "ASTRO BOT", "passed": true, "run": "artifacts/astro-bot/runs/20260717-074330-all-nids-setrays/attempt-02.log"}]},
+      "blockers": []
+    },
+    {
+      "nid": "SUEVes8gvmw",
+      "symbol": "sceRudpSetEventHandler",
+      "component": "RUDP",
+      "library": "libSceRudp",
+      "generation": "Gen5",
+      "cluster": "rudp",
+      "observations": [{"game": "ASTRO BOT", "calls": 1, "source": "artifacts/astro-bot/runs/20260717-061517-all-nids-live/attempt-01.log"}],
+      "status": "game-verified",
+      "priority": {"calls": 1, "criticality": "network-initialization", "cross_game_fanout": 1},
+      "evidence": {"aerolib_name": "sceRudpSetEventHandler", "binary_hash": "a13fdbcb36acae55635c2d1b2c1ab449186e9e959f333567eef4ca840642f950", "reference_functions": ["wrapper RVA 0x5E60"], "call_sites": [], "confidence": "high", "conflicts": []},
+      "contract": {"signature": "int sceRudpSetEventHandler(void (*callback)(...), void *userdata)", "returns": ["0, not-initialized, or invalid-handler via EAX"], "output_writes": [], "validation_rules": ["module initialized before non-null callback"], "state_transitions": ["atomically replaces callback/userdata pair"], "ownership": ["non-owning callback pointers"], "synchronization": ["RUDP state lock"]},
+      "implementation": {"worktree": "/Users/mcruz/.codex/worktrees/sharpemu-astro-font-nids", "branch": "codex/astro-nid-swarm", "commit": "0284ef3", "files": ["src/SharpEmu.Libs/Rudp/RudpExports.cs", "tests/SharpEmu.Libs.Tests/Rudp/RudpExportsTests.cs"]},
+      "validation": {"branch": "focused RUDP tests passed", "integration": "exact suites passed at 61cea56", "games": [{"game": "ASTRO BOT", "passed": true, "run": "artifacts/astro-bot/runs/20260717-074330-all-nids-setrays/attempt-02.log"}]},
+      "blockers": []
+    },
+    {
+      "nid": "6PBNpsgyaxw",
+      "symbol": "sceRudpEnableInternalIOThread",
+      "component": "RUDP",
+      "library": "libSceRudp",
+      "generation": "Gen5",
+      "cluster": "rudp",
+      "observations": [{"game": "ASTRO BOT", "calls": 1, "source": "artifacts/astro-bot/runs/20260717-064056-all-nids-final/attempt-01.log"}],
+      "status": "game-verified",
+      "priority": {"calls": 1, "criticality": "network-initialization", "cross_game_fanout": 1},
+      "evidence": {"aerolib_name": "sceRudpEnableInternalIOThread", "binary_hash": "a13fdbcb36acae55635c2d1b2c1ab449186e9e959f333567eef4ca840642f950", "reference_functions": ["wrapper RVA 0x5D10"], "call_sites": [], "confidence": "high", "conflicts": []},
+      "contract": {"signature": "int sceRudpEnableInternalIOThread(uint32_t stackSize, int priority)", "returns": ["0, not-initialized, invalid-context, or duplicate-enable via EAX"], "output_writes": [], "validation_rules": ["initialized, empty context, not already enabled; stack clamped to 0x4000 minimum"], "state_transitions": ["records enabled internal IO-thread configuration"], "ownership": ["module owns lifecycle until sceRudpEnd"], "synchronization": ["RUDP state lock"]},
+      "implementation": {"worktree": "/Users/mcruz/.codex/worktrees/sharpemu-astro-font-nids", "branch": "codex/astro-nid-swarm", "commit": "091d869", "files": ["src/SharpEmu.Libs/Rudp/RudpExports.cs", "tests/SharpEmu.Libs.Tests/Rudp/RudpExportsTests.cs"]},
+      "validation": {"branch": "focused RUDP tests passed", "integration": "exact suites passed at 61cea56", "games": [{"game": "ASTRO BOT", "passed": true, "run": "artifacts/astro-bot/runs/20260717-074330-all-nids-setrays/attempt-02.log"}]},
+      "blockers": []
+    },
+    {
+      "nid": "WAzWTZm1H+I",
+      "symbol": "sceSaveDataTransferringMount",
+      "component": "SaveData",
+      "library": "libSceSaveData",
+      "generation": "Gen4|Gen5",
+      "cluster": "savedata",
+      "observations": [
+        {
+          "game": "ASTRO BOT",
+          "calls": 1,
+          "source": "artifacts/astro-bot/runs/20260717-224009-savedata-transferring-mount-pass/attempt-01.log",
+          "importing_image": "eboot.bin",
+          "call_sites": ["return 0x0000000801082EE4"]
+        }
+      ],
+      "status": "game-verified",
+      "priority": {
+        "calls": 1,
+        "criticality": "optional prior-title save transfer",
+        "cross_game_fanout": 1
+      },
+      "evidence": {
+        "aerolib_name": "sceSaveDataTransferringMount",
+        "binary_hash": "237d302887e67818f179d299158413ac9eb4c1ec71b36767afd5141a52170386",
+        "reference_functions": [
+          "decrypted PS5 libSceSaveData.sprx export 0x33540",
+          "firmware SaveData service operation 0x3D"
+        ],
+        "call_sites": ["ASTRO BOT return 0x0000000801082EE4"],
+        "confidence": "medium",
+        "conflicts": [
+          "firmware service-internal error mapping is unavailable beyond observed wrapper behavior",
+          "plaintext host saves do not require proprietary PFS fingerprint authentication"
+        ]
+      },
+      "contract": {
+        "signature": "int sceSaveDataTransferringMount(const OrbisSaveDataTransferringMount *request, OrbisSaveDataMountResult *result)",
+        "returns": [
+          "0 on read-only mount success",
+          "0x809F0000 parameter",
+          "0x809F0001 not initialized",
+          "0x809F0008 source save not found",
+          "guest memory fault or internal host-filesystem error"
+        ],
+        "output_writes": ["writes one zero-initialized 0x40-byte mount result on success"],
+        "validation_rules": [
+          "initialization precedes pointer validation",
+          "request and result pointers required",
+          "nonnegative user ID and nonempty explicit title/directory required",
+          "request reserved[32] must be readable and zero"
+        ],
+        "state_transitions": ["reserves a mount slot and registers the existing source save read-only"],
+        "ownership": ["caller owns request/result memory; host save directory remains emulator-owned"],
+        "synchronization": ["SaveData state gate and kernel guest-mount lock"]
+      },
+      "implementation": {
+        "worktree": "/private/tmp/sharpemu-nid-savedata-transferring",
+        "branch": "codex/nid-savedata-transferring-mount",
+        "commit": "3ea3554",
+        "files": [
+          "src/SharpEmu.Libs/SaveData/SaveDataExports.cs",
+          "tests/SharpEmu.Libs.Tests/SaveData/SaveDataTransferringMountTests.cs",
+          "docs/astro-bot/savedata-transferring-mount.md"
+        ]
+      },
+      "validation": {
+        "branch": "7 focused, 567 library, 33 source-generator, and 34 shader tests passed; Release osx-x64 publish passed",
+        "integration": "commit 3ea3554 fast-forwarded into local main",
+        "games": [
+          {
+            "game": "ASTRO BOT",
+            "passed": true,
+            "run": "artifacts/astro-bot/runs/20260717-224009-savedata-transferring-mount-pass/attempt-01.log",
+            "milestone": "savedata.transferring_mount",
+            "unresolved_nids": []
+          },
+          {
+            "game": "Dreaming Sarah",
+            "passed": true,
+            "run": "artifacts/astro-bot/runs/20260717-224116-savedata-transferring-dreaming-sarah/attempt-01.log",
+            "milestone": "ON SAVEGAME MISSING",
+            "unresolved_nids": []
+          }
+        ]
+      },
+      "blockers": []
+    },
+    {
+      "nid": "Sygnk9dr5WQ",
+      "symbol": "sceShareRegisterContentEventCallback",
+      "component": "Share",
+      "library": "libSceShare",
+      "generation": "Gen5",
+      "cluster": "share",
+      "observations": [{"game": "ASTRO BOT", "calls": 1, "source": "artifacts/astro-bot/runs/20260717-061517-all-nids-live/attempt-01.log"}],
+      "status": "game-verified",
+      "priority": {"calls": 1, "criticality": "share-initialization", "cross_game_fanout": 1},
+      "evidence": {"aerolib_name": "sceShareRegisterContentEventCallback", "binary_hash": "02b41c8d10cc86418a7b3182a972d0a24163791eaf67a187ac6d1df531e4560d", "reference_functions": ["wrapper RVA 0x6AB0", "terminate RVA 0x6660"], "call_sites": [], "confidence": "high", "conflicts": []},
+      "contract": {"signature": "int sceShareRegisterContentEventCallback(void (*callback)(...), void *userdata)", "returns": ["0 or 0x81960001/02/0C via EAX"], "output_writes": [], "validation_rules": ["non-null callback, initialized/available service, callback-only duplicate rejection"], "state_transitions": ["adds owned callback entry; sceShareTerminate clears list"], "ownership": ["non-owning callback pointers; module owns entry"], "synchronization": ["Share callback-list lock"]},
+      "implementation": {"worktree": "/Users/mcruz/.codex/worktrees/sharpemu-astro-font-nids", "branch": "codex/astro-nid-swarm", "commit": "41b8572", "files": ["src/SharpEmu.Libs/Share/ShareExports.cs", "tests/SharpEmu.Libs.Tests/Share/ShareExportsTests.cs"]},
+      "validation": {"branch": "focused Share tests passed", "integration": "exact suites passed at 61cea56", "games": [{"game": "ASTRO BOT", "passed": true, "run": "artifacts/astro-bot/runs/20260717-074330-all-nids-setrays/attempt-02.log"}]},
+      "blockers": []
+    }
+  ]
+}

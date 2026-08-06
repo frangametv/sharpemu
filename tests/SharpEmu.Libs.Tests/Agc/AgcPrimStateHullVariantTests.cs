@@ -16,6 +16,7 @@ public sealed class AgcPrimStateHullVariantTests
     private const ulong HullStateAddress = BaseAddress + 0x300;
     private const ulong GeometryShaderAddress = BaseAddress + 0x400;
     private const ulong SpecialsAddress = BaseAddress + 0x500;
+    private const ulong HullSpecialsAddress = BaseAddress + 0x600;
 
     // Tessellation pipelines pass a non-null hull-state block; the
     // geometry-derived register writes must still happen instead of an
@@ -28,6 +29,7 @@ public sealed class AgcPrimStateHullVariantTests
 
         memory.TryWrite(GeometryShaderAddress + 0x5A, new byte[] { 2 });
         WriteUInt64(memory, GeometryShaderAddress + 0x28, SpecialsAddress);
+        WriteUInt64(memory, HullStateAddress + 0x28, HullSpecialsAddress);
 
         // Specials: {register, value} pairs at GeCntl 0x00, StagesEn 0x08,
         // GsOutPrimType 0x20, GeUserVgprEn 0x28.
@@ -35,6 +37,9 @@ public sealed class AgcPrimStateHullVariantTests
         WriteUInt64(memory, SpecialsAddress + 0x08, 0x0000_0333_0000_0444UL);
         WriteUInt64(memory, SpecialsAddress + 0x20, 0x0000_0555_0000_0666UL);
         WriteUInt64(memory, SpecialsAddress + 0x28, 0x0000_0777_0000_0888UL);
+        WriteUInt64(memory, HullSpecialsAddress + 0x08, 0x0000_0000_0000_0444UL);
+        WriteUInt64(memory, HullSpecialsAddress + 0x20, 0x0000_0555_0000_0666UL);
+        WriteUInt64(memory, HullSpecialsAddress + 0x28, 0x0000_0777_0000_0888UL);
 
         ctx[CpuRegister.Rdi] = CxRegistersAddress;
         ctx[CpuRegister.Rsi] = UcRegistersAddress;

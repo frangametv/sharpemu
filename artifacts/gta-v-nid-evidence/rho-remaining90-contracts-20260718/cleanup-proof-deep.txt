@@ -1,0 +1,4 @@
+exact_root=/dev/shm/sharpemu-rho-rem90-9eYXpyPJ
+exact_root_exists=0
+prefix_dirs=0
+exact_root_java=0

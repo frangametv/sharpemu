@@ -1,0 +1,55 @@
+{
+  "executable_sha256": "4da65731b07fa2911b9468505b2f1fc0a56df7373356fdc1dfa886b00385d8d9",
+  "format": "sharpemu-ghidra-selected-nid-functions-v1",
+  "function_count": 2,
+  "functions": [
+    {
+      "external": false,
+      "function_body_addresses": 213,
+      "function_body_sha256": "6de005132ff129a7e317646f1dae330940aa667f32b7a11f94d5e7642ecb9e94",
+      "function_entry": "00001a10",
+      "function_name": "39WxhR-ePew#C#A",
+      "function_present": true,
+      "instruction_count": 49,
+      "log_file": "audit-01-Ajm-native.log",
+      "nid": "39WxhR-ePew",
+      "result_file": "01-Ajm-native.result.tsv",
+      "symbol": "39WxhR-ePew#C#A",
+      "symbol_address": "00001a10",
+      "thunk": false,
+      "thunk_target": "",
+      "thunk_target_external": null
+    },
+    {
+      "external": false,
+      "function_body_addresses": 445,
+      "function_body_sha256": "360dde386495a14eec1f6c54b63a656959b6365af7968a0ec4a30a38042cc6b7",
+      "function_entry": "00000e10",
+      "function_name": "5tOfnaClcqM#C#A",
+      "function_present": true,
+      "instruction_count": 124,
+      "log_file": "audit-01-Ajm-native.log",
+      "nid": "5tOfnaClcqM",
+      "result_file": "01-Ajm-native.result.tsv",
+      "symbol": "5tOfnaClcqM#C#A",
+      "symbol_address": "00000e10",
+      "thunk": false,
+      "thunk_target": "",
+      "thunk_target_external": null
+    }
+  ],
+  "ghidra_version": "12.1.2_PUBLIC_20260605",
+  "missing": [],
+  "program_name": "libSceAjm.native.sprx",
+  "provenance": {
+    "audit_script_sha256": "f946f435e38dc99db306165473b180209d5db7e0581c6c52d3b417510f87dfa9",
+    "computer": "DESKTOP-RAAKAQJ",
+    "evidence_policy": "Ghidra analysis of exact Gen5 provider ELFs only; no Kyty or other emulator-derived source, contracts, or implementations.",
+    "log_sha256": "6afa0414e8193344f38015690f5487ac7969d419e41f329b768c870ee91ee0f8",
+    "plan_sha256": "7b98c992e0d65d55d9743b30b320ad197f0bc52bb803d5654398a701a814d831",
+    "provider_role": "selected_native_fallback",
+    "result_sha256": "04f7c8c7e1b6e955ee8997d2c96da447c84cbf0f4c1c5c545483db13a8652c0c"
+  },
+  "target_count": 2,
+  "without_functions": []
+}

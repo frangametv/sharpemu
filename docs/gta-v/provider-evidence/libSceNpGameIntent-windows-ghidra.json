@@ -1,0 +1,70 @@
+{
+  "executable_sha256": "7b8533f64300c45e45db6fb120c2609a3fcda7b05b0052aecc9a080c77b771ad",
+  "format": "sharpemu-ghidra-selected-nid-functions-v1",
+  "function_count": 3,
+  "functions": [
+    {
+      "external": false,
+      "function_body_addresses": 42,
+      "function_body_sha256": "922500d5316d989863c80115ce05f73c503289a833cef7c2930dcc9839ee4544",
+      "function_entry": "000008d0",
+      "function_name": "0HBYxYAjmf0#H#A",
+      "function_present": true,
+      "instruction_count": 12,
+      "nid": "0HBYxYAjmf0",
+      "result_file": "libSceNpGameIntent-chunk-00.result.tsv",
+      "symbol": "0HBYxYAjmf0#H#A",
+      "symbol_address": "000008d0",
+      "thunk": false,
+      "thunk_target": "",
+      "thunk_target_external": null,
+      "wave": "wave2"
+    },
+    {
+      "external": false,
+      "function_body_addresses": 90,
+      "function_body_sha256": "48a9a47aa4a66286c985c462164d96a544708dfabab434d8961d60953af45b5a",
+      "function_entry": "00000900",
+      "function_name": "jEIXUAr9XE8#H#A",
+      "function_present": true,
+      "instruction_count": 29,
+      "nid": "jEIXUAr9XE8",
+      "result_file": "libSceNpGameIntent-chunk-00.result.tsv",
+      "symbol": "jEIXUAr9XE8#H#A",
+      "symbol_address": "00000900",
+      "thunk": false,
+      "thunk_target": "",
+      "thunk_target_external": null,
+      "wave": "wave2"
+    },
+    {
+      "external": false,
+      "function_body_addresses": 228,
+      "function_body_sha256": "2ebab8dba3611f38f8cc88a33ec3a6b3735d28f18f68b2981cf477d37680ac2b",
+      "function_entry": "00000960",
+      "function_name": "rPl0INNc-M8#H#A",
+      "function_present": true,
+      "instruction_count": 67,
+      "nid": "rPl0INNc-M8",
+      "result_file": "libSceNpGameIntent-chunk-00.result.tsv",
+      "symbol": "rPl0INNc-M8#H#A",
+      "symbol_address": "00000960",
+      "thunk": false,
+      "thunk_target": "",
+      "thunk_target_external": null,
+      "wave": "wave2"
+    }
+  ],
+  "ghidra_version": "12.1.2_PUBLIC_20260605",
+  "missing": [],
+  "program_name": "libSceNpGameIntent.sprx",
+  "provenance": {
+    "audit_sha256": "a28951db44df6f026715f9ab8e47b992cea172e396bc6d80b4383e00c14f2be6",
+    "evidence_policy": "Ghidra analysis of exact Gen5 provider ELFs only; no Kyty-derived contracts or implementations.",
+    "excluded_nids": [],
+    "recommendations_sha256": "f059a17f1440499c499311093ac225a428f19c5a8776c41ca609aecd670df7c5",
+    "summary_sha256": "e1e93ff2f5967daa1d6f838b08f4490de7144118032e0d4e413cb767ab50e0a2"
+  },
+  "target_count": 3,
+  "without_functions": []
+}

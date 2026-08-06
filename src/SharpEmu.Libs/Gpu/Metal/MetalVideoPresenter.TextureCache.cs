@@ -43,6 +43,7 @@ internal static partial class MetalVideoPresenter
         texture.DstSelect,
         texture.TileMode,
         texture.Pitch,
+        texture.SourceOffset,
         texture.Sampler);
 
     /// <summary>Storage textures are shader-writable on the GPU, so their
@@ -68,9 +69,13 @@ internal static partial class MetalVideoPresenter
         _ = MetalNative.Send(handle, MetalNative.Selector("retain"));
         _drawTextureCache[key] = handle;
         _cachedDrawTextureIdentities[key] = 0;
-        // No GuestImageWriteTracker.Track: watch-only cache registrations
-        // widened the managed-write hot path. CPU-backed / protected images
-        // own dirty notifications used for eviction.
+        GuestImageWriteTracker.Track(
+            texture.Address,
+            texture.GuestAllocationByteCount != 0
+                ? texture.GuestAllocationByteCount
+                : (ulong)texture.RgbaPixels.Length,
+            Volatile.Read(ref _executingGuestWorkSequence),
+            "metal.texture-cache");
     }
 
     /// <summary>

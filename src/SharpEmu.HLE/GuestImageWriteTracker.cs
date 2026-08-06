@@ -7,6 +7,34 @@ using System.Runtime.InteropServices;
 
 namespace SharpEmu.HLE;
 
+public readonly record struct GuestWriteFaultContext(
+    ulong InstructionAddress = 0,
+    ulong Rax = 0,
+    ulong Rcx = 0,
+    ulong Rdx = 0,
+    ulong Rbx = 0,
+    ulong Rsp = 0,
+    ulong Rbp = 0,
+    ulong Rsi = 0,
+    ulong Rdi = 0,
+    ulong R12 = 0,
+    ulong R13 = 0,
+    ulong R14 = 0,
+    ulong R15 = 0,
+    ulong Stack0 = 0,
+    ulong Stack1 = 0,
+    ulong Stack2 = 0,
+    ulong Stack3 = 0,
+    ulong Stack4 = 0,
+    ulong Stack5 = 0,
+    ulong Stack6 = 0,
+    ulong Stack7 = 0);
+
+public readonly record struct GuestWriteFaultInfo(
+    ulong Address,
+    ulong Page,
+    GuestWriteFaultContext Context);
+
 /// <summary>
 /// Detects guest CPU writes into memory that backs a host GPU image. On PS5
 /// render targets alias unified memory, so games freely mix CPU writes and GPU
@@ -46,6 +74,7 @@ public static unsafe class GuestImageWriteTracker
         public long FirstCpuWriteTimestampNanoseconds;
         public ulong FirstCpuWriteAddress;
         public ulong FirstCpuWritePage;
+        public GuestWriteFaultContext FirstCpuWriteContext;
         public string Source = "unspecified";
     }
 
@@ -88,10 +117,16 @@ public static unsafe class GuestImageWriteTracker
     private static RangeSnapshot _rangeSnapshot = RangeSnapshot.Empty;
 
     private static readonly bool _enabled =
-        string.Equals(
-            Environment.GetEnvironmentVariable("SHARPEMU_GUEST_IMAGE_CPU_SYNC"),
-            "1",
-            StringComparison.Ordinal);
+        Environment.GetEnvironmentVariable("SHARPEMU_GUEST_IMAGE_CPU_SYNC") != "0";
+    private static readonly bool _configuredGuestMemoryTraceEnabled = string.Equals(
+        Environment.GetEnvironmentVariable(
+            "SHARPEMU_TRACE_GUEST_MEMORY_CPU_WRITES"),
+        "1",
+        StringComparison.Ordinal);
+    private static readonly (ulong Address, ulong Length)[]
+        _configuredGuestMemoryTraceRanges = ParseAddressRanges(
+            Environment.GetEnvironmentVariable(
+                "SHARPEMU_TRACE_GUEST_MEMORY_RANGES"));
     private static readonly (bool Wildcard, ulong[] Addresses) _lifetimeTraceFilter =
         ParseAddressList(Environment.GetEnvironmentVariable("SHARPEMU_TRACE_GUEST_IMAGE_ADDRS"));
     private static readonly (bool Wildcard, string[] Sources) _lifetimeSourceTraceFilter =
@@ -138,31 +173,39 @@ public static unsafe class GuestImageWriteTracker
     public static bool Enabled => _enabled;
 
     /// <summary>
-    /// Test/diagnostics helper: whether <paramref name="address"/> is tracked
-    /// with write protection armed (watch-only ranges report protect=false).
+    /// Arms configured diagnostic ranges as soon as a guest virtual mapping
+    /// covers them. This catches upload/file-loader stores that occur before
+    /// the first AGC submission; later AGC polling reports the captured RIP.
     /// </summary>
-    public static bool TryGetProtectionState(
-        ulong address,
-        out bool protect,
-        out bool armed)
+    public static void TrackConfiguredGuestMemoryRanges(
+        ulong mappedAddress,
+        ulong byteCount)
     {
-        protect = false;
-        armed = false;
-        if (!_enabled)
+        if (!_enabled ||
+            !_configuredGuestMemoryTraceEnabled ||
+            mappedAddress == 0 ||
+            byteCount == 0)
         {
-            return false;
+            return;
         }
 
-        lock (_gate)
+        var mappedEnd = byteCount > ulong.MaxValue - mappedAddress
+            ? ulong.MaxValue
+            : mappedAddress + byteCount;
+        foreach (var range in _configuredGuestMemoryTraceRanges)
         {
-            if (!_rangesByAddress.TryGetValue(address, out var range))
+            var rangeEnd = range.Length > ulong.MaxValue - range.Address
+                ? ulong.MaxValue
+                : range.Address + range.Length;
+            if (range.Address < mappedAddress || rangeEnd > mappedEnd)
             {
-                return false;
+                continue;
             }
 
-            protect = range.Protect;
-            armed = Volatile.Read(ref range.Armed) != 0;
-            return true;
+            Track(
+                range.Address,
+                range.Length,
+                source: "configured-guest-memory-range");
         }
     }
 
@@ -366,6 +409,51 @@ public static unsafe class GuestImageWriteTracker
         }
     }
 
+    public static bool TryGetFirstCpuWriteContext(
+        ulong address,
+        out GuestWriteFaultContext context)
+    {
+        if (TryGetFirstCpuWriteInfo(address, out var info))
+        {
+            context = info.Context;
+            return true;
+        }
+
+        context = default;
+        return false;
+    }
+
+    public static bool TryGetFirstCpuWriteInfo(
+        ulong address,
+        out GuestWriteFaultInfo info)
+    {
+        info = default;
+        if (!_enabled)
+        {
+            return false;
+        }
+
+        lock (_gate)
+        {
+            if (!_rangesByAddress.TryGetValue(address, out var range))
+            {
+                return false;
+            }
+
+            FlushPendingFirstCpuWrite(range);
+            if (Volatile.Read(ref range.FirstCpuWriteSeen) != 2)
+            {
+                return false;
+            }
+
+            info = new GuestWriteFaultInfo(
+                range.FirstCpuWriteAddress,
+                range.FirstCpuWritePage,
+                range.FirstCpuWriteContext);
+            return true;
+        }
+    }
+
     public static void Rearm(ulong address)
     {
         if (!_enabled)
@@ -475,7 +563,16 @@ public static unsafe class GuestImageWriteTracker
     /// range, restore write access, mark the range dirty, and return true so
     /// the faulting write can be retried. Must not allocate or lock.
     /// </summary>
-    public static bool TryHandleWriteFault(ulong faultAddress)
+    public static bool TryHandleWriteFault(
+        ulong faultAddress,
+        ulong instructionAddress = 0) =>
+        TryHandleWriteFault(
+            faultAddress,
+            new GuestWriteFaultContext(instructionAddress));
+
+    public static bool TryHandleWriteFault(
+        ulong faultAddress,
+        in GuestWriteFaultContext context)
     {
         if (!_enabled || faultAddress == 0)
         {
@@ -567,17 +664,23 @@ public static unsafe class GuestImageWriteTracker
                 Interlocked.Increment(ref range.WriteGeneration);
             }
             if (wasArmed &&
-                range.TraceLifetime &&
                 Interlocked.CompareExchange(ref range.FirstCpuWriteSeen, 1, 0) == 0)
             {
                 // Signal context: capture preallocated scalar fields only.
-                // Formatting and I/O are deferred to a locked safe path.
-                range.FirstCpuWriteTraceSequence =
-                    Interlocked.Increment(ref _lifetimeTraceSequence);
-                range.FirstCpuWriteTimestampNanoseconds = GetMonotonicNanoseconds();
+                // Formatting and I/O are deferred to a locked safe path. The
+                // handler call itself is authoritative even when mprotect
+                // could not arm the page, so diagnostics are not lost merely
+                // because the platform protection fallback was unavailable.
                 range.FirstCpuWriteAddress = faultAddress;
                 range.FirstCpuWritePage = faultAddress & ~0xFFFUL;
-                Volatile.Write(ref range.PendingFirstCpuWrite, 1);
+                range.FirstCpuWriteContext = context;
+                if (range.TraceLifetime)
+                {
+                    range.FirstCpuWriteTraceSequence =
+                        Interlocked.Increment(ref _lifetimeTraceSequence);
+                    range.FirstCpuWriteTimestampNanoseconds = GetMonotonicNanoseconds();
+                    Volatile.Write(ref range.PendingFirstCpuWrite, 1);
+                }
                 Volatile.Write(ref range.FirstCpuWriteSeen, 2);
             }
         }
@@ -694,6 +797,50 @@ public static unsafe class GuestImageWriteTracker
         return (false, parsedAddresses.ToArray());
     }
 
+    private static (ulong Address, ulong Length)[] ParseAddressRanges(string? ranges)
+    {
+        if (string.IsNullOrWhiteSpace(ranges))
+        {
+            return [];
+        }
+
+        var parsedRanges = new List<(ulong Address, ulong Length)>();
+        foreach (var item in ranges.Split(
+                     ',',
+                     StringSplitOptions.RemoveEmptyEntries |
+                     StringSplitOptions.TrimEntries))
+        {
+            var separator = item.IndexOf(':');
+            if (separator <= 0 || separator == item.Length - 1)
+            {
+                continue;
+            }
+
+            static bool TryParseHex(ReadOnlySpan<char> value, out ulong parsed)
+            {
+                if (value.StartsWith("0x", StringComparison.OrdinalIgnoreCase))
+                {
+                    value = value[2..];
+                }
+
+                return ulong.TryParse(
+                    value,
+                    NumberStyles.HexNumber,
+                    CultureInfo.InvariantCulture,
+                    out parsed);
+            }
+
+            if (TryParseHex(item.AsSpan(0, separator), out var address) &&
+                TryParseHex(item.AsSpan(separator + 1), out var length) &&
+                length != 0)
+            {
+                parsedRanges.Add((address, length));
+            }
+        }
+
+        return parsedRanges.Distinct().ToArray();
+    }
+
     private static bool ShouldTraceSource(string source)
     {
         if (_lifetimeSourceTraceFilter.Wildcard)
@@ -745,6 +892,7 @@ public static unsafe class GuestImageWriteTracker
             "first-cpu-write-disarm",
             range.FirstCpuWriteAddress,
             range.FirstCpuWritePage,
+            range.FirstCpuWriteContext,
             range.FirstCpuWriteTraceSequence,
             range.FirstCpuWriteTimestampNanoseconds);
     }
@@ -754,6 +902,7 @@ public static unsafe class GuestImageWriteTracker
         string operation,
         ulong faultAddress = 0,
         ulong faultPage = 0,
+        GuestWriteFaultContext context = default,
         long traceSequence = 0,
         long timestampNanoseconds = 0)
     {
@@ -769,12 +918,25 @@ public static unsafe class GuestImageWriteTracker
 
         var elapsedMilliseconds =
             (timestampNanoseconds - _lifetimeTraceEpochNanoseconds) / 1_000_000.0;
+        var registerDescription = context.InstructionAddress == 0
+            ? string.Empty
+            : $" rax=0x{context.Rax:X16} rcx=0x{context.Rcx:X16} " +
+              $"rdx=0x{context.Rdx:X16} rbx=0x{context.Rbx:X16} " +
+              $"rsp=0x{context.Rsp:X16} rbp=0x{context.Rbp:X16} " +
+              $"rsi=0x{context.Rsi:X16} rdi=0x{context.Rdi:X16} " +
+              $"r12=0x{context.R12:X16} r13=0x{context.R13:X16} " +
+              $"r14=0x{context.R14:X16} r15=0x{context.R15:X16} " +
+              $"stack=0x{context.Stack0:X16}/0x{context.Stack1:X16}/" +
+              $"0x{context.Stack2:X16}/0x{context.Stack3:X16}/" +
+              $"0x{context.Stack4:X16}/0x{context.Stack5:X16}/" +
+              $"0x{context.Stack6:X16}/0x{context.Stack7:X16}";
         Console.Error.WriteLine(
             $"[WT][LIFETIME] seq={traceSequence} t_ms={elapsedMilliseconds:F3} " +
             $"event={operation} source_seq={range.SourceSequence} source='{range.Source}' " +
             $"requested=0x{range.Address:X16}+0x{range.ByteCount:X} " +
             $"range=0x{range.Start:X16}..0x{range.End:X16} " +
-            $"fault=0x{faultAddress:X16} page=0x{faultPage:X16}");
+            $"fault=0x{faultAddress:X16} page=0x{faultPage:X16} " +
+            $"ip=0x{context.InstructionAddress:X16}{registerDescription}");
     }
 
     private static bool TrySetProtection(ulong start, ulong length, bool writable)

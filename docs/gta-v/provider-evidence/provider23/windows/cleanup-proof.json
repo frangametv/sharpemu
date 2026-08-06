@@ -1,0 +1,21 @@
+{
+  "check": "independent-post-cleanup",
+  "campaign_root": "C:\\Users\\Miguel Cruz\\AppData\\Local\\Temp\\cg-gh-swarm-20260718-rem23-6c8f4e2a",
+  "root_exists": false,
+  "cleanup_script_exists": false,
+  "cleanup_proof_exists": false,
+  "verifier_self_removed": true,
+  "campaign_java": 0,
+  "all_java": 0,
+  "matching_temp_entries": 0,
+  "matching_home_entries": 0,
+  "verified": true,
+  "timestamp_utc": "2026-07-18T08:21:29.1447517Z",
+  "read_only_followup": {
+    "root_exists": false,
+    "matching_temp_entries": 0,
+    "matching_home_entries": 0,
+    "java_processes": 0,
+    "timestamp_utc": "2026-07-18T08:23:40.468Z"
+  }
+}

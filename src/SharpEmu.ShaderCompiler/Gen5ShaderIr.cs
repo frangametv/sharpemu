@@ -52,7 +52,8 @@ public enum Gen5PixelOutputKind
 public readonly record struct Gen5PixelOutputBinding(
     uint GuestSlot,
     uint HostLocation,
-    Gen5PixelOutputKind Kind);
+    Gen5PixelOutputKind Kind,
+    uint WriteMask = 0xFu);
 
 public readonly record struct Gen5ShaderResourceMapping(
     Gen5ShaderResourceKind Kind,
@@ -119,12 +120,120 @@ public readonly record struct Gen5ComputeSystemRegisters(
     }
 }
 
+/// <summary>
+/// Static system SGPR values injected by the graphics front end for merged
+/// GFX9+ shaders. User SGPRs begin at s8 for these stages, while s0:s1 carry
+/// the indirect graphics user-data table selected by the GS register bank.
+/// </summary>
+public readonly record struct Gen5GraphicsSystemRegisters(
+    ulong IndirectUserDataAddress,
+    uint? MergedWaveInfo = null)
+{
+    public void Apply(Span<uint> scalarRegisters)
+    {
+        if (scalarRegisters.Length < 2)
+        {
+            return;
+        }
+
+        scalarRegisters[0] = unchecked((uint)IndirectUserDataAddress);
+        scalarRegisters[1] = unchecked((uint)(IndirectUserDataAddress >> 32));
+        if (MergedWaveInfo is { } mergedWaveInfo && scalarRegisters.Length > 3)
+        {
+            scalarRegisters[3] = mergedWaveInfo;
+        }
+    }
+}
+
+/// <summary>
+/// Shared storage layout used to lower a merged NGG export/geometry shader to
+/// compute, then rasterize the generated primitives with a fixed host vertex
+/// shader. Every offset is expressed in dwords within <see cref="BufferIndex"/>.
+/// </summary>
+public sealed record Gen5NggOutputLayout(
+    int BufferIndex,
+    uint MaximumPrimitiveCount,
+    uint MaximumVertexCount,
+    uint ParameterCount)
+{
+    public const uint DebugRegisterCount = 4;
+
+    public uint PrimitiveDataDwordOffset => 0;
+
+    public uint PrimitiveValidDwordOffset => MaximumPrimitiveCount;
+
+    public uint VertexValidDwordOffset => checked(MaximumPrimitiveCount * 2);
+
+    public uint PositionDwordOffset =>
+        checked(VertexValidDwordOffset + MaximumVertexCount);
+
+    public uint GetParameterDwordOffset(uint parameter)
+    {
+        if (parameter >= ParameterCount)
+        {
+            throw new ArgumentOutOfRangeException(nameof(parameter));
+        }
+
+        return checked(
+            PositionDwordOffset +
+            MaximumVertexCount * 4 * (parameter + 1));
+    }
+
+    public uint DebugRegisterDwordOffset => checked(
+        PositionDwordOffset +
+        MaximumVertexCount * 4 * (ParameterCount + 1));
+
+    // Keep a per-lane register snapshot at the end of the synthetic NGG
+    // buffer. It is ignored by the fixed raster shader and populated only
+    // when the compute-register capture environment variables select a PC.
+    // Reserving it unconditionally keeps the shader/buffer ABI stable while
+    // allowing a live Astro run to expose guest VGPRs without recompiling the
+    // host or mistaking LLDB's host CPU registers for guest GPU state.
+    public uint DwordCount => checked(
+        DebugRegisterDwordOffset +
+        MaximumVertexCount * DebugRegisterCount);
+
+    public int ByteLength => checked((int)DwordCount * sizeof(uint));
+}
+
 public sealed record Gen5ShaderState(
     Gen5ShaderProgram Program,
     IReadOnlyList<uint> UserData,
     Gen5ShaderMetadata? Metadata,
     Gen5ComputeSystemRegisters? ComputeSystemRegisters = null,
-    uint UserDataScalarRegisterBase = 0);
+    uint UserDataScalarRegisterBase = 0,
+    uint ProgramResource1 = 0,
+    Gen5GraphicsSystemRegisters? GraphicsSystemRegisters = null);
+
+/// <summary>
+/// Shared ABI for the per-draw scalar block consumed by translated shaders.
+/// Buffer metadata is interleaved by absolute descriptor index so every stage
+/// can address its own bindings without knowing another stage's binding count.
+/// </summary>
+public static class Gen5RuntimeScalarLayout
+{
+    public const int ScalarRegisterDwordCount = 256;
+    public const int BufferMetadataDwordCount = 2;
+
+    public static int GetByteBiasDwordIndex(int bindingIndex)
+    {
+        ArgumentOutOfRangeException.ThrowIfNegative(bindingIndex);
+        return checked(
+            ScalarRegisterDwordCount +
+            bindingIndex * BufferMetadataDwordCount);
+    }
+
+    public static int GetBufferDwordCountDwordIndex(int bindingIndex) =>
+        checked(GetByteBiasDwordIndex(bindingIndex) + 1);
+
+    public static int GetDwordLength(int bindingCount)
+    {
+        ArgumentOutOfRangeException.ThrowIfNegative(bindingCount);
+        return checked(
+            ScalarRegisterDwordCount +
+            bindingCount * BufferMetadataDwordCount);
+    }
+}
 
 public readonly record struct Gen5Operand(Gen5OperandKind Kind, uint Value)
 {
@@ -238,10 +347,11 @@ public sealed record Gen5SdwaControl(
     bool Clamp,
     uint? ScalarDestination) : Gen5InstructionControl;
 
-// Packed (VOP3P) source and destination modifiers. Each mask holds one bit per
-// source operand. OpSel/OpSelHi pick which 16-bit half of a source feeds the low
-// and high result lanes respectively; NegLo/NegHi negate the value routed to each
-// lane. Clamp saturates each output half to [0, 1].
+// VOP3P source and destination modifiers. For packed operations, OpSel/OpSelHi
+// pick which 16-bit half feeds the low/high result lane and NegLo/NegHi negate
+// that lane's operands. MIX operations instead combine the two selector bits per
+// source (00/01=f32, 10=low f16, 11=high f16), and reinterpret NegHi as ABS.
+// Clamp saturates the result to [0, 1].
 public sealed record Gen5Vop3pControl(
     uint OpSelMask,
     uint OpSelHiMask,

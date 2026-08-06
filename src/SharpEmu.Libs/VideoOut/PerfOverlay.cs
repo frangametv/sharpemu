@@ -5,6 +5,10 @@ using System.Diagnostics;
 
 namespace SharpEmu.Libs.VideoOut;
 
+// Attribution: the original performance-overlay implementation was authored by @xnetcat
+// and later adapted in PR #216. Source snapshot:
+// https://github.com/xnetcat/sharpemu/tree/2497ea6799432ac2385a50f739eff2ce922d6fd4
+
 /// <summary>
 /// In-window performance HUD. The panel is rasterized on the CPU into a
 /// small BGRA buffer each frame (embedded 5x7 font, no assets) and the
