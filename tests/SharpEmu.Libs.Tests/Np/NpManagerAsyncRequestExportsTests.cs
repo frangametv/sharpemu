@@ -323,15 +323,28 @@ public sealed class NpManagerAsyncRequestExportsTests : IDisposable
 
         var deleteContext = new CpuContext(_memory, Generation.Gen5);
         deleteContext[CpuRegister.Rdi] = (ulong)requestId;
-        var deleteTask = Task.Run(() => NpManagerExports.NpDeleteRequest(deleteContext));
+        // The operation deliberately blocks a thread-pool worker. Run delete
+        // on a dedicated thread so a constrained CI thread pool cannot starve
+        // the very operation this test is waiting to observe.
+        var deleteTask = Task.Factory.StartNew(
+            () => NpManagerExports.NpDeleteRequest(deleteContext),
+            CancellationToken.None,
+            TaskCreationOptions.LongRunning,
+            TaskScheduler.Default);
 
-        Assert.True(SpinWait.SpinUntil(
-            () => NpManagerAsyncRequests.LiveCountForTests == 0,
-            TimeSpan.FromSeconds(2)));
-        var firstCompleted = await Task.WhenAny(deleteTask, Task.Delay(TimeSpan.FromMilliseconds(100)));
-        Assert.NotSame(deleteTask, firstCompleted);
+        try
+        {
+            Assert.True(SpinWait.SpinUntil(
+                () => NpManagerAsyncRequests.LiveCountForTests == 0,
+                TimeSpan.FromSeconds(2)));
+            var firstCompleted = await Task.WhenAny(deleteTask, Task.Delay(TimeSpan.FromMilliseconds(100)));
+            Assert.NotSame(deleteTask, firstCompleted);
+        }
+        finally
+        {
+            release.Set();
+        }
 
-        release.Set();
         Assert.Equal(0, await deleteTask);
         Assert.Equal(0UL, deleteContext[CpuRegister.Rax]);
         AssertPoll(requestId, ResultAddress, ErrorRequestNotFound);
