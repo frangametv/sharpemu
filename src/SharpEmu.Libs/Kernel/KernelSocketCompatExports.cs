@@ -11,6 +11,8 @@ namespace SharpEmu.Libs.Kernel;
 
 internal static class KernelSocketCompatExports
 {
+    private static readonly TimeSpan HostTcpConnectTimeout = TimeSpan.FromSeconds(5);
+
     private sealed class EmulatedSocketState
     {
         public TcpClient? Client;
@@ -556,15 +558,15 @@ internal static class KernelSocketCompatExports
         client = new TcpClient();
         try
         {
-            var connectTask = client.ConnectAsync(ipAddress, port);
-            if (!connectTask.Wait(TimeSpan.FromMilliseconds(500)))
-            {
-                client.Dispose();
-                client = null!;
-                return false;
-            }
-
-            return true;
+            using var timeout = new CancellationTokenSource(HostTcpConnectTimeout);
+            client.ConnectAsync(ipAddress, port, timeout.Token).AsTask().GetAwaiter().GetResult();
+            return client.Connected;
+        }
+        catch (OperationCanceledException)
+        {
+            client.Dispose();
+            client = null!;
+            return false;
         }
         catch (SocketException)
         {
