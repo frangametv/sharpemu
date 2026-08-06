@@ -4,24 +4,6 @@
 name: Build and Release
 
 on:
-  push:
-    branches:
-      - "**"
-    tags:
-      - "v*"
-    paths-ignore:
-      - "**/*.md"
-      - "**/*.png"
-      - "**/*.jpeg"
-      - "**/*.jpg"
-  pull_request:
-    branches:
-      - main
-    paths-ignore:
-      - "**/*.md"
-      - "**/*.png"
-      - "**/*.jpeg"
-      - "**/*.jpg"
   workflow_dispatch:
 
 permissions:
