@@ -12,6 +12,13 @@ public sealed class SysAbiExportAttribute : Attribute
 
     public string ExportName { get; set; } = string.Empty;
 
+    /// <summary>
+    /// Marks <see cref="ExportName"/> as a local diagnostic label for an explicit
+    /// NID whose real symbol name is unavailable. Synthetic names are intentionally
+    /// exempt from PS5 symbol-catalog validation.
+    /// </summary>
+    public bool IsSyntheticName { get; set; }
+
     public Generation Target { get; set; } = Generation.None;
 
     /// <summary>

@@ -31,6 +31,7 @@ public static class VoiceQoSExports
     [SysAbiExport(
         Nid = "FuXenJLkk-c",
         ExportName = "sceVoiceQoSTerminate",
+        IsSyntheticName = true,
         Target = Generation.Gen4 | Generation.Gen5,
         LibraryName = "libSceVoiceQoS")]
     public static int VoiceQoSTerminate(CpuContext ctx)
@@ -42,6 +43,7 @@ public static class VoiceQoSExports
     [SysAbiExport(
         Nid = "+0lOiPZjnBI",
         ExportName = "sceVoiceQoSSetMode",
+        IsSyntheticName = true,
         Target = Generation.Gen4 | Generation.Gen5,
         LibraryName = "libSceVoiceQoS")]
     public static int VoiceQoSSetMode(CpuContext ctx)

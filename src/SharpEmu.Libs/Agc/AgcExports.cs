@@ -2033,6 +2033,7 @@ public static partial class AgcExports
     [SysAbiExport(
         Nid = "Ikfdt-rIqCE",
         ExportName = "Ikfdt-rIqCE#G#A",
+        IsSyntheticName = true,
         Target = Generation.Gen5,
         LibraryName = "libSceAgc")]
     public static int ConfigureUnknownPatchDescriptor(CpuContext ctx)

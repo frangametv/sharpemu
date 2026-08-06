@@ -2702,6 +2702,7 @@ public static class KernelRuntimeCompatExports
     [SysAbiExport(
         Nid = "cHlIo6CoRTA",
         ExportName = "sceKernelGetNamedMemoryDomainCompat1270",
+        IsSyntheticName = true,
         Target = Generation.Gen5,
         LibraryName = "libKernel")]
     public static int KernelGetNamedMemoryDomainCompat1270(CpuContext ctx)

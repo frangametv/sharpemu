@@ -202,7 +202,7 @@ public sealed class SysAbiExportAnalyzer : DiagnosticAnalyzer
                 effectiveNid = computed;
             }
 
-            if (catalogNames is not null && !nameInCatalog)
+            if (catalogNames is not null && !nameInCatalog && !arguments.IsSyntheticName)
             {
                 context.ReportDiagnostic(Diagnostic.Create(
                     SysAbiDiagnostics.NameNotInCatalog, location, arguments.ExportName));

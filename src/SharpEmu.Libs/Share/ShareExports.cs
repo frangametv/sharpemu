@@ -21,7 +21,6 @@ public static class ShareExports
     private static string _contentParam = string.Empty;
     private static readonly object _callbackGate = new();
     private static ulong _contentEventCallback;
-    private static ulong _contentEventCallbackArgument;
 
     private sealed record ContentEventRegistration(ulong Callback, ulong UserData);
 
@@ -188,7 +187,6 @@ public static class ShareExports
             if (_contentEventCallback == callback)
             {
                 _contentEventCallback = 0;
-                _contentEventCallbackArgument = 0;
             }
         }
 

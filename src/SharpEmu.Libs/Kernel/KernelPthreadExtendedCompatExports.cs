@@ -471,6 +471,7 @@ public static class KernelPthreadExtendedCompatExports
     [SysAbiExport(
         Nid = "CfO+zWMbJJQ",
         ExportName = "__sharpemu_gen5_thrd_detach",
+        IsSyntheticName = true,
         Target = Generation.Gen5,
         LibraryName = "libc")]
     public static int Gen5ThrdDetach(CpuContext ctx) => PthreadDetach(ctx);

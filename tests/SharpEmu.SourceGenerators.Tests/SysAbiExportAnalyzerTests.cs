@@ -257,6 +257,30 @@ public sealed class SysAbiExportAnalyzerTests
     }
 
     [Fact]
+    public void ExplicitSyntheticNameDoesNotRequireCatalogEntry()
+    {
+        const string source = """
+            using SharpEmu.HLE;
+
+            public static class Exports
+            {
+                [SysAbiExport(
+                    Nid = "Zxa0VhQVTsk",
+                    ExportName = "sceKernelUnknownSyntheticLabel",
+                    IsSyntheticName = true,
+                    Target = Generation.Gen5)]
+                public static int Synthetic(CpuContext ctx) => 0;
+            }
+            """;
+
+        var catalog = new InMemoryAdditionalText(
+            "/repo/scripts/ps5_names.txt",
+            "sceKernelWaitSema\nsceKernelSignalSema\n");
+
+        Assert.Empty(Analyze(source, catalog));
+    }
+
+    [Fact]
     public void PrivateHandlerIsReported()
     {
         var diagnostics = Analyze("""

@@ -79,6 +79,7 @@ public static class LibcInternalExports
     [SysAbiExport(
         Nid = "iPBqs+YUUFw",
         ExportName = "__atomic_fetch_add_4_compat1270",
+        IsSyntheticName = true,
         Target = Generation.Gen5,
         LibraryName = "libSceLibcInternal")]
     public static int AtomicFetchAdd32Compat1270(CpuContext ctx)
@@ -89,6 +90,7 @@ public static class LibcInternalExports
     [SysAbiExport(
         Nid = "2HnmKiLmV6s",
         ExportName = "__atomic_fetch_sub_4_compat1270",
+        IsSyntheticName = true,
         Target = Generation.Gen5,
         LibraryName = "libSceLibcInternal")]
     public static int AtomicFetchSub32Compat1270(CpuContext ctx)

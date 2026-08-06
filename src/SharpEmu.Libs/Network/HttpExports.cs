@@ -81,6 +81,7 @@ public static class HttpExports
     [SysAbiExport(
         Nid = "XNUoD2B9a6A",
         ExportName = "sceHttpSetIntOptionCompat1270",
+        IsSyntheticName = true,
         Target = Generation.Gen5,
         LibraryName = "libSceHttp")]
     public static int HttpSetIntOptionCompat1270(CpuContext ctx)

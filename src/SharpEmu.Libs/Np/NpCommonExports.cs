@@ -187,6 +187,7 @@ public static class NpCommonExports
     [SysAbiExport(
         Nid = "V75N47uYdQc",
         ExportName = "sceNpObjectNewCallbackAllocatorCompat1270",
+        IsSyntheticName = true,
         Target = Generation.Gen5,
         LibraryName = "libSceNpCommon")]
     public static int NpObjectNewCallbackAllocatorCompat1270(CpuContext ctx)
@@ -199,6 +200,7 @@ public static class NpCommonExports
     [SysAbiExport(
         Nid = "mzlILsFx0cU",
         ExportName = "sceNpAllocatorAllocateCompat1270",
+        IsSyntheticName = true,
         Target = Generation.Gen5,
         LibraryName = "libSceNpCommon")]
     public static int NpAllocatorAllocateCompat1270(CpuContext ctx)
@@ -229,6 +231,7 @@ public static class NpCommonExports
     [SysAbiExport(
         Nid = "BztTl7QeYqE",
         ExportName = "sceNpAllocatorFreeCompat1270",
+        IsSyntheticName = true,
         Target = Generation.Gen5,
         LibraryName = "libSceNpCommon")]
     public static int NpAllocatorFreeCompat1270(CpuContext ctx)
@@ -246,6 +249,7 @@ public static class NpCommonExports
     [SysAbiExport(
         Nid = "kBON3bAtfGs",
         ExportName = "sceNpGetPlatformEnvironmentCompat1270",
+        IsSyntheticName = true,
         Target = Generation.Gen5,
         LibraryName = "libSceNpCommon")]
     public static int NpGetPlatformEnvironmentCompat1270(CpuContext ctx)
@@ -275,6 +279,7 @@ public static class NpCommonExports
     [SysAbiExport(
         Nid = "dV+zK-Ce-2E",
         ExportName = "sceNpIpcClientConstructorCompat1270",
+        IsSyntheticName = true,
         Target = Generation.Gen5,
         LibraryName = "libSceNpCommon")]
     public static int NpIpcClientConstructorCompat1270(CpuContext ctx)
@@ -299,6 +304,7 @@ public static class NpCommonExports
     [SysAbiExport(
         Nid = "oLpLfV2Ov9A",
         ExportName = "sceNpIpcClientInitializeCompat1270",
+        IsSyntheticName = true,
         Target = Generation.Gen5,
         LibraryName = "libSceNpCommon")]
     public static int NpIpcClientInitializeCompat1270(CpuContext ctx)
@@ -321,6 +327,7 @@ public static class NpCommonExports
     [SysAbiExport(
         Nid = "pJlGhXEt5CU",
         ExportName = "sceNpCommonInitializeGlobalsCompat1270",
+        IsSyntheticName = true,
         Target = Generation.Gen5,
         LibraryName = "libSceNpCommon")]
     public static int NpCommonInitializeGlobalsCompat1270(CpuContext ctx)
@@ -335,6 +342,7 @@ public static class NpCommonExports
     [SysAbiExport(
         Nid = "XEXFdmQj5oI",
         ExportName = "sceNpEventSubscriptionConstructorCompat1270",
+        IsSyntheticName = true,
         Target = Generation.Gen5,
         LibraryName = "libSceNpCommon")]
     public static int NpEventSubscriptionConstructorCompat1270(CpuContext ctx)
@@ -356,6 +364,7 @@ public static class NpCommonExports
     [SysAbiExport(
         Nid = "kUitiIVR43g",
         ExportName = "sceNpEventSubscriptionDestructorCompat1270",
+        IsSyntheticName = true,
         Target = Generation.Gen5,
         LibraryName = "libSceNpCommon")]
     public static int NpEventSubscriptionDestructorCompat1270(CpuContext ctx)
@@ -374,6 +383,7 @@ public static class NpCommonExports
     [SysAbiExport(
         Nid = "esiO4He2WTU",
         ExportName = "sceNpEventQueueConstructorCompat1270",
+        IsSyntheticName = true,
         Target = Generation.Gen5,
         LibraryName = "libSceNpCommon")]
     public static int NpEventQueueConstructorCompat1270(CpuContext ctx)
@@ -392,6 +402,7 @@ public static class NpCommonExports
     [SysAbiExport(
         Nid = "8kUkQPQP7bA",
         ExportName = "sceNpEventQueueDestructorCompat1270",
+        IsSyntheticName = true,
         Target = Generation.Gen5,
         LibraryName = "libSceNpCommon")]
     public static int NpEventQueueDestructorCompat1270(CpuContext ctx)
@@ -410,6 +421,7 @@ public static class NpCommonExports
     [SysAbiExport(
         Nid = "b20e017Ei94",
         ExportName = "sceNpEventQueueInitializeCompat1270",
+        IsSyntheticName = true,
         Target = Generation.Gen5,
         LibraryName = "libSceNpCommon")]
     public static int NpEventQueueInitializeCompat1270(CpuContext ctx)
@@ -455,6 +467,7 @@ public static class NpCommonExports
     [SysAbiExport(
         Nid = "jxPY-0x8e-M",
         ExportName = "sceNpEventQueueIsEmptyCompat1270",
+        IsSyntheticName = true,
         Target = Generation.Gen5,
         LibraryName = "libSceNpCommon")]
     public static int NpEventQueueIsEmptyCompat1270(CpuContext ctx)
@@ -486,6 +499,7 @@ public static class NpCommonExports
     [SysAbiExport(
         Nid = "slmKkuIoC28",
         ExportName = "sceNpEventQueueSignalCompat1270",
+        IsSyntheticName = true,
         Target = Generation.Gen5,
         LibraryName = "libSceNpCommon")]
     public static int NpEventQueueSignalCompat1270(CpuContext ctx)
@@ -642,6 +656,7 @@ public static class NpCommonExports
     [SysAbiExport(
         Nid = "cMOgkE2M2e8",
         ExportName = "sceNpHandleConstructorCompat1270",
+        IsSyntheticName = true,
         Target = Generation.Gen5,
         LibraryName = "libSceNpCommon")]
     public static int NpHandleConstructorCompat1270(CpuContext ctx)
@@ -666,6 +681,7 @@ public static class NpCommonExports
     [SysAbiExport(
         Nid = "amFi-Av19hU",
         ExportName = "sceNpEventFlagInitializeCompat1270",
+        IsSyntheticName = true,
         Target = Generation.Gen5,
         LibraryName = "libSceNpCommon")]
     public static int NpEventFlagInitializeCompat1270(CpuContext ctx)
@@ -687,6 +703,7 @@ public static class NpCommonExports
     [SysAbiExport(
         Nid = "st-oQvV7HVI",
         ExportName = "sceNpEventFlagIsInitializedCompat1270",
+        IsSyntheticName = true,
         Target = Generation.Gen5,
         LibraryName = "libSceNpCommon")]
     public static int NpEventFlagIsInitializedCompat1270(CpuContext ctx)
@@ -705,6 +722,7 @@ public static class NpCommonExports
     [SysAbiExport(
         Nid = "8i-vOVRVt5w",
         ExportName = "sceNpEventFlagSetCompat1270",
+        IsSyntheticName = true,
         Target = Generation.Gen5,
         LibraryName = "libSceNpCommon")]
     public static int NpEventFlagSetCompat1270(CpuContext ctx) =>
@@ -713,6 +731,7 @@ public static class NpCommonExports
     [SysAbiExport(
         Nid = "QlaBcxSFPZI",
         ExportName = "sceNpEventFlagDestroyCompat1270",
+        IsSyntheticName = true,
         Target = Generation.Gen5,
         LibraryName = "libSceNpCommon")]
     public static int NpEventFlagDestroyCompat1270(CpuContext ctx)
@@ -729,6 +748,7 @@ public static class NpCommonExports
     [SysAbiExport(
         Nid = "fhJ5uKzcn0w",
         ExportName = "sceNpCreateDispatchThreadCompat1270",
+        IsSyntheticName = true,
         Target = Generation.Gen5,
         LibraryName = "libSceNpCommon")]
     public static int NpCreateDispatchThreadCompat1270(CpuContext ctx)
@@ -750,6 +770,7 @@ public static class NpCommonExports
     [SysAbiExport(
         Nid = "EjMsfO3GCIA",
         ExportName = "sceNpJoinDispatchThreadCompat1270",
+        IsSyntheticName = true,
         Target = Generation.Gen5,
         LibraryName = "libSceNpCommon")]
     public static int NpJoinDispatchThreadCompat1270(CpuContext ctx) =>
@@ -758,6 +779,7 @@ public static class NpCommonExports
     [SysAbiExport(
         Nid = "X6NVkdpRnog",
         ExportName = "sceNpWorkerConstructorCompat1270",
+        IsSyntheticName = true,
         Target = Generation.Gen5,
         LibraryName = "libSceNpCommon")]
     public static int NpWorkerConstructorCompat1270(CpuContext ctx)
@@ -784,6 +806,7 @@ public static class NpCommonExports
     [SysAbiExport(
         Nid = "1QFKnDJxk3A",
         ExportName = "sceNpWorkerDestructorCompat1270",
+        IsSyntheticName = true,
         Target = Generation.Gen5,
         LibraryName = "libSceNpCommon")]
     public static int NpWorkerDestructorCompat1270(CpuContext ctx)
@@ -797,6 +820,7 @@ public static class NpCommonExports
     [SysAbiExport(
         Nid = "+dGO+GS2ZXQ",
         ExportName = "sceNpWorkerInitializeCompat1270",
+        IsSyntheticName = true,
         Target = Generation.Gen5,
         LibraryName = "libSceNpCommon")]
     public static int NpWorkerInitializeCompat1270(CpuContext ctx)
@@ -839,6 +863,7 @@ public static class NpCommonExports
     [SysAbiExport(
         Nid = "VnQolo6vTr4",
         ExportName = "sceNpWorkerStartCompat1270",
+        IsSyntheticName = true,
         Target = Generation.Gen5,
         LibraryName = "libSceNpCommon")]
     public static int NpWorkerStartCompat1270(CpuContext ctx)
@@ -858,6 +883,7 @@ public static class NpCommonExports
     [SysAbiExport(
         Nid = "CznMfhTIvVY",
         ExportName = "sceNpWorkerIsInitializedCompat1270",
+        IsSyntheticName = true,
         Target = Generation.Gen5,
         LibraryName = "libSceNpCommon")]
     public static int NpWorkerIsInitializedCompat1270(CpuContext ctx)
@@ -869,6 +895,7 @@ public static class NpCommonExports
     [SysAbiExport(
         Nid = "eTy3L1azX4E",
         ExportName = "sceNpWorkerIsRunningCompat1270",
+        IsSyntheticName = true,
         Target = Generation.Gen5,
         LibraryName = "libSceNpCommon")]
     public static int NpWorkerIsRunningCompat1270(CpuContext ctx)
@@ -881,6 +908,7 @@ public static class NpCommonExports
     [SysAbiExport(
         Nid = "zmOmSLnqlBQ",
         ExportName = "sceNpWorkerNotifyCompat1270",
+        IsSyntheticName = true,
         Target = Generation.Gen5,
         LibraryName = "libSceNpCommon")]
     public static int NpWorkerNotifyCompat1270(CpuContext ctx) =>
@@ -889,6 +917,7 @@ public static class NpCommonExports
     [SysAbiExport(
         Nid = "4DE+nnCVRPA",
         ExportName = "sceNpWorkerStopCompat1270",
+        IsSyntheticName = true,
         Target = Generation.Gen5,
         LibraryName = "libSceNpCommon")]
     public static int NpWorkerStopCompat1270(CpuContext ctx)
@@ -905,6 +934,7 @@ public static class NpCommonExports
     [SysAbiExport(
         Nid = "NeopmYshD0U",
         ExportName = "sceNpWorkerDestroyCompat1270",
+        IsSyntheticName = true,
         Target = Generation.Gen5,
         LibraryName = "libSceNpCommon")]
     public static int NpWorkerDestroyCompat1270(CpuContext ctx)
@@ -922,6 +952,7 @@ public static class NpCommonExports
     [SysAbiExport(
         Nid = "1x0jThSUr4w",
         ExportName = "sceNpObjectArrayDeleteCompat1270",
+        IsSyntheticName = true,
         Target = Generation.Gen5,
         LibraryName = "libSceNpCommon")]
     public static int NpObjectArrayDeleteCompat1270(CpuContext ctx)
@@ -1091,6 +1122,7 @@ public static class NpCommonExports
     [SysAbiExport(
         Nid = "OoK0Ah0l1ko",
         ExportName = "sceNpThreadInitializeWithParamCompat1270",
+        IsSyntheticName = true,
         Target = Generation.Gen5,
         LibraryName = "libSceNpCommon")]
     public static int NpThreadInitializeWithParamCompat1270(CpuContext ctx)

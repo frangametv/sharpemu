@@ -18,7 +18,6 @@ namespace SharpEmu.Libs.VideoOut;
 
 public static class VideoOutExports
 {
-    private static string _windowTitle = "SharpEmu VideoOut";
     private const int OrbisVideoOutErrorInvalidValue = unchecked((int)0x80290001);
     private const int OrbisVideoOutErrorInvalidAddress = unchecked((int)0x80290002);
     private const int OrbisVideoOutErrorResourceBusy = unchecked((int)0x80290009);
@@ -180,11 +179,6 @@ public static class VideoOutExports
         if (!_bootSplashEnabled)
         {
             return false;
-        }
-
-        lock (_stateGate)
-        {
-            _windowTitle = "SharpEmu - PS5 Cold Boot";
         }
 
         VulkanVideoPresenter.EnsureStarted(1280, 720);

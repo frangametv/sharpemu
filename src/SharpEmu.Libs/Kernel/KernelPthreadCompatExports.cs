@@ -219,6 +219,7 @@ public static class KernelPthreadCompatExports
     [SysAbiExport(
         Nid = "2ozFS9GCs+A",
         ExportName = "__sharpemu_gen5_thrd_current",
+        IsSyntheticName = true,
         Target = Generation.Gen5,
         LibraryName = "libc")]
     public static int Gen5ThrdCurrent(CpuContext ctx) => PthreadSelf(ctx);
@@ -382,6 +383,7 @@ public static class KernelPthreadCompatExports
     [SysAbiExport(
         Nid = "5qXct3c1skg",
         ExportName = "__libcpp_mutex_lock",
+        IsSyntheticName = true,
         Target = Generation.Gen5,
         LibraryName = "libc")]
     public static int LibcppMutexLock(CpuContext ctx) =>
@@ -390,6 +392,7 @@ public static class KernelPthreadCompatExports
     [SysAbiExport(
         Nid = "4bp9gcNLwMI",
         ExportName = "__libcpp_mutex_unlock",
+        IsSyntheticName = true,
         Target = Generation.Gen5,
         LibraryName = "libc")]
     public static int LibcppMutexUnlock(CpuContext ctx) =>
@@ -523,6 +526,7 @@ public static class KernelPthreadCompatExports
     [SysAbiExport(
         Nid = "fUs4X3mpTi4",
         ExportName = "__sharpemu_gen5_cond_wait",
+        IsSyntheticName = true,
         Target = Generation.Gen5,
         LibraryName = "libc")]
     public static int Gen5CondWait(CpuContext ctx) =>
@@ -608,6 +612,7 @@ public static class KernelPthreadCompatExports
     [SysAbiExport(
         Nid = "enG9-gUJp70",
         ExportName = "__libcpp_condvar_broadcast",
+        IsSyntheticName = true,
         Target = Generation.Gen5,
         LibraryName = "libc")]
     public static int LibcppCondvarBroadcast(CpuContext ctx) =>

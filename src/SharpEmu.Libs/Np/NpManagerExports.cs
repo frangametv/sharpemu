@@ -29,6 +29,7 @@ public static class NpManagerExports
     [SysAbiExport(
         Nid = "fHGhS3uP52k",
         ExportName = "sceNpManagerGlobalInitializeCompat1270",
+        IsSyntheticName = true,
         Target = Generation.Gen5,
         LibraryName = "libSceNpManager")]
     public static int NpManagerGlobalInitializeCompat1270(CpuContext ctx)
@@ -64,6 +65,7 @@ public static class NpManagerExports
     [SysAbiExport(
         Nid = "ukEeOizCkIU",
         ExportName = "sceNpManagerGetAllocatorCallbacksCompat1270",
+        IsSyntheticName = true,
         Target = Generation.Gen5,
         LibraryName = "libSceNpManager")]
     public static int NpManagerGetAllocatorCallbacksCompat1270(CpuContext ctx)
@@ -90,6 +92,7 @@ public static class NpManagerExports
     [SysAbiExport(
         Nid = "4uhgVNAqiag",
         ExportName = "sceNpManagerGlobalTerminateCompat1270",
+        IsSyntheticName = true,
         Target = Generation.Gen5,
         LibraryName = "libSceNpManager")]
     public static int NpManagerGlobalTerminateCompat1270(CpuContext ctx)
@@ -110,6 +113,7 @@ public static class NpManagerExports
     [SysAbiExport(
         Nid = "QvqOkNK5ThU",
         ExportName = "sceNpExtNpHttpClientConstructorCompat1270",
+        IsSyntheticName = true,
         Target = Generation.Gen5,
         LibraryName = "libSceNpManager")]
     public static int NpExtNpHttpClientConstructorCompat1270(CpuContext ctx)
@@ -140,6 +144,7 @@ public static class NpManagerExports
     [SysAbiExport(
         Nid = "CvGog64+vCk",
         ExportName = "sceNpExtNpHttpClientInitializeCompat1270",
+        IsSyntheticName = true,
         Target = Generation.Gen5,
         LibraryName = "libSceNpManager")]
     public static int NpExtNpHttpClientInitializeCompat1270(CpuContext ctx)
@@ -164,6 +169,7 @@ public static class NpManagerExports
     [SysAbiExport(
         Nid = "S7Afe0llsL8",
         ExportName = "sceNpCallbackSlotConstructorCompat1270",
+        IsSyntheticName = true,
         Target = Generation.Gen5,
         LibraryName = "libSceNpManager")]
     public static int NpCallbackSlotConstructorCompat1270(CpuContext ctx)
@@ -185,6 +191,7 @@ public static class NpManagerExports
     [SysAbiExport(
         Nid = "gQFyT9aIsOk",
         ExportName = "sceNpCallbackSlotDestructorCompat1270",
+        IsSyntheticName = true,
         Target = Generation.Gen5,
         LibraryName = "libSceNpManager")]
     public static int NpCallbackSlotDestructorCompat1270(CpuContext ctx)

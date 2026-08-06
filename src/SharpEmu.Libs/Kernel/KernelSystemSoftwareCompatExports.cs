@@ -132,6 +132,7 @@ public static class KernelSystemSoftwareCompatExports
     [SysAbiExport(
         Nid = "Mt6co-yzyjg",
         ExportName = "__sharpemu_gen5_libc_interface_factory",
+        IsSyntheticName = true,
         Target = Generation.Gen5,
         LibraryName = "libc")]
     public static int Gen5LibcInterfaceFactory(CpuContext ctx)
@@ -284,6 +285,7 @@ public static class KernelSystemSoftwareCompatExports
     [SysAbiExport(
         Nid = "K+YIrBadUlc",
         ExportName = "__sharpemu_gen5_ctype_locale_begin",
+        IsSyntheticName = true,
         Target = Generation.Gen5,
         LibraryName = "libc")]
     public static int Gen5CtypeLocaleBegin(CpuContext ctx)
@@ -306,6 +308,7 @@ public static class KernelSystemSoftwareCompatExports
     [SysAbiExport(
         Nid = "gwAf8VMkXS0",
         ExportName = "__sharpemu_gen5_ctype_table",
+        IsSyntheticName = true,
         Target = Generation.Gen5,
         LibraryName = "libc")]
     public static int Gen5CtypeTable(CpuContext ctx)
@@ -361,6 +364,7 @@ public static class KernelSystemSoftwareCompatExports
     [SysAbiExport(
         Nid = "taOj6NIm7DM",
         ExportName = "__sharpemu_gen5_ctype_locale_end",
+        IsSyntheticName = true,
         Target = Generation.Gen5,
         LibraryName = "libc")]
     public static int Gen5CtypeLocaleEnd(CpuContext ctx)

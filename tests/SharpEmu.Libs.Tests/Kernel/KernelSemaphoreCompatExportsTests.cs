@@ -112,9 +112,18 @@ public sealed class KernelSemaphoreCompatExportsTests
             waitContext[CpuRegister.Rdi] = handle;
             waitContext[CpuRegister.Rsi] = 1;
             waitContext[CpuRegister.Rdx] = timeoutAddress;
-            var waitTask = Task.Run(() => KernelSemaphoreCompatExports.KernelWaitSema(waitContext));
+            using var waitStarted = new ManualResetEventSlim();
+            var waitTask = Task.Factory.StartNew(
+                () =>
+                {
+                    waitStarted.Set();
+                    return KernelSemaphoreCompatExports.KernelWaitSema(waitContext);
+                },
+                CancellationToken.None,
+                TaskCreationOptions.LongRunning,
+                TaskScheduler.Default);
 
-            await Task.Delay(20);
+            Assert.True(waitStarted.Wait(TimeSpan.FromSeconds(2)));
             Assert.Equal(0, KernelSemaphoreCompatExports.KernelSignalSema(signalContext, handle, 1));
             Assert.Equal(0, await waitTask.WaitAsync(TimeSpan.FromSeconds(2)));
             Assert.True(waitContext.TryReadUInt32(timeoutAddress, out var remainingTimeout));

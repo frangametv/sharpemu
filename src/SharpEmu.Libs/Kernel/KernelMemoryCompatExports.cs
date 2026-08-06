@@ -1671,6 +1671,7 @@ public static partial class KernelMemoryCompatExports
     [SysAbiExport(
         Nid = "z+P+xCnWLBk",
         ExportName = "sceLibcFreeCallbackCompat1270",
+        IsSyntheticName = true,
         Target = Generation.Gen5,
         LibraryName = "libSceLibcInternal")]
     public static int LibcFreeCallbackCompat1270(CpuContext ctx)
@@ -4666,6 +4667,7 @@ public static partial class KernelMemoryCompatExports
     [SysAbiExport(
         Nid = "dYK287SsmDs",
         ExportName = "sceKernelMapNamedFlexibleMemoryInternalCompat1270",
+        IsSyntheticName = true,
         Target = Generation.Gen5,
         LibraryName = "libKernel")]
     public static int KernelMapNamedFlexibleMemoryInternalCompat1270(CpuContext ctx)

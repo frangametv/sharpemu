@@ -104,6 +104,7 @@ public static class KernelSystemServiceCompatExports
     [SysAbiExport(
         Nid = "Rf0G+91hdUA",
         ExportName = "sceSystemTtsIsAccessibilityAvailableA",
+        IsSyntheticName = true,
         Target = Generation.Gen5,
         LibraryName = "libSceSystemTtsWrapper")]
     public static int SystemTtsIsAccessibilityAvailableA(CpuContext ctx) =>

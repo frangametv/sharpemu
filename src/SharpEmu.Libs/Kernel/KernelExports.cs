@@ -33,6 +33,7 @@ public static class KernelExports
     [SysAbiExport(
         Nid = "sp+h-CJV1Ns",
         ExportName = "sceKernelGetCompiledSdkVersionCompat1270",
+        IsSyntheticName = true,
         Target = Generation.Gen5,
         LibraryName = "libKernel")]
     public static int KernelGetCompiledSdkVersionCompat1270(CpuContext ctx)
@@ -46,6 +47,7 @@ public static class KernelExports
     [SysAbiExport(
         Nid = "Yrwoq3bti3c",
         ExportName = "sceKernelRngPseudoSysctlGateCompat1270",
+        IsSyntheticName = true,
         Target = Generation.Gen5,
         LibraryName = "libKernel")]
     public static int KernelRngPseudoSysctlGateCompat1270(CpuContext ctx)
@@ -227,6 +229,7 @@ public static class KernelExports
     [SysAbiExport(
         Nid = "cPGKQ8XPkf8",
         ExportName = "__sharpemu_gen5_thrd_start_with_name",
+        IsSyntheticName = true,
         Target = Generation.Gen5,
         LibraryName = "libc")]
     public static int Gen5ThrdStartWithName(CpuContext ctx)
@@ -245,6 +248,7 @@ public static class KernelExports
     [SysAbiExport(
         Nid = "2cXiHqvKFUM",
         ExportName = "__sharpemu_gen5_thrd_start",
+        IsSyntheticName = true,
         Target = Generation.Gen5,
         LibraryName = "libc")]
     public static int Gen5ThrdStart(CpuContext ctx)
@@ -261,6 +265,7 @@ public static class KernelExports
     [SysAbiExport(
         Nid = "kuI8yo7-b4w",
         ExportName = "__sharpemu_gen5_thrd_start_with_name_attr",
+        IsSyntheticName = true,
         Target = Generation.Gen5,
         LibraryName = "libc")]
     public static int Gen5ThrdStartWithNameAndAttr(CpuContext ctx)
@@ -436,6 +441,7 @@ public static class KernelExports
     [SysAbiExport(
         Nid = "qnYxp6VUtbI",
         ExportName = "__sharpemu_gen5_thrd_join",
+        IsSyntheticName = true,
         Target = Generation.Gen5,
         LibraryName = "libc")]
     public static int Gen5ThrdJoin(CpuContext ctx) => PthreadJoin(ctx);

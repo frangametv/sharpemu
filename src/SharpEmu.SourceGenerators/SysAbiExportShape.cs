@@ -18,13 +18,20 @@ public static class SysAbiExportShape
 
     public readonly struct Arguments
     {
-        public Arguments(string libraryName, string nid, string exportName, int target, bool preferLle)
+        public Arguments(
+            string libraryName,
+            string nid,
+            string exportName,
+            int target,
+            bool preferLle,
+            bool isSyntheticName)
         {
             LibraryName = libraryName;
             Nid = nid;
             ExportName = exportName;
             Target = target;
             PreferLle = preferLle;
+            IsSyntheticName = isSyntheticName;
         }
 
         public string LibraryName { get; }
@@ -32,6 +39,7 @@ public static class SysAbiExportShape
         public string ExportName { get; }
         public int Target { get; }
         public bool PreferLle { get; }
+        public bool IsSyntheticName { get; }
     }
 
     /// <summary>
@@ -208,6 +216,7 @@ public static class SysAbiExportShape
         var exportName = string.Empty;
         var target = 0;
         var preferLle = false;
+        var isSyntheticName = false;
         foreach (var argument in attribute.NamedArguments)
         {
             switch (argument.Key)
@@ -227,9 +236,12 @@ public static class SysAbiExportShape
                 case "PreferLle":
                     preferLle = argument.Value.Value is bool boolValue && boolValue;
                     break;
+                case "IsSyntheticName":
+                    isSyntheticName = argument.Value.Value is bool syntheticValue && syntheticValue;
+                    break;
             }
         }
 
-        return new Arguments(libraryName, nid, exportName, target, preferLle);
+        return new Arguments(libraryName, nid, exportName, target, preferLle, isSyntheticName);
     }
 }

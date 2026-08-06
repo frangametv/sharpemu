@@ -136,6 +136,7 @@ public static class CompositorExports
     [SysAbiExport(
         Nid = "wXnNof3LrrU",
         ExportName = "sceCompositorConfigureCanvasCompat",
+        IsSyntheticName = true,
         Target = Generation.Gen5,
         LibraryName = "libSceComposite")]
     public static int ConfigureCanvasCompat(CpuContext ctx)
