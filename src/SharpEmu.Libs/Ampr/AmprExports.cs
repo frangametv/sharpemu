@@ -30,6 +30,7 @@ public static class AmprExports
     private const uint KernelEventQueueRecordType = 2;
     private const uint WriteAddressRecordType = 3;
     private static readonly ConcurrentDictionary<ulong, CommandBufferState> _commandBuffers = new();
+    private static long _completionFailureCount;
     private static readonly bool _traceAmpr =
         string.Equals(Environment.GetEnvironmentVariable("SHARPEMU_LOG_AMPR"), "1", StringComparison.Ordinal);
     private static readonly bool _traceAmprReads =
@@ -636,6 +637,7 @@ public static class AmprExports
 
         if (!TryGetCommandBufferState(ctx, commandBuffer, out var buffer, out _, out var state) || state is null)
         {
+            TraceCompletionFailure(ctx, commandBuffer, "state");
             return (int)OrbisGen2Result.ORBIS_GEN2_ERROR_MEMORY_FAULT;
         }
 
@@ -650,6 +652,7 @@ public static class AmprExports
         {
             if (!TryReadUInt32(ctx, buffer + offset, out var recordType))
             {
+                TraceCompletionFailure(ctx, commandBuffer, "record-type", buffer + offset);
                 return (int)OrbisGen2Result.ORBIS_GEN2_ERROR_MEMORY_FAULT;
             }
 
@@ -662,6 +665,7 @@ public static class AmprExports
                 case KernelEventQueueRecordType:
                     if (!CompleteKernelEventQueueRecord(ctx, buffer + offset))
                     {
+                        TraceCompletionFailure(ctx, commandBuffer, "event-record", buffer + offset);
                         return (int)OrbisGen2Result.ORBIS_GEN2_ERROR_MEMORY_FAULT;
                     }
 
@@ -671,6 +675,7 @@ public static class AmprExports
                 case WriteAddressRecordType:
                     if (!CompleteWriteAddressRecord(ctx, buffer + offset))
                     {
+                        TraceCompletionFailure(ctx, commandBuffer, "write-record", buffer + offset);
                         return (int)OrbisGen2Result.ORBIS_GEN2_ERROR_MEMORY_FAULT;
                     }
 
@@ -755,6 +760,23 @@ public static class AmprExports
                 commandBuffer + CommandBufferCommandCountOffset,
                 out var count32))
         {
+            // The native one-host-thread-per-guest-thread backend can observe
+            // the caller-owned header while another guest thread is recycling
+            // or unmapping it. The HLE already owns a synchronized state copy,
+            // updated by ctor/set/reset/append; retain that authoritative copy
+            // rather than losing all submitted records on a transient header
+            // read failure.
+            if (_commandBuffers.TryGetValue(commandBuffer, out state))
+            {
+                lock (state)
+                {
+                    buffer = state.Buffer;
+                    size = state.Size;
+                }
+
+                return true;
+            }
+
             size = 0;
             state = null;
             return false;
@@ -771,6 +793,23 @@ public static class AmprExports
         }
 
         return true;
+    }
+
+    private static void TraceCompletionFailure(
+        CpuContext ctx,
+        ulong commandBuffer,
+        string stage,
+        ulong address = 0)
+    {
+        var failure = Interlocked.Increment(ref _completionFailureCount);
+        if (failure > 8 && (failure & (failure - 1)) != 0)
+        {
+            return;
+        }
+
+        Console.Error.WriteLine(
+            $"[LOADER][WARN] ampr.complete_failed#{failure} stage={stage} " +
+            $"cmd=0x{commandBuffer:X16} address=0x{address:X16} rip=0x{ctx.Rip:X16}");
     }
 
     private static int TryReadFileToGuestMemory(

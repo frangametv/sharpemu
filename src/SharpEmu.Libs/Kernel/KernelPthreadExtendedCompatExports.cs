@@ -712,7 +712,11 @@ public static class KernelPthreadExtendedCompatExports
         }
 
         var syntheticHandle = AllocateSyntheticHandle(SyntheticPthreadAttrHandleBase, ref _nextSyntheticPthreadAttrHandleId);
-        if (!ctx.TryWriteUInt64(attrAddress, syntheticHandle))
+        // Native guest threads may pass an identity-mapped host pointer which
+        // is valid in the process but absent from this CpuContext's region
+        // snapshot. Use the same checked compatibility path as the other
+        // pthread HLEs instead of rejecting that writable storage.
+        if (!KernelMemoryCompatExports.TryWriteUInt64Compat(ctx, attrAddress, syntheticHandle))
         {
             return (int)OrbisGen2Result.ORBIS_GEN2_ERROR_MEMORY_FAULT;
         }

@@ -91,7 +91,9 @@ public sealed unsafe partial class DirectExecutionBackend : INativeCpuBackend, I
 		ulong Arg1,
 		ulong Arg2,
 		ulong GuestThreadHandle,
-		int ManagedThreadId);
+		int ManagedThreadId,
+		ulong Result,
+		bool ResultValid);
 
 #pragma warning disable CS0649
 	private struct EXCEPTION_POINTERS
@@ -314,11 +316,18 @@ public sealed unsafe partial class DirectExecutionBackend : INativeCpuBackend, I
 	// direct-call bridge selection or callable symbol diagnostics.
 	private readonly Dictionary<string, ulong> _runtimeDataSymbolsByName = new Dictionary<string, ulong>(StringComparer.Ordinal);
 
-	private readonly RecentImportTraceEntry[] _recentImportTrace = new RecentImportTraceEntry[64];
+	// Import dispatch is concurrent. A single backend-wide ring mixed entries
+	// from unrelated guest workers, so a crash on RAGE Main Thread could print
+	// only launcher-thread calls. Keep the bounded history on the dispatching
+	// host thread; exception handling runs on that same thread.
+	[ThreadStatic]
+	private static RecentImportTraceEntry[]? _threadRecentImportTrace;
 
-	private int _recentImportTraceCount;
+	[ThreadStatic]
+	private static int _threadRecentImportTraceCount;
 
-	private int _recentImportTraceWriteIndex;
+	[ThreadStatic]
+	private static int _threadRecentImportTraceWriteIndex;
 
 	private readonly string[] _distinctImportNidHistory = new string[128];
 
@@ -1141,8 +1150,8 @@ public sealed unsafe partial class DirectExecutionBackend : INativeCpuBackend, I
 		LastError = null;
 		InitializeRuntimeSymbolIndex(runtimeSymbols);
 		InitializeRuntimeDataSymbolIndex(runtimeDataSymbols);
-		_recentImportTraceCount = 0;
-		_recentImportTraceWriteIndex = 0;
+		_threadRecentImportTraceCount = 0;
+		_threadRecentImportTraceWriteIndex = 0;
 		_distinctImportNidHistoryCount = 0;
 		_distinctImportNidHistoryWriteIndex = 0;
 		_lastDistinctImportNid = string.Empty;

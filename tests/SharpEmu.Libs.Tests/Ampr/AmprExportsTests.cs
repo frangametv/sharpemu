@@ -96,13 +96,46 @@ public sealed class AmprExportsTests
         Assert.Equal(0UL, memory.ReadUInt64(CommandBuffer + 0x10));
     }
 
+    [Fact]
+    public void CompleteCommandBuffer_HeaderTemporarilyUnreadable_UsesRegisteredState()
+    {
+        var memory = new FixedMemory();
+        var ctx = new CpuContext(memory, Generation.Gen5);
+        const ulong watcherAddress = BackingBuffer + 0x8000;
+        const ulong watcherValue = 0x1234_5678UL;
+
+        ctx[CpuRegister.Rdi] = CommandBuffer;
+        Assert.Equal(0, AmprExports.CommandBufferConstructor(ctx));
+        ctx[CpuRegister.Rsi] = BackingBuffer;
+        ctx[CpuRegister.Rdx] = 0x4000;
+        Assert.Equal(0, AmprExports.CommandBufferSetBuffer(ctx));
+
+        ctx[CpuRegister.Rdi] = CommandBuffer;
+        ctx[CpuRegister.Rsi] = watcherAddress;
+        ctx[CpuRegister.Rdx] = watcherValue;
+        Assert.Equal(0, AmprExports.CommandBufferWriteAddressOnCompletion(ctx));
+
+        memory.DenyCommandBufferReads = true;
+        Assert.Equal(0, AmprExports.CompleteCommandBuffer(ctx, CommandBuffer));
+        Assert.Equal(watcherValue, memory.ReadUInt64(watcherAddress));
+    }
+
     private sealed class FixedMemory : ICpuMemory
     {
         private const ulong BaseAddress = 0x10_0000;
         private readonly byte[] _bytes = new byte[0x20_000];
 
+        public bool DenyCommandBufferReads { get; set; }
+
         public bool TryRead(ulong virtualAddress, Span<byte> destination)
         {
+            if (DenyCommandBufferReads &&
+                virtualAddress < CommandBuffer + 0x18 &&
+                virtualAddress + (ulong)destination.Length > CommandBuffer)
+            {
+                return false;
+            }
+
             if (!TryResolve(virtualAddress, destination.Length, out var offset))
             {
                 return false;

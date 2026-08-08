@@ -534,7 +534,7 @@ public sealed partial class DirectExecutionBackend
 				Console.Error.Flush();
 			}
 		}
-		if (!flag0 && !isGuestWorker)
+		if (!flag0)
 		{
 			RecordRecentImportTrace(
 				num,
@@ -746,6 +746,7 @@ public sealed partial class DirectExecutionBackend
 					LastError = transferError ?? "failed to prepare guest context transfer";
 					ActiveForcedGuestExit = true;
 					cpuContext[CpuRegister.Rax] = 18446744071562199298uL;
+					CompleteRecentImportTrace(num, cpuContext[CpuRegister.Rax]);
 					return cpuContext[CpuRegister.Rax];
 				}
 
@@ -763,6 +764,7 @@ public sealed partial class DirectExecutionBackend
 					Volatile.Write(ref transferGuestThreadState.LastImportRax, transferTarget.Rax);
 					Volatile.Write(ref transferGuestThreadState.LastImportResultValid, 1);
 				}
+				CompleteRecentImportTrace(num, transferTarget.Rax);
 				return unchecked((ulong)transferFrame);
 			}
 			if (GuestThreadExecution.TryConsumeCurrentEntryExit(out var exitValue, out var exitReason))
@@ -786,6 +788,7 @@ public sealed partial class DirectExecutionBackend
 				}
 			}
 			var guestReturnValue = cpuContext[CpuRegister.Rax];
+			CompleteRecentImportTrace(num, guestReturnValue);
 			if (probeTarget)
 			{
 				ulong finalReturnSlot;
@@ -817,6 +820,7 @@ public sealed partial class DirectExecutionBackend
 			Console.Error.WriteLine($"[LOADER][ERROR] {LastError}");
 			Console.Error.WriteLine($"[LOADER][ERROR] {ex.StackTrace}");
 			cpuContext[CpuRegister.Rax] = 18446744071562199298uL;
+			CompleteRecentImportTrace(num, cpuContext[CpuRegister.Rax]);
 			if (_activeGuestThreadState is { } failedGuestThreadState)
 			{
 				Volatile.Write(ref failedGuestThreadState.LastImportRax, cpuContext[CpuRegister.Rax]);

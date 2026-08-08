@@ -498,7 +498,7 @@ public static unsafe class GuestImageWriteTracker
 
     /// <summary>
     /// Prepares pages touched by a managed HLE memory write. Native guest
-    /// stores fault and enter <see cref="TryHandleWriteFault"/> through the
+    /// stores fault and enter <see cref="TryHandleWriteFault(ulong, ulong)"/> through the
     /// POSIX signal bridge, but a managed Buffer.MemoryCopy into a protected
     /// page is surfaced by the runtime as a fatal AccessViolation instead of
     /// a resumable guest fault. Visit every page in the write span up front so

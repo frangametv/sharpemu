@@ -140,8 +140,8 @@ public sealed partial class DirectExecutionBackend
 		ulong arg1,
 		ulong arg2)
 	{
-		var trace = _recentImportTrace;
-		trace[_recentImportTraceWriteIndex] = new RecentImportTraceEntry(
+		var trace = _threadRecentImportTrace ??= new RecentImportTraceEntry[64];
+		trace[_threadRecentImportTraceWriteIndex] = new RecentImportTraceEntry(
 			dispatchIndex,
 			nid,
 			returnRip,
@@ -149,32 +149,57 @@ public sealed partial class DirectExecutionBackend
 			arg1,
 			arg2,
 			GuestThreadExecution.CurrentGuestThreadHandle,
-			Environment.CurrentManagedThreadId);
-		_recentImportTraceWriteIndex = (_recentImportTraceWriteIndex + 1) % trace.Length;
-		if (_recentImportTraceCount < trace.Length)
+			Environment.CurrentManagedThreadId,
+			Result: 0,
+			ResultValid: false);
+		_threadRecentImportTraceWriteIndex = (_threadRecentImportTraceWriteIndex + 1) % trace.Length;
+		if (_threadRecentImportTraceCount < trace.Length)
 		{
-			_recentImportTraceCount++;
+			_threadRecentImportTraceCount++;
+		}
+	}
+
+	private static void CompleteRecentImportTrace(long dispatchIndex, ulong result)
+	{
+		var trace = _threadRecentImportTrace;
+		if (trace is null || _threadRecentImportTraceCount == 0)
+		{
+			return;
+		}
+
+		// Normally the completed call is the newest entry. Scan backwards so
+		// context-transfer paths and nested diagnostics remain unambiguous.
+		for (var offset = 1; offset <= _threadRecentImportTraceCount; offset++)
+		{
+			var index = (_threadRecentImportTraceWriteIndex - offset + trace.Length) % trace.Length;
+			var entry = trace[index];
+			if (entry.DispatchIndex == dispatchIndex)
+			{
+				trace[index] = entry with { Result = result, ResultValid = true };
+				return;
+			}
 		}
 	}
 
 	private void DumpRecentImportTrace()
 	{
-		var trace = _recentImportTrace;
-		if (trace is null || _recentImportTraceCount == 0)
+		var trace = _threadRecentImportTrace;
+		if (trace is null || _threadRecentImportTraceCount == 0)
 		{
 			return;
 		}
-		Log.Info($"   Recent import calls for managed={Environment.CurrentManagedThreadId} guest=0x{GuestThreadExecution.CurrentGuestThreadHandle:X16} ({_recentImportTraceCount}):");
-		int num = (_recentImportTraceWriteIndex - _recentImportTraceCount + trace.Length) % trace.Length;
-		for (int i = 0; i < _recentImportTraceCount; i++)
+		Log.Info($"   Recent import calls for managed={Environment.CurrentManagedThreadId} guest=0x{GuestThreadExecution.CurrentGuestThreadHandle:X16} ({_threadRecentImportTraceCount}):");
+		int num = (_threadRecentImportTraceWriteIndex - _threadRecentImportTraceCount + trace.Length) % trace.Length;
+		for (int i = 0; i < _threadRecentImportTraceCount; i++)
 		{
 			int num2 = (num + i) % trace.Length;
 			var entry = trace[num2];
 			if (!string.IsNullOrEmpty(entry.Nid))
 			{
+				var resultText = entry.ResultValid ? $" result=0x{entry.Result:X16}" : " result=<in-flight>";
 				Log.Info(
 					$"     #{entry.DispatchIndex} managed={entry.ManagedThreadId} guest=0x{entry.GuestThreadHandle:X16} nid={entry.Nid} ret=0x{entry.ReturnRip:X16} " +
-					$"rdi=0x{entry.Arg0:X16} rsi=0x{entry.Arg1:X16} rdx=0x{entry.Arg2:X16}");
+					$"rdi=0x{entry.Arg0:X16} rsi=0x{entry.Arg1:X16} rdx=0x{entry.Arg2:X16}{resultText}");
 			}
 		}
 	}

@@ -623,8 +623,29 @@ public sealed partial class DirectExecutionBackend
 		WriteCtxU64(contextRecord, 248, rip + 2);
 		if (count <= 16 || count % 65536 == 0)
 		{
+			var guestThread = _activeGuestThreadState;
+			var lastResultValid = guestThread is not null &&
+				Volatile.Read(ref guestThread.LastImportResultValid) != 0;
 			Console.Error.WriteLine(
 				$"[LOADER][WARN] Ignored guest int 0x41 trap #{count} at 0x{rip:X16} (default-on; set SHARPEMU_IGNORE_INT41=0 to disable)");
+			Console.Error.WriteLine(
+				$"[LOADER][WARN] guest_int41#{count}: managed={Environment.CurrentManagedThreadId} " +
+				$"guest=0x{(guestThread?.ThreadHandle ?? GuestThreadExecution.CurrentGuestThreadHandle):X16} " +
+				$"name='{guestThread?.Name ?? "<unknown>"}' " +
+				$"last_import={guestThread?.LastImportNid ?? "<none>"} " +
+				$"last_ret=0x{(guestThread?.LastReturnRip ?? 0):X16} " +
+				$"last_rax=0x{(guestThread?.LastImportRax ?? 0):X16} " +
+				$"last_result_valid={lastResultValid}");
+			Console.Error.WriteLine(
+				$"[LOADER][WARN] guest_int41#{count} registers: " +
+				$"rax=0x{ReadCtxU64(contextRecord, CTX_RAX):X16} rbx=0x{ReadCtxU64(contextRecord, CTX_RBX):X16} " +
+				$"rcx=0x{ReadCtxU64(contextRecord, CTX_RCX):X16} rdx=0x{ReadCtxU64(contextRecord, CTX_RDX):X16} " +
+				$"rsi=0x{ReadCtxU64(contextRecord, CTX_RSI):X16} rdi=0x{ReadCtxU64(contextRecord, CTX_RDI):X16} " +
+				$"rsp=0x{ReadCtxU64(contextRecord, CTX_RSP):X16} rbp=0x{ReadCtxU64(contextRecord, CTX_RBP):X16} " +
+				$"r8=0x{ReadCtxU64(contextRecord, CTX_R8):X16} r9=0x{ReadCtxU64(contextRecord, CTX_R9):X16} " +
+				$"r12=0x{ReadCtxU64(contextRecord, CTX_R12):X16} r13=0x{ReadCtxU64(contextRecord, CTX_R13):X16} " +
+				$"r14=0x{ReadCtxU64(contextRecord, CTX_R14):X16} r15=0x{ReadCtxU64(contextRecord, CTX_R15):X16}");
+			DumpRecentImportTrace();
 			Console.Error.Flush();
 		}
 		return true;

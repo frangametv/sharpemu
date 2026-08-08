@@ -6,6 +6,7 @@ using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.Text;
 using SharpEmu.HLE;
+using SharpEmu.Libs.Kernel;
 
 namespace SharpEmu.Libs.Fiber;
 
@@ -49,6 +50,7 @@ public static class FiberExports
     private const int FiberMagicEndOffset = 104;
 
     private static int _contextSizeCheck;
+    private static long _initializationFailureCount;
 
     private static readonly object _fiberGate = new();
     private static readonly ConcurrentDictionary<ulong, FiberContinuation> _continuations = new();
@@ -453,39 +455,54 @@ public static class FiberExports
         uint flags,
         uint buildVersion)
     {
+        int Fail(string stage, int error)
+        {
+            var failure = Interlocked.Increment(ref _initializationFailureCount);
+            if (failure <= 8 || (failure & (failure - 1)) == 0)
+            {
+                Console.Error.WriteLine(
+                    $"[LOADER][WARN] fiber.init_failed#{failure} stage={stage} error=0x{unchecked((uint)error):X8} " +
+                    $"fiber=0x{fiber:X16} name=0x{nameAddress:X16} entry=0x{entry:X16} " +
+                    $"context=0x{contextAddress:X16} size=0x{contextSize:X} opt=0x{optParam:X16} " +
+                    $"flags=0x{flags:X8} build=0x{buildVersion:X8} rsp=0x{ctx[CpuRegister.Rsp]:X16}");
+            }
+
+            return SetReturn(ctx, error);
+        }
+
         if (fiber == 0 || nameAddress == 0 || entry == 0)
         {
-            return SetReturn(ctx, FiberErrorNull);
+            return Fail("null-argument", FiberErrorNull);
         }
 
         if ((fiber & 7) != 0 ||
             (contextAddress & 15) != 0 ||
             (optParam & 7) != 0)
         {
-            return SetReturn(ctx, FiberErrorAlignment);
+            return Fail("alignment", FiberErrorAlignment);
         }
 
         if (contextSize != 0 && contextSize < FiberContextMinimumSize)
         {
-            return SetReturn(ctx, FiberErrorRange);
+            return Fail("context-range", FiberErrorRange);
         }
 
         if ((contextSize & 15) != 0 ||
             (contextAddress == 0 && contextSize != 0) ||
             (contextAddress != 0 && contextSize == 0))
         {
-            return SetReturn(ctx, FiberErrorInvalid);
+            return Fail("context-pair", FiberErrorInvalid);
         }
 
         if (optParam != 0 &&
             (!TryReadUInt32(ctx, optParam, out var optMagic) || optMagic != FiberOptSignature))
         {
-            return SetReturn(ctx, FiberErrorInvalid);
+            return Fail("option-signature", FiberErrorInvalid);
         }
 
         if (!TryReadNullTerminatedUtf8(ctx, nameAddress, MaxNameLength + 1, out var name))
         {
-            return SetReturn(ctx, FiberErrorInvalid);
+            return Fail("name-read", FiberErrorInvalid);
         }
 
         flags = ApplyInitializationFlags(
@@ -506,14 +523,14 @@ public static class FiberExports
             !TryWriteUInt64(ctx, fiber + FiberContextEndOffset, contextAddress == 0 ? 0 : contextAddress + contextSize) ||
             !TryWriteUInt32(ctx, fiber + FiberMagicEndOffset, FiberSignature1))
         {
-            return SetReturn(ctx, FiberErrorInvalid);
+            return Fail("fiber-layout-write", FiberErrorInvalid);
         }
 
         if (contextAddress != 0)
         {
             if (!TryWriteUInt64(ctx, contextAddress, FiberStackSignature))
             {
-                return SetReturn(ctx, FiberErrorInvalid);
+                return Fail("context-signature-write", FiberErrorInvalid);
             }
 
             if ((flags & FiberFlagContextSizeCheck) != 0)
@@ -1015,7 +1032,10 @@ public static class FiberExports
 
     private static ulong ReadStackArg64(CpuContext ctx, int index)
     {
-        if (ctx.TryReadUInt64(ctx[CpuRegister.Rsp] + sizeof(ulong) + ((ulong)index * sizeof(ulong)), out var value))
+        if (KernelMemoryCompatExports.TryReadUInt64Compat(
+                ctx,
+                ctx[CpuRegister.Rsp] + sizeof(ulong) + ((ulong)index * sizeof(ulong)),
+                out var value))
         {
             return value;
         }
@@ -1025,56 +1045,41 @@ public static class FiberExports
 
     private static bool TryReadUInt32(CpuContext ctx, ulong address, out uint value)
     {
-        Span<byte> buffer = stackalloc byte[sizeof(uint)];
-        if (!ctx.Memory.TryRead(address, buffer))
-        {
-            value = 0;
-            return false;
-        }
-
-        value = BinaryPrimitives.ReadUInt32LittleEndian(buffer);
-        return true;
+        return KernelMemoryCompatExports.TryReadUInt32Compat(ctx, address, out value);
     }
 
     private static bool TryWriteUInt32(CpuContext ctx, ulong address, uint value)
     {
         Span<byte> buffer = stackalloc byte[sizeof(uint)];
         BinaryPrimitives.WriteUInt32LittleEndian(buffer, value);
-        return ctx.Memory.TryWrite(address, buffer);
+        return KernelMemoryCompatExports.TryWriteCompat(ctx, address, buffer);
     }
 
     private static bool TryReadUInt64(CpuContext ctx, ulong address, out ulong value)
     {
-        Span<byte> buffer = stackalloc byte[sizeof(ulong)];
-        if (!ctx.Memory.TryRead(address, buffer))
-        {
-            value = 0;
-            return false;
-        }
-
-        value = BinaryPrimitives.ReadUInt64LittleEndian(buffer);
-        return true;
+        return KernelMemoryCompatExports.TryReadUInt64Compat(ctx, address, out value);
     }
 
     private static bool TryWriteUInt64(CpuContext ctx, ulong address, ulong value)
     {
         Span<byte> buffer = stackalloc byte[sizeof(ulong)];
         BinaryPrimitives.WriteUInt64LittleEndian(buffer, value);
-        return ctx.Memory.TryWrite(address, buffer);
+        return KernelMemoryCompatExports.TryWriteCompat(ctx, address, buffer);
     }
 
     private static bool TryWriteName(CpuContext ctx, ulong address, string name)
     {
         Span<byte> buffer = stackalloc byte[MaxNameLength + 1];
+        buffer.Clear();
         var bytes = Encoding.UTF8.GetBytes(name);
         bytes.AsSpan(0, Math.Min(bytes.Length, MaxNameLength)).CopyTo(buffer);
-        return ctx.Memory.TryWrite(address, buffer);
+        return KernelMemoryCompatExports.TryWriteCompat(ctx, address, buffer);
     }
 
     private static bool TryReadInlineName(CpuContext ctx, ulong address, out string value)
     {
         Span<byte> buffer = stackalloc byte[MaxNameLength + 1];
-        if (!ctx.Memory.TryRead(address, buffer))
+        if (!KernelMemoryCompatExports.TryReadCompat(ctx, address, buffer))
         {
             value = string.Empty;
             return false;
@@ -1096,7 +1101,7 @@ public static class FiberExports
         Span<byte> current = stackalloc byte[1];
         for (var index = 0; index < bytes.Length; index++)
         {
-            if (!ctx.Memory.TryRead(address + (ulong)index, current))
+            if (!KernelMemoryCompatExports.TryReadCompat(ctx, address + (ulong)index, current))
             {
                 value = string.Empty;
                 return false;

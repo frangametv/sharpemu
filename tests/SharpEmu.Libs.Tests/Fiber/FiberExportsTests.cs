@@ -2,9 +2,11 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 
 using System.Buffers.Binary;
+using System.Runtime.InteropServices;
 
 using SharpEmu.HLE;
 using SharpEmu.Libs.Fiber;
+using SharpEmu.Libs.Kernel;
 
 using Xunit;
 
@@ -231,6 +233,39 @@ public sealed class FiberExportsTests
         Assert.Equal(ContextAddress + contextSize, ReadUInt64(memory, FiberAddress + 96));
         Assert.Equal(SignatureEnd, ReadUInt32(memory, FiberAddress + 104));
         Assert.Equal(StackSignature, ReadUInt64(memory, ContextAddress));
+    }
+
+    [Fact]
+    public void Initialize_TrackedNativePointerOutsideCpuMap_UsesCompatibilityMemory()
+    {
+        var memory = new FakeCpuMemory(Base, RegionSize);
+        var context = new CpuContext(memory, Generation.Gen5);
+
+        context[CpuRegister.Rdi] = 0x400;
+        Assert.Equal(0, KernelMemoryCompatExports.Malloc(context));
+        var allocation = context[CpuRegister.Rax];
+        try
+        {
+            var fiber = (allocation + 7) & ~7UL;
+            var name = fiber + 0x100;
+            Marshal.Copy("NativeFiber\0"u8.ToArray(), 0, unchecked((nint)name), 12);
+
+            context[CpuRegister.Rdi] = fiber;
+            context[CpuRegister.Rsi] = name;
+            context[CpuRegister.Rdx] = EntryAddress;
+            context[CpuRegister.Rcx] = 0xCAFE;
+            context[CpuRegister.R8] = 0;
+            context[CpuRegister.R9] = 0;
+
+            Assert.Equal(0, FiberExports.FiberInitialize(context));
+            Assert.Equal(unchecked((int)SignatureStart), Marshal.ReadInt32(unchecked((nint)fiber)));
+            Assert.Equal(unchecked((int)SignatureEnd), Marshal.ReadInt32(unchecked((nint)(fiber + 104))));
+        }
+        finally
+        {
+            context[CpuRegister.Rdi] = allocation;
+            Assert.Equal(0, KernelMemoryCompatExports.Free(context));
+        }
     }
 
     [Fact]
