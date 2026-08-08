@@ -45,3 +45,5 @@ ehthumbs.db
 .idea/
 packages.lock.json
 .vscode/
+clean_test/
+.debug/
