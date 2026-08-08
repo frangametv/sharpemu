@@ -16046,8 +16046,13 @@ public static partial class AgcExports
                 error);
             lock (_submitTraceGate)
             {
-                if (_tracedComputeShaders.Add(shaderAddress))
+                if (TryCreateComputeShaderCompatibilityDiagnostic(
+                        _tracedComputeShaders,
+                        shaderAddress,
+                        error,
+                        out var compatibilityDiagnostic))
                 {
+                    Console.Error.WriteLine(compatibilityDiagnostic);
                     TraceAgcShader(
                         $"agc.compute_shader cs=0x{shaderAddress:X16} error={error}");
                 }
@@ -19046,6 +19051,22 @@ public static partial class AgcExports
         }
 
         Console.Error.WriteLine($"[LOADER][TRACE] t={TraceSeconds()} {message}");
+    }
+
+    internal static bool TryCreateComputeShaderCompatibilityDiagnostic(
+        ISet<ulong> tracedComputeShaders,
+        ulong shaderAddress,
+        string error,
+        out string diagnostic)
+    {
+        if (!tracedComputeShaders.Add(shaderAddress))
+        {
+            diagnostic = string.Empty;
+            return false;
+        }
+
+        diagnostic = $"[COMPAT][SHADER] cs=0x{shaderAddress:X16} error={error}";
+        return true;
     }
 
     private static void TraceAgcShader(
