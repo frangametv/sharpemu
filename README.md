@@ -15,6 +15,12 @@ SPDX-License-Identifier: GPL-2.0-or-later
 </p>
 
 <p align="center">
+  <a href="https://github.com/frangametv/sharpemu/releases">
+    <img src="https://img.shields.io/badge/Download-2EA44F?style=for-the-badge&logo=github&logoColor=white" alt="Download from GitHub Releases">
+  </a>
+</p>
+
+<p align="center">
   <img src="https://img.shields.io/badge/Discord-%40FranGameTv-5865F2?style=for-the-badge&logo=discord&logoColor=white" alt="Discord @FranGameTv">
 </p>
 
@@ -50,6 +56,12 @@ system modules and reach early graphics or video-output stages in some games.
 It is not yet a general-purpose or stable PS5 emulator.
 
 ## Download and Run
+
+<p align="center">
+  <a href="https://github.com/frangametv/sharpemu/releases">
+    <img src="https://img.shields.io/badge/Download-GitHub%20Releases-2EA44F?style=for-the-badge&logo=github&logoColor=white" alt="Download from GitHub Releases">
+  </a>
+</p>
 
 Prebuilt packages for Windows, Linux and macOS are available from
 [GitHub Releases](https://github.com/frangametv/sharpemu/releases). Select the
