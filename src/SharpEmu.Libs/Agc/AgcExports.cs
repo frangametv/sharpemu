@@ -7461,6 +7461,28 @@ public static partial class AgcExports
         }
     }
 
+    private static bool HasObservedLabelProducer(
+        object memory,
+        ulong address,
+        ulong length)
+    {
+        memory = CanonicalMemory(memory);
+        lock (_labelProducerGate)
+        {
+            for (var index = _labelProducers.Count - 1; index >= 0; index--)
+            {
+                var candidate = _labelProducers[index];
+                if (ReferenceEquals(candidate.Memory, memory) &&
+                    RangesOverlap(candidate.Address, candidate.Length, address, length))
+                {
+                    return true;
+                }
+            }
+        }
+
+        return false;
+    }
+
     private static void TraceWaitProducerState(
         object memory,
         in GpuWaitRegistry.WaitingDcb waiter,
@@ -8396,6 +8418,18 @@ public static partial class AgcExports
             ? deadlockMs
             : 500L) * System.Diagnostics.Stopwatch.Frequency / 1000L;
 
+    // Astro Bot uses a small set of AGC-NOP 64-bit bookkeeping waits whose
+    // corresponding producer packet is not present in any command stream the
+    // current parser can observe. Keeping such a wait forever wedges every
+    // compute queue. Recover only the exact 0 -> 1 / low-32-bit form, only
+    // after a generous delay, and only while no producer has appeared.
+    private static readonly long _gpuProducerlessAgcWaitRecoveryTicks =
+        (long.TryParse(
+             Environment.GetEnvironmentVariable("SHARPEMU_GPU_PRODUCERLESS_WAIT_MS"),
+             out var producerlessWaitMs) && producerlessWaitMs > 0
+            ? producerlessWaitMs
+            : 2000L) * System.Diagnostics.Stopwatch.Frequency / 1000L;
+
     // Reads the WAIT_REG_MEM watched address, reference, mask, and 3-bit compare
     // function for both the AGC NOP-encapsulated (RWaitMem32/64) and the standard
     // ItWaitRegMem packet layouts.
@@ -9128,7 +9162,44 @@ public static partial class AgcExports
                 }
             }
 
-            if (woken is null && expiredRetries is null && deadlockBroken is null)
+            var producerlessCandidates =
+                GpuWaitRegistry.SnapshotExpiredProducerlessAgcWaitCandidates(
+                    ctx.Memory,
+                    System.Diagnostics.Stopwatch.GetTimestamp(),
+                    _gpuProducerlessAgcWaitRecoveryTicks);
+            List<GpuWaitRegistry.WaitingDcb>? producerlessRecovered = null;
+            if (producerlessCandidates is not null)
+            {
+                foreach (var waiter in producerlessCandidates)
+                {
+                    if (HasObservedLabelProducer(
+                        ctx.Memory,
+                        waiter.WaitAddress,
+                        waiter.Is64Bit ? (ulong)sizeof(ulong) : sizeof(uint)) ||
+                        !GpuWaitRegistry.TryRemove(waiter))
+                    {
+                        continue;
+                    }
+
+                    (producerlessRecovered ??= []).Add(waiter);
+                }
+            }
+            if (producerlessRecovered is not null)
+            {
+                foreach (var waiter in producerlessRecovered)
+                {
+                    Console.Error.WriteLine(
+                        $"[LOADER][WARN] agc.producerless_wait_recovered " +
+                        $"label=0x{waiter.WaitAddress:X16} queue={waiter.QueueName} " +
+                        $"submission={waiter.SubmissionId} waited_ms=" +
+                        $"{(System.Diagnostics.Stopwatch.GetTimestamp() - waiter.RegisteredTicks) * 1000.0 / System.Diagnostics.Stopwatch.Frequency:F1}");
+                    ResumeSuspendedDcb(ctx, gpuState, waiter, tracePackets);
+                    resumedCount++;
+                }
+            }
+
+            if (woken is null && expiredRetries is null && deadlockBroken is null &&
+                producerlessRecovered is null)
             {
                 if (_gpuWaitStaleTicks > 0 &&
                     GpuWaitRegistry.CollectUnreportedStale(

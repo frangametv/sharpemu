@@ -471,6 +471,81 @@ internal static class GpuWaitRegistry
         return expired;
     }
 
+    /// <summary>
+    /// Returns old AGC-NOP equality waits that are eligible for producerless
+    /// recovery. This is a compatibility
+    /// escape hatch for Gen5 queue bookkeeping labels whose producer packet is
+    /// outside the command streams currently understood by SharpEmu. Standard
+    /// PM4 waits and waits backed by a real producer remain fail-closed.
+    /// </summary>
+    public static List<WaitingDcb>? SnapshotExpiredProducerlessAgcWaitCandidates(
+        object memory,
+        long nowTicks,
+        long minAgeTicks)
+    {
+        memory = Canonicalize(memory)!;
+        List<WaitingDcb>? expired = null;
+        lock (_gate)
+        {
+            foreach (var (_, list) in _waiters)
+            {
+                for (var i = 0; i < list.Count; i++)
+                {
+                    var waiter = list[i];
+                    if (!ReferenceEquals(waiter.Memory, memory) ||
+                        waiter.IsStandard ||
+                        !waiter.Is64Bit ||
+                        waiter.CompareFunction != 3 ||
+                        waiter.Mask != uint.MaxValue ||
+                        (waiter.ReferenceValue & waiter.Mask) != 1 ||
+                        nowTicks - waiter.RegisteredTicks < minAgeTicks)
+                    {
+                        continue;
+                    }
+
+                    expired ??= new List<WaitingDcb>();
+                    expired.Add(waiter);
+                }
+            }
+        }
+
+        return expired;
+    }
+
+    /// <summary>Atomically removes one previously snapshotted waiter.</summary>
+    public static bool TryRemove(in WaitingDcb candidate)
+    {
+        lock (_gate)
+        {
+            if (!_waiters.TryGetValue(candidate.WaitAddress, out var list))
+            {
+                return false;
+            }
+
+            for (var i = list.Count - 1; i >= 0; i--)
+            {
+                var waiter = list[i];
+                if (!ReferenceEquals(waiter.Memory, candidate.Memory) ||
+                    !ReferenceEquals(waiter.State, candidate.State) ||
+                    waiter.SubmissionId != candidate.SubmissionId ||
+                    waiter.ResumeAddress != candidate.ResumeAddress)
+                {
+                    continue;
+                }
+
+                list.RemoveAt(i);
+                if (list.Count == 0)
+                {
+                    _waiters.Remove(candidate.WaitAddress);
+                }
+
+                return true;
+            }
+
+            return false;
+        }
+    }
+
     public static List<WaitingDcb>? CollectAllForMemory(object memory)
     {
         List<WaitingDcb>? collected = null;

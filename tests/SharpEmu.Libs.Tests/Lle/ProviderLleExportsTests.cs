@@ -218,7 +218,6 @@ public sealed class ProviderLleExportsTests
             NpManagerLleExports.MissingGuestProvider,
             NpUniversalDataSystemLleExports.MissingGuestProvider,
             NpUtilityLleExports.MissingGuestProvider,
-            NpWebApi2LleExports.MissingGuestProvider,
             PlayerInvitationDialogLleExports.MissingGuestProvider,
             RemoteplayLleExports.MissingGuestProvider,
             RtcLleExports.MissingGuestProvider,
@@ -311,7 +310,6 @@ public sealed class ProviderLleExportsTests
             AudioOutLleExports.MissingGuestProvider,
             AudioOut2LleExports.MissingGuestProvider,
             CoredumpLleExports.MissingGuestProvider,
-            HttpLleExports.MissingGuestProvider,
             ImeLleExports.MissingGuestProvider,
             NpTrophy2LleExports.MissingGuestProvider,
             PadLleExports.MissingGuestProvider,
@@ -322,7 +320,7 @@ public sealed class ProviderLleExportsTests
             VideoOutLleExports.MissingGuestProvider,
         };
 
-        Assert.Equal(14, fallbacks.Length);
+        Assert.Equal(13, fallbacks.Length);
         foreach (var fallback in fallbacks)
         {
             var context = new CpuContext(new NullMemory(), Generation.Gen5);

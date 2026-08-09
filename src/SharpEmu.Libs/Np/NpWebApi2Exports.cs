@@ -13,8 +13,11 @@ public static class NpWebApi2Exports
     private static int _nextLibraryContextHandle;
     private static int _nextPushEventHandle;
     private static int _nextUserContextHandle = 1000;
+    private static int _nextRequestHandle;
     private static readonly object _contextGate = new();
     private static readonly HashSet<int> _libraryContexts = [];
+    private static readonly HashSet<int> _userContexts = [];
+    private static readonly HashSet<int> _requests = [];
 
     [SysAbiExport(
         Nid = "+o9816YQhqQ",
@@ -98,7 +101,142 @@ public static class NpWebApi2Exports
         }
 
         var userContextId = Interlocked.Increment(ref _nextUserContextHandle);
+        lock (_contextGate)
+        {
+            _userContexts.Add(userContextId);
+        }
+
         return ctx.SetReturn(userContextId);
+    }
+
+    public static int NpWebApi2CreateRequest(CpuContext ctx)
+    {
+        var userContextId = unchecked((int)ctx[CpuRegister.Rdi]);
+        var serviceNameAddress = ctx[CpuRegister.Rsi];
+        var requestDataAddress = ctx[CpuRegister.Rdx];
+
+        lock (_contextGate)
+        {
+            if (!_userContexts.Contains(userContextId) ||
+                serviceNameAddress == 0 ||
+                requestDataAddress == 0)
+            {
+                return ctx.SetReturn(NpWebApi2ErrorInvalidArgument);
+            }
+
+            var requestId = Interlocked.Increment(ref _nextRequestHandle);
+            _requests.Add(requestId);
+            TraceNpWebApi2("create-request", requestId, (ulong)userContextId);
+            return ctx.SetReturn(requestId);
+        }
+    }
+
+    public static int NpWebApi2AddHttpRequestHeader(CpuContext ctx)
+    {
+        var requestId = unchecked((int)ctx[CpuRegister.Rdi]);
+        var headerNameAddress = ctx[CpuRegister.Rsi];
+        var headerValueAddress = ctx[CpuRegister.Rdx];
+
+        // Matches the provider's observed entry checks: request handle zero is
+        // accepted, while both string pointers are mandatory. The offline HLE
+        // records no network state; it only preserves the successful request
+        // construction path used by libSceNpCppWebApi.
+        if (headerNameAddress == 0 || headerValueAddress == 0)
+        {
+            return ctx.SetReturn(NpWebApi2ErrorInvalidArgument);
+        }
+
+        TraceNpWebApi2("add-request-header", requestId, headerNameAddress);
+        return ctx.SetReturn(OrbisGen2Result.ORBIS_GEN2_OK);
+    }
+
+    public static int NpWebApi2SendRequest(CpuContext ctx)
+    {
+        // The provider accepts request handle zero and forwards all four
+        // arguments to its internal dispatcher.  In the no-provider path we
+        // deliberately complete an empty offline response: no host network
+        // access and no fabricated PSN identity or payload.
+        var requestId = unchecked((int)ctx[CpuRegister.Rdi]);
+        TraceNpWebApi2("send-request-offline", requestId, ctx[CpuRegister.Rcx]);
+        return ctx.SetReturn(OrbisGen2Result.ORBIS_GEN2_OK);
+    }
+
+    public static int NpWebApi2GetHttpResponseHeaderValueLength(CpuContext ctx)
+    {
+        var headerNameAddress = ctx[CpuRegister.Rsi];
+        var outputLengthAddress = ctx[CpuRegister.Rdx];
+        if (headerNameAddress == 0 ||
+            outputLengthAddress == 0 ||
+            !ctx.TryWriteUInt64(outputLengthAddress, 1))
+        {
+            return ctx.SetReturn(NpWebApi2ErrorInvalidArgument);
+        }
+
+        // One byte is sufficient for the empty response's trailing NUL.
+        return ctx.SetReturn(OrbisGen2Result.ORBIS_GEN2_OK);
+    }
+
+    public static int NpWebApi2GetHttpResponseHeaderValue(CpuContext ctx)
+    {
+        var headerNameAddress = ctx[CpuRegister.Rsi];
+        var outputAddress = ctx[CpuRegister.Rdx];
+        var outputCapacity = ctx[CpuRegister.Rcx];
+        if (headerNameAddress == 0 ||
+            outputAddress == 0 ||
+            outputCapacity == 0 ||
+            !ctx.Memory.TryWrite(outputAddress, stackalloc byte[] { 0 }))
+        {
+            return ctx.SetReturn(NpWebApi2ErrorInvalidArgument);
+        }
+
+        return ctx.SetReturn(OrbisGen2Result.ORBIS_GEN2_OK);
+    }
+
+    public static int NpWebApi2DeleteRequest(CpuContext ctx)
+    {
+        var requestId = unchecked((int)ctx[CpuRegister.Rdi]);
+        lock (_contextGate)
+        {
+            _requests.Remove(requestId);
+        }
+
+        TraceNpWebApi2("delete-request", requestId, 0);
+        return ctx.SetReturn(OrbisGen2Result.ORBIS_GEN2_OK);
+    }
+
+    public static int NpWebApi2ReadData(CpuContext ctx)
+    {
+        var requestId = unchecked((int)ctx[CpuRegister.Rdi]);
+        var outputAddress = ctx[CpuRegister.Rsi];
+        var outputCapacity = ctx[CpuRegister.Rdx];
+        // Matches the provider entry checks for RSI/RDX. The deterministic
+        // offline response has no entity body, so zero is an immediate EOF.
+        if (outputAddress == 0 || outputCapacity == 0)
+        {
+            return ctx.SetReturn(NpWebApi2ErrorInvalidArgument);
+        }
+
+        TraceNpWebApi2("read-data-eof", requestId, outputCapacity);
+        return ctx.SetReturn(0);
+    }
+
+    public static int NpWebApi2DeleteUserContext(CpuContext ctx)
+    {
+        var userContextId = unchecked((int)ctx[CpuRegister.Rdi]);
+        lock (_contextGate)
+        {
+            _userContexts.Remove(userContextId);
+        }
+
+        TraceNpWebApi2("delete-user-context", userContextId, 0);
+        return ctx.SetReturn(OrbisGen2Result.ORBIS_GEN2_OK);
+    }
+
+    public static int NpWebApi2AbortRequest(CpuContext ctx)
+    {
+        var requestId = unchecked((int)ctx[CpuRegister.Rdi]);
+        TraceNpWebApi2("abort-request", requestId, 0);
+        return ctx.SetReturn(OrbisGen2Result.ORBIS_GEN2_OK);
     }
 
     [SysAbiExport(

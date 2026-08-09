@@ -797,6 +797,21 @@ public sealed class SelfLoader : ISelfLoader
             }
         }
 
+        if (string.Equals(
+                Environment.GetEnvironmentVariable("SHARPEMU_DUMP_IMPORT_INVENTORY"),
+                "1",
+                StringComparison.Ordinal))
+        {
+            foreach (var nid in orderedImportNids)
+            {
+                nidNames.TryGetValue(nid, out var catalogName);
+                var isData = descriptors.Any(
+                    descriptor => descriptor.ImportNid == nid && descriptor.IsDataImport);
+                Console.Error.WriteLine(
+                    $"[LOADER][IMPORT_INVENTORY] image=0x{imageBase:X16}\tnid={nid}\tname={catalogName ?? "<unknown>"}\tcount={nidCounts[nid]}\tkind={(isData ? "object" : "function")}\tstub={(stubEligibleNids.Contains(nid) ? 1 : 0)}");
+            }
+        }
+
         var addressesByNid = new Dictionary<string, ulong>(orderedImportNids.Count, StringComparer.Ordinal);
         foreach (var entry in stubsByAddress)
         {
