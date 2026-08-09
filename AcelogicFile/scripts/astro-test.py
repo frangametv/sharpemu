@@ -93,7 +93,7 @@ class SetupError(RuntimeError):
 
 
 def repo_root() -> Path:
-    return Path(__file__).resolve().parents[1]
+    return Path(__file__).resolve().parents[2]
 
 
 def host_rid() -> str:

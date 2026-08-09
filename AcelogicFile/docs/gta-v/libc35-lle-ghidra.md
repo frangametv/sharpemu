@@ -43,11 +43,11 @@ actually loaded.
   fail-closed registration without `PreferLle`.
 
 The two LLE files are reproducible from the compact queue with
-`scripts/generate-lle-nid-registrations.py`. The evidence packet is reproduced
+`AcelogicFile/scripts/generate-lle-nid-registrations.py`. The evidence packet is reproduced
 and validated with:
 
 ```text
-python3 scripts/convert-rho-libc35-evidence.py <final-rho-packet> docs/gta-v/provider-evidence/libc35
+python3 AcelogicFile/scripts/convert-rho-libc35-evidence.py <final-rho-packet> AcelogicFile/docs/gta-v/provider-evidence/libc35
 ```
 
 The converter verifies the source manifest, the exact 67-row partition, all
@@ -58,7 +58,7 @@ derived packet.
 ## Durable evidence
 
 The self-contained selected packet is under
-`docs/gta-v/provider-evidence/libc35/`. It contains only compact selected
+`AcelogicFile/docs/gta-v/provider-evidence/libc35/`. It contains only compact selected
 records, source hashes, the exact registration queue, provider selections, and
 remote cleanup proofs. It does not contain the game, firmware images, Ghidra
 projects, or the full runtime log.

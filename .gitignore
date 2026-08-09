@@ -7,7 +7,7 @@ PUBLISH_RELEASE.txt
 [Bb]in/
 [Oo]bj/
 [Pp]ublish/
-[Aa]rtifacts/
+/[Aa]rtifacts/
 logs/
 .tmp/
 

@@ -11,8 +11,8 @@ from pathlib import Path
 from unittest import mock
 
 
-REPO_ROOT = Path(__file__).resolve().parents[1]
-HARNESS_PATH = REPO_ROOT / "scripts" / "astro-test.py"
+REPO_ROOT = Path(__file__).resolve().parents[2]
+HARNESS_PATH = REPO_ROOT / "AcelogicFile" / "scripts" / "astro-test.py"
 SPEC = importlib.util.spec_from_file_location("astro_test_harness", HARNESS_PATH)
 assert SPEC is not None and SPEC.loader is not None
 HARNESS = importlib.util.module_from_spec(SPEC)

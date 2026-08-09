@@ -45,7 +45,7 @@ bodies are supplied by `libkernel.sprx` but register under
 ## Durable evidence
 
 The self-contained packet lives under
-`docs/gta-v/provider-evidence/provider23/`:
+`AcelogicFile/docs/gta-v/provider-evidence/provider23/`:
 
 - `windows/queue.csv`: exact 23-row registration queue, SHA-256
   `c7adf2491aa780e04c4f0eba129607a66f6a681859ddefbca266354b02199e67`.
@@ -74,7 +74,7 @@ the registrations.
 ## Reproduction
 
 Each catalog is generated with
-`scripts/generate-lle-nid-registrations.py`, using `windows/queue.csv`, its
+`AcelogicFile/scripts/generate-lle-nid-registrations.py`, using `windows/queue.csv`, its
 matching file under `windows/selected/`, the exact component name, and the
 logical library shown above. The generator independently recomputes every
 catalog-symbol NID and rejects missing functions, evidence-set mismatches,

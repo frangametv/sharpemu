@@ -18,7 +18,7 @@ The statically validated implementation commit is `d3c90e3686a61817f3f67193664a8
 | Combined test suites | 1166/1166 passed |
 | win-x64 self-contained Release publish | succeeded, 65 warnings, 0 errors |
 
-The exact commands and counts are recorded in `artifacts/gta-v-nid-evidence/final-parity-validation-20260718.json` and are checked by `scripts/update-gta-v-final-parity-tracker.py`.
+The exact commands and counts are recorded in `AcelogicFile/artifacts/gta-v-nid-evidence/final-parity-validation-20260718.json` and are checked by `AcelogicFile/scripts/update-gta-v-final-parity-tracker.py`.
 
 The validated Windows artifact was produced with:
 
@@ -78,7 +78,7 @@ The terminal fault is the same later-state fault observed before the final parit
 
 ## Durable historical evidence
 
-The tracked compressed trace is `artifacts/gta-v-nid-evidence/final-parity-runtime-20260718/gta-v-final-parity-x64.log.gz`.
+The tracked compressed trace is `AcelogicFile/artifacts/gta-v-nid-evidence/final-parity-runtime-20260718/gta-v-final-parity-x64.log.gz`.
 
 - Compressed SHA-256: `68848eeaeb458489144abdb73c66a566f22fd3b40b57ad10f4e51c3a68012a1b`
 - Raw SHA-256: `585ff7f6635ce07830b2078a46aa6e5cebdd8ddb1f83a0880b9fc40bf0b564f8`

@@ -47,7 +47,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--repo",
         type=Path,
-        default=Path(__file__).resolve().parents[1],
+        default=Path(__file__).resolve().parents[2],
     )
     return parser.parse_args()
 
@@ -82,7 +82,7 @@ def load_dual_host_evidence(
     repo: Path,
     registrations: dict[str, dict[str, Any]],
 ) -> dict[str, dict[str, Any]]:
-    packet = repo / "docs/gta-v/provider-evidence/provider23"
+    packet = repo / "AcelogicFile/docs/gta-v/provider-evidence/provider23"
     mac_path = packet / "mac/selected.json"
     mac_payload = json.loads(mac_path.read_text(encoding="utf-8"))
     mac = {record["nid"]: record for record in mac_payload["records"]}
@@ -129,7 +129,7 @@ def main() -> None:
     repo = args.repo.resolve()
     registrations = load_registrations(repo)
     evidence = load_dual_host_evidence(repo, registrations)
-    manifest_path = repo / "GTA_V_NID_SWARM_MANIFEST.json"
+    manifest_path = repo / "AcelogicFile/GTA_V_NID_SWARM_MANIFEST.json"
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     by_nid = {item["nid"]: item for item in manifest["items"]}
     require(len(by_nid) == len(manifest["items"]) == 911, "unexpected manifest cardinality")

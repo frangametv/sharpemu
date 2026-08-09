@@ -22,8 +22,9 @@ data rows. Runtime and regression evidence is recorded in
 
 The `acelogic_*` columns are the immutable baseline snapshot, not live coverage
 fields. Current coverage is recomputed against SharpEmu's generated Gen5 export
-registry and tracked in `GTA_V_PROGRESS.md`, `GTA_V_NID_SWARM_MANIFEST.json`, and
-`GTA_V_UNCOVERED_NIDS.csv`.
+registry and tracked in `AcelogicFile/GTA_V_PROGRESS.md`,
+`AcelogicFile/GTA_V_NID_SWARM_MANIFEST.json`, and
+`AcelogicFile/GTA_V_UNCOVERED_NIDS.csv`.
 
 Registration parity means that every one of these 1,432 NIDs appears exactly once
 in the effective Gen5 registry. It does not by itself prove semantic correctness,

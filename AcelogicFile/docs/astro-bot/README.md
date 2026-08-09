@@ -53,7 +53,7 @@ and writable binding.
 The completed selector control was:
 
 ```sh
-python3 scripts/astro-test.py test \
+python3 AcelogicFile/scripts/astro-test.py test \
   --build never \
   --tag e206-live-selector-to-geometry \
   --timeout 200 --stability 20 --retries 2 \
@@ -70,13 +70,13 @@ python3 scripts/astro-test.py test \
 Check the machine, game, and runtime paths:
 
 ```sh
-python3 scripts/astro-test.py doctor
+python3 AcelogicFile/scripts/astro-test.py doctor
 ```
 
 Run the exact title gate without capture overhead:
 
 ```sh
-python3 scripts/astro-test.py test \
+python3 AcelogicFile/scripts/astro-test.py test \
   --build never \
   --tag focused-probe \
   --no-screenshot \
@@ -86,7 +86,7 @@ python3 scripts/astro-test.py test \
 Keep the emulator open for manual input testing:
 
 ```sh
-python3 scripts/astro-test.py run --build never --tag manual-input
+python3 AcelogicFile/scripts/astro-test.py run --build never --tag manual-input
 ```
 
 Use screenshots only when validating a visual change. The runner stores logs,

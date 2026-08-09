@@ -69,6 +69,6 @@ Machine-readable evidence:
   `cd4fe3472751199781dc93860d0e137342d0e9936d3973da361cd0d0d9bdaab7`.
 
 The per-library selected packets are reproducibly derived by
-`scripts/convert-ghidra-windows-audit.py`; registrations are emitted by
-`scripts/generate-lle-nid-registrations.py`. The Ghidra archive SHA-256 was
+`AcelogicFile/scripts/convert-ghidra-windows-audit.py`; registrations are emitted by
+`AcelogicFile/scripts/generate-lle-nid-registrations.py`. The Ghidra archive SHA-256 was
 `b62e81a0390618466c019c60d8c2f796ced2509c4c1aea4a37644a77272cf99d`.

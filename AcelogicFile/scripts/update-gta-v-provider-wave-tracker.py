@@ -53,7 +53,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--repo",
         type=Path,
-        default=Path(__file__).resolve().parents[1],
+        default=Path(__file__).resolve().parents[2],
         help="SharpEmu worktree root",
     )
     parser.add_argument("--provider-commit", required=True)
@@ -112,8 +112,8 @@ def body_measure(function: dict[str, Any]) -> int:
 
 
 def load_evidence(repo: Path, selected_nids: set[str]) -> dict[str, GhidraEvidence]:
-    documents = [repo / "docs/gta-v/npcppwebapi-lle-ghidra.json"]
-    documents.extend(sorted((repo / "docs/gta-v/provider-evidence").glob("*.json")))
+    documents = [repo / "AcelogicFile/docs/gta-v/npcppwebapi-lle-ghidra.json"]
+    documents.extend(sorted((repo / "AcelogicFile/docs/gta-v/provider-evidence").glob("*.json")))
 
     evidence: dict[str, GhidraEvidence] = {}
     for document in documents:
@@ -280,7 +280,7 @@ def update_semantic_item(repo: Path, item: dict[str, Any], semantic_commit: str)
         "files": [
             "src/SharpEmu.Libs/Agc/AgcExports.cs",
             "tests/SharpEmu.Libs.Tests/Agc/AgcDriverHsOffchipParamTests.cs",
-            "docs/gta-v/agc-driver-hs-offchip-param.md",
+            "AcelogicFile/docs/gta-v/agc-driver-hs-offchip-param.md",
         ],
     }
     item["validation"] = {
@@ -303,7 +303,7 @@ def update_semantic_item(repo: Path, item: dict[str, Any], semantic_commit: str)
 def main() -> None:
     args = parse_args()
     repo = args.repo.resolve()
-    manifest_path = repo / "GTA_V_NID_SWARM_MANIFEST.json"
+    manifest_path = repo / "AcelogicFile/GTA_V_NID_SWARM_MANIFEST.json"
     registrations = load_registrations(repo)
     evidence = load_evidence(repo, set(registrations))
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))

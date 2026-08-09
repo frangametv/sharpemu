@@ -74,7 +74,7 @@
     "description": "Historical pre-rebase 2026-07-18 Rosetta trace; this is not runtime validation of the gpu-bootstrap scheduler integration.",
     "command": "set +e; SHARPEMU_LOG_ALL_IMPORTS=1 SHARPEMU_LOG_IMPORTS=1 gtimeout -s TERM 45 arch -x86_64 artifacts/publish/SharpEmu.CLI/Release/net10.0/osx-x64/SharpEmu --cpu-engine=native --log-level=info \"/Volumes/Untitled/games/sharpemu/Games/GTA V/eboot.bin\" > artifacts/gta-v-final-parity-x64.log 2>&1; rc=$?; set -e; echo \"exit=$rc\"",
     "exit_capture": "rc=$?",
-    "compressed_log": "artifacts/gta-v-nid-evidence/final-parity-runtime-20260718/gta-v-final-parity-x64.log.gz",
+    "compressed_log": "AcelogicFile/artifacts/gta-v-nid-evidence/final-parity-runtime-20260718/gta-v-final-parity-x64.log.gz",
     "compressed_sha256": "68848eeaeb458489144abdb73c66a566f22fd3b40b57ad10f4e51c3a68012a1b",
     "raw_sha256": "585ff7f6635ce07830b2078a46aa6e5cebdd8ddb1f83a0880b9fc40bf0b564f8",
     "raw_bytes": 22997934,

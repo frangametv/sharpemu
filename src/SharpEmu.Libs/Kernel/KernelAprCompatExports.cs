@@ -46,16 +46,22 @@ public static class KernelAprCompatExports
         var completionResult = AmprExports.CompleteCommandBuffer(ctx, commandBuffer);
         if (completionResult != (int)OrbisGen2Result.ORBIS_GEN2_OK)
         {
+            _submittedCommandBuffers.TryRemove(submissionId, out _);
             return completionResult;
         }
 
-        if (outSubmissionId != 0 && !ctx.TryWriteUInt32(outSubmissionId, submissionId))
+        // Direct execution can pass native pointers for APR outputs. Use the
+        // shared guest/host compatibility writer instead of guest memory only.
+        if (outSubmissionId != 0 &&
+            !KernelMemoryCompatExports.TryWriteUInt32Compat(ctx, outSubmissionId, submissionId))
         {
+            _submittedCommandBuffers.TryRemove(submissionId, out _);
             return (int)OrbisGen2Result.ORBIS_GEN2_ERROR_MEMORY_FAULT;
         }
 
         if (resultAddress != 0 && !TryWriteAprResult(ctx, resultAddress))
         {
+            _submittedCommandBuffers.TryRemove(submissionId, out _);
             return (int)OrbisGen2Result.ORBIS_GEN2_ERROR_MEMORY_FAULT;
         }
 
@@ -104,6 +110,7 @@ public static class KernelAprCompatExports
         var completionResult = AmprExports.CompleteCommandBuffer(ctx, commandBuffer);
         if (completionResult != (int)OrbisGen2Result.ORBIS_GEN2_OK)
         {
+            _submittedCommandBuffers.TryRemove(submissionId, out _);
             return completionResult;
         }
 
@@ -131,11 +138,13 @@ public static class KernelAprCompatExports
         var completionResult = AmprExports.CompleteCommandBuffer(ctx, commandBuffer);
         if (completionResult != (int)OrbisGen2Result.ORBIS_GEN2_OK)
         {
+            _submittedCommandBuffers.TryRemove(submissionId, out _);
             return completionResult;
         }
 
-        if (!ctx.TryWriteUInt32(outSubmissionId, submissionId))
+        if (!KernelMemoryCompatExports.TryWriteUInt32Compat(ctx, outSubmissionId, submissionId))
         {
+            _submittedCommandBuffers.TryRemove(submissionId, out _);
             return (int)OrbisGen2Result.ORBIS_GEN2_ERROR_MEMORY_FAULT;
         }
 
@@ -160,7 +169,7 @@ public static class KernelAprCompatExports
     {
         Span<byte> result = stackalloc byte[sizeof(ulong)];
         result.Clear();
-        return ctx.Memory.TryWrite(resultAddress, result);
+        return KernelMemoryCompatExports.TryWriteCompat(ctx, resultAddress, result);
     }
 
     private static void TraceApr(

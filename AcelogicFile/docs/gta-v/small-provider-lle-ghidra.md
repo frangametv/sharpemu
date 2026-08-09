@@ -28,6 +28,6 @@ intentional: the public provider contains eight of the nine targets, while
 `libSceVideoRecording.native.sprx` contains all nine, including the unnamed
 `iQS6DUtLybE` export.
 
-The machine-readable evidence is stored in `docs/gta-v/provider-evidence/`.
+The machine-readable evidence is stored in `AcelogicFile/docs/gta-v/provider-evidence/`.
 Generated registrations are stored in `src/SharpEmu.Libs/Lle/` and can be
-reproduced with `scripts/generate-lle-nid-registrations.py`.
+reproduced with `AcelogicFile/scripts/generate-lle-nid-registrations.py`.

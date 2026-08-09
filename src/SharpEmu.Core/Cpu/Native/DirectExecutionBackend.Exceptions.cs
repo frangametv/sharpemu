@@ -280,6 +280,11 @@ public sealed partial class DirectExecutionBackend
 
 			}
 
+			if (exceptionCode == 3221225477u)
+			{
+				DumpNullVirtualCallResultDiagnostics(rip, rax, rdi, accessType, target);
+			}
+
 			Console.Error.WriteLine("[LOADER][INFO]   Stack qwords (RSP..):");
 			for (int i = 0; i < 16; i++)
 			{
@@ -1206,6 +1211,97 @@ public sealed partial class DirectExecutionBackend
 
 		Console.Error.WriteLine($"[LOADER][INFO]   {name} @0x{slotAddress:X16} = {FormatPointerWithNearestSymbol(value)}");
 	}
+
+	internal static bool TryDecodeNullVirtualCallResultStore(
+		ReadOnlySpan<byte> codeBeforeRip,
+		ReadOnlySpan<byte> codeAtRip,
+		ulong rax,
+		ulong accessType,
+		ulong accessTarget,
+		out byte virtualSlot)
+	{
+		virtualSlot = 0;
+		if (rax != 0 || accessType != 1 || accessTarget != 8 ||
+			codeBeforeRip.Length < 9 || codeAtRip.Length < 4)
+		{
+			return false;
+		}
+
+		ReadOnlySpan<byte> before = codeBeforeRip[^9..];
+		if (before[0] != 0x48 || before[1] != 0x8B || before[2] != 0x07 ||
+			before[3] != 0xFF || before[4] != 0x50 ||
+			before[6] != 0x49 || before[7] != 0x89 || before[8] != 0xC6 ||
+			codeAtRip[0] != 0x48 || codeAtRip[1] != 0x89 ||
+			codeAtRip[2] != 0x58 || codeAtRip[3] != 0x08)
+		{
+			return false;
+		}
+
+		virtualSlot = before[5];
+		return true;
+	}
+
+	private void DumpNullVirtualCallResultDiagnostics(
+		ulong rip,
+		ulong rax,
+		ulong receiver,
+		ulong accessType,
+		ulong accessTarget)
+	{
+		Span<byte> codeBeforeRip = stackalloc byte[9];
+		Span<byte> codeAtRip = stackalloc byte[4];
+		if (rip < (ulong)codeBeforeRip.Length ||
+			!TryReadHostBytes(rip - (ulong)codeBeforeRip.Length, codeBeforeRip) ||
+			!TryReadHostBytes(rip, codeAtRip) ||
+			!TryDecodeNullVirtualCallResultStore(
+				codeBeforeRip,
+				codeAtRip,
+				rax,
+				accessType,
+				accessTarget,
+				out var virtualSlot))
+		{
+			return;
+		}
+
+		Console.Error.WriteLine(
+			$"[LOADER][INFO]   Null virtual-call result detected: receiver=0x{receiver:X16} " +
+			$"slot=+0x{virtualSlot:X2}");
+		if (!TryReadQword(receiver, out var vtable))
+		{
+			Console.Error.WriteLine("[LOADER][INFO]   Null virtual-call vtable: <unreadable>");
+			return;
+		}
+
+		if (ulong.MaxValue - vtable < virtualSlot)
+		{
+			Console.Error.WriteLine(
+				$"[LOADER][INFO]   Null virtual-call vtable={FormatPointerWithNearestSymbol(vtable)} " +
+				"target-slot=<overflow>");
+			return;
+		}
+
+		var virtualSlotAddress = vtable + virtualSlot;
+		if (!TryReadQword(virtualSlotAddress, out var callTarget))
+		{
+			Console.Error.WriteLine(
+				$"[LOADER][INFO]   Null virtual-call vtable={FormatPointerWithNearestSymbol(vtable)} " +
+				$"target-slot=0x{virtualSlotAddress:X16} <unreadable>");
+			return;
+		}
+
+		Console.Error.WriteLine(
+			$"[LOADER][INFO]   Null virtual-call vtable={FormatPointerWithNearestSymbol(vtable)} " +
+			$"target={FormatPointerWithNearestSymbol(callTarget)}");
+		Span<byte> targetCode = stackalloc byte[32];
+		if (TryReadHostBytes(callTarget, targetCode))
+		{
+			Console.Error.WriteLine(
+				"[LOADER][INFO]   Null virtual-call target bytes: " +
+				BitConverter.ToString(targetCode.ToArray()).Replace("-", " "));
+		}
+	}
+
 	private void DumpPointerWindow(string name, ulong baseAddress, int size)
 	{
 		if (baseAddress < 0x10000 || size <= 0)

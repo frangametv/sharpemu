@@ -42,5 +42,5 @@ Machine-readable evidence:
   SHA-256 `aac85e3a77fde54179eb6a49e6c375e9a6ddb55027941e8056d1361975ea272b`.
 
 The selected packets are reproducibly derived with
-`scripts/convert-ghidra-provider-inventory.py`, and the registrations are
-reproducibly emitted with `scripts/generate-lle-nid-registrations.py`.
+`AcelogicFile/scripts/convert-ghidra-provider-inventory.py`, and the registrations are
+reproducibly emitted with `AcelogicFile/scripts/generate-lle-nid-registrations.py`.

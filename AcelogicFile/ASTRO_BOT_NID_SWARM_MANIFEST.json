@@ -438,7 +438,7 @@
         "files": [
           "src/SharpEmu.Libs/SaveData/SaveDataExports.cs",
           "tests/SharpEmu.Libs.Tests/SaveData/SaveDataTransferringMountTests.cs",
-          "docs/astro-bot/savedata-transferring-mount.md"
+          "AcelogicFile/docs/astro-bot/savedata-transferring-mount.md"
         ]
       },
       "validation": {

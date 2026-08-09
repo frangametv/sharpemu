@@ -16,18 +16,18 @@ from pathlib import Path
 from typing import Any
 
 
-INVENTORY_RELATIVE = Path("docs/gta-v/gta-v-gen5-nid-inventory-base-615bae08.csv")
+INVENTORY_RELATIVE = Path("AcelogicFile/docs/gta-v/gta-v-gen5-nid-inventory-base-615bae08.csv")
 INVENTORY_SHA256 = "efb0a69b0e5e32274db2ca86558041318e9ba65011c0d94f3362629bf826f73a"
-MANIFEST_RELATIVE = Path("GTA_V_NID_SWARM_MANIFEST.json")
-UNCOVERED_RELATIVE = Path("GTA_V_UNCOVERED_NIDS.csv")
-RHO_PACKET = Path("artifacts/gta-v-nid-evidence/rho-remaining90-contracts-20260718")
-LIBC_QUEUE = Path("docs/gta-v/provider-evidence/libc35/prefer-lle-registration-queue.csv")
+MANIFEST_RELATIVE = Path("AcelogicFile/GTA_V_NID_SWARM_MANIFEST.json")
+UNCOVERED_RELATIVE = Path("AcelogicFile/GTA_V_UNCOVERED_NIDS.csv")
+RHO_PACKET = Path("AcelogicFile/artifacts/gta-v-nid-evidence/rho-remaining90-contracts-20260718")
+LIBC_QUEUE = Path("AcelogicFile/docs/gta-v/provider-evidence/libc35/prefer-lle-registration-queue.csv")
 LIBC_NON_LLE_QUEUE = RHO_PACKET / "libc-non-lle-contract-queue.csv"
 KERNEL_QUEUE = RHO_PACKET / "kernel-hle-contract-queue.csv"
 DATA_QUEUE = RHO_PACKET / "data-import-disposition.csv"
 CONSOLIDATED_EVIDENCE = RHO_PACKET / "consolidated-nid-evidence.json"
-OBJECT_EVIDENCE = Path("artifacts/gta-v-nid-evidence/data5-objects-20260718/GHIDRA_OBJECT_EVIDENCE.json")
-VALIDATION_EVIDENCE = Path("artifacts/gta-v-nid-evidence/final-parity-validation-20260718.json")
+OBJECT_EVIDENCE = Path("AcelogicFile/artifacts/gta-v-nid-evidence/data5-objects-20260718/GHIDRA_OBJECT_EVIDENCE.json")
+VALIDATION_EVIDENCE = Path("AcelogicFile/artifacts/gta-v-nid-evidence/final-parity-validation-20260718.json")
 HISTORICAL_RUNTIME_COMMIT = "4ea43616102ba8b2a5bf59b745cd3b758d05e110"
 CURRENT_RUNTIME_COMMIT = "b591baa1aab949e63c48d790b067d5beeb47b091"
 ATTRIBUTE_RE = re.compile(r"\[SysAbiExport\(\s*(.*?)\)\]", re.DOTALL)
@@ -420,7 +420,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--repo",
         type=Path,
-        default=Path(__file__).resolve().parents[1],
+        default=Path(__file__).resolve().parents[2],
     )
     return parser.parse_args()
 
@@ -658,7 +658,7 @@ def main() -> None:
             "files": [
                 export["source"],
                 "tests/SharpEmu.Libs.Tests/Lle/Libc35ExportsTests.cs",
-                "docs/gta-v/libc35-lle-ghidra.md",
+                "AcelogicFile/docs/gta-v/libc35-lle-ghidra.md",
             ],
         }
         item["validation"] = common_validation(
@@ -707,7 +707,7 @@ def main() -> None:
                 export["source"],
                 "src/SharpEmu.Libs/Kernel/KernelSocketCompatExports.cs",
                 "tests/SharpEmu.Libs.Tests/Kernel/GtaVKernelContractExportsTests.cs",
-                "docs/gta-v/kernel27-ghidra-contracts.md",
+                "AcelogicFile/docs/gta-v/kernel27-ghidra-contracts.md",
             ],
         }
         item["validation"] = common_validation(
@@ -758,7 +758,7 @@ def main() -> None:
                 "src/SharpEmu.Core/Runtime/ImportedDataRebinder.cs",
                 "src/SharpEmu.Core/Loader/SelfLoader.cs",
                 "tests/SharpEmu.Libs.Tests/Loader/DataSymbolRegistrationTests.cs",
-                "docs/gta-v/gen5-object-import-architecture.md",
+                "AcelogicFile/docs/gta-v/gen5-object-import-architecture.md",
             ],
         }
         item["validation"] = common_validation(

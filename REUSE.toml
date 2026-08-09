@@ -34,26 +34,7 @@ SPDX-License-Identifier = "MIT"
 [[annotations]]
 path = [
     ".gitattributes",
-    "ASTRO_BOT_*",
-    "GTA_V_*",
-    "SYSTEM_UI.md",
-    "artifacts/gta-v-nid-evidence/**",
-    "docs/astro-bot/**",
-    "docs/gta-v/**",
-    "scripts/astro-test.py",
-    "scripts/convert-ghidra-provider-inventory.py",
-    "scripts/convert-ghidra-windows-audit.py",
-    "scripts/convert-rho-libc35-evidence.py",
-    "scripts/extract-self-code-window.py",
-    "scripts/filter-gta-v-uncovered.py",
-    "scripts/generate-lle-nid-registrations.py",
-    "scripts/ghidra/**",
-    "scripts/reconstruct-ps5-self.py",
-    "scripts/run-ghidra-provider-sweep.py",
-    "scripts/update-gta-v-final-parity-tracker.py",
-    "scripts/update-gta-v-provider-wave-tracker.py",
-    "scripts/update-gta-v-provider23-tracker.py",
-    "tests/test_astro_test.py"
+    "AcelogicFile/**"
 ]
 precedence = "aggregate"
 SPDX-FileCopyrightText = "2026 Acelogic"
@@ -65,4 +46,4 @@ path = "CUSTOM_VERSION.txt"
 precedence = "aggregate"
 SPDX-FileCopyrightText = "2026 FranGameTv"
 SPDX-License-Identifier = "GPL-2.0-or-later"
-SPDX-FileComment = "User-editable build label embedded into the SharpEmu GUI, for example Fran2."
+SPDX-FileComment = "User-editable build label embedded into the SharpEmu GUI."

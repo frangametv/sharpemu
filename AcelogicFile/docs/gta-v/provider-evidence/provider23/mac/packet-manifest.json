@@ -455,7 +455,7 @@
     },
     {
       "bytes": 10568,
-      "path": "scripts/reconstruct-ps5-self.py",
+      "path": "AcelogicFile/scripts/reconstruct-ps5-self.py",
       "sha256": "ac4d33b0093dd2b2788273c9400d07307ff2a2f5dbc6cfe8b319425e13ffdd9c"
     }
   ],
