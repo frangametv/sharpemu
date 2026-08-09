@@ -9306,10 +9306,15 @@ public static partial class AgcExports
                 var wroteData = writesGuestMemory && (dataSelection switch
                 {
                     1 => TryWriteUInt32(ctx, destinationAddress, dataLo),
-                    2 => ctx.TryWriteUInt64(destinationAddress, data),
+                    // Native/JIT guest code can place writable host-backed libc
+                    // pointers in AGC packets. Match the 32-bit path above and
+                    // accept those validated mappings instead of silently losing
+                    // the completion fence.
+                    2 => TryWriteUInt64(ctx, destinationAddress, data),
                     // Hardware counter writes are timing values sampled at the
                     // release point, not the immediate payload in ordinal 6/7.
-                    3 or 4 => ctx.TryWriteUInt64(
+                    3 or 4 => TryWriteUInt64(
+                        ctx,
                         destinationAddress,
                         unchecked((ulong)System.Diagnostics.Stopwatch.GetTimestamp())),
                     _ => false,
@@ -9433,11 +9438,14 @@ public static partial class AgcExports
                 var wroteData = dataSelection switch
                 {
                     1 => TryWriteUInt32(ctx, destinationAddress, dataLo),
-                    2 => ctx.TryWriteUInt64(destinationAddress, data),
+                    // Keep 64-bit releases compatible with writable host-backed
+                    // libc pointers, as the 32-bit TryWriteUInt32 path already is.
+                    2 => TryWriteUInt64(ctx, destinationAddress, data),
                     // Data selection 3 samples the GPU clock at the release
                     // point. The packet payload is ignored by hardware; Unity
                     // uses the nonzero timestamp as submit-completion state.
-                    3 => ctx.TryWriteUInt64(
+                    3 => TryWriteUInt64(
+                        ctx,
                         destinationAddress,
                         unchecked((ulong)System.Diagnostics.Stopwatch.GetTimestamp())),
                     _ => false,
