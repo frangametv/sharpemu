@@ -16,7 +16,7 @@ SPDX-License-Identifier: GPL-2.0-or-later
 
 <p align="center">
   <a href="https://github.com/frangametv/sharpemu/releases">
-    <img src="https://img.shields.io/badge/Download-2EA44F?style=for-the-badge&logo=github&logoColor=white" alt="Download from GitHub Releases">
+    <img src="https://img.shields.io/badge/Download-GitHub%20Releases-2EA44F?style=for-the-badge&logo=github&logoColor=white" alt="Download from GitHub Releases">
   </a>
 </p>
 
@@ -57,15 +57,15 @@ It is not yet a general-purpose or stable PS5 emulator.
 
 ## Download and Run
 
-<p align="center">
+Prebuilt packages for Windows, Linux and macOS are available from
+[GitHub Releases](https://github.com/frangametv/sharpemu/releases). Select the
+archive for your operating system and extract it before launching SharpEmu.
+
+<p align="left">
   <a href="https://github.com/frangametv/sharpemu/releases">
     <img src="https://img.shields.io/badge/Download-GitHub%20Releases-2EA44F?style=for-the-badge&logo=github&logoColor=white" alt="Download from GitHub Releases">
   </a>
 </p>
-
-Prebuilt packages for Windows, Linux and macOS are available from
-[GitHub Releases](https://github.com/frangametv/sharpemu/releases). Select the
-archive for your operating system and extract it before launching SharpEmu.
 
 A Vulkan-capable GPU and an up-to-date graphics driver are required. The macOS
 package includes MoltenVK and runs as an x64 application, including through
