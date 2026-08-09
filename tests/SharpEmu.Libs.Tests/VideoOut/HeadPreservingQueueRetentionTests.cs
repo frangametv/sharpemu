@@ -96,6 +96,20 @@ public sealed class HeadPreservingQueueRetentionTests
             new VulkanOrderedGuestAction(() => { }, "test")));
     }
 
+    [Theory]
+    [InlineData(0, false, true)]
+    [InlineData(1, false, false)]
+    [InlineData(1, true, true)]
+    public void FlipWaitRunsOnlyAfterItsReferencedCapture(
+        long version,
+        bool captureComplete,
+        bool expected)
+    {
+        Assert.Equal(
+            expected,
+            GuestPresentationScheduling.IsFlipWaitReady(version, captureComplete));
+    }
+
     [Fact]
     public void YieldAfterEveryFlipExposesEveryGenerationInOrder()
     {

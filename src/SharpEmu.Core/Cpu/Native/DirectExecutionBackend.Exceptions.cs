@@ -18,6 +18,7 @@ public sealed partial class DirectExecutionBackend
 	private const ulong LazyCommitWindowBytes = 0x0200_0000UL;
 	private static int _lazyCommitTraceCount;
 	private static int _guestAllocatorHoleRecoveries;
+	private static int _nullVirtualAllocatorRecoveries;
 	private static int _auxiliaryThreadExecuteFaultRecoveries;
 	private static int _auxiliaryThreadExecuteFaultSkips;
 	private nint _workerAbortStack;
@@ -149,6 +150,11 @@ public sealed partial class DirectExecutionBackend
 			}
 			if (exceptionCode == 3221225477u &&
 				TryRecoverGuestAllocatorHole(exceptionRecord, contextRecord, rip))
+			{
+				return -1;
+			}
+			if (exceptionCode == 3221225477u &&
+				TryRecoverNullVirtualAllocatorResult(exceptionRecord, contextRecord, rip))
 			{
 				return -1;
 			}
@@ -697,6 +703,74 @@ public sealed partial class DirectExecutionBackend
 		}
 
 		return true;
+	}
+
+	private unsafe bool TryRecoverNullVirtualAllocatorResult(
+		EXCEPTION_RECORD* exceptionRecord,
+		void* contextRecord,
+		ulong rip)
+	{
+		if (string.Equals(
+				Environment.GetEnvironmentVariable("SHARPEMU_DISABLE_NULL_VIRTUAL_ALLOCATOR_RECOVERY"),
+				"1",
+				StringComparison.Ordinal) ||
+			exceptionRecord->NumberParameters < 2 ||
+			exceptionRecord->ExceptionInformation[0] != 1 ||
+			exceptionRecord->ExceptionInformation[1] != 8 ||
+			ReadCtxU64(contextRecord, CTX_RAX) != 0 ||
+			ReadCtxU64(contextRecord, CTX_R14) != 0 ||
+			rip < 24)
+		{
+			return false;
+		}
+
+		Span<byte> before = stackalloc byte[24];
+		Span<byte> current = stackalloc byte[4];
+		var activeContext = ActiveCpuContext;
+		if (activeContext is null ||
+			!activeContext.Memory.TryRead(rip - 24, before) ||
+			!activeContext.Memory.TryRead(rip, current) ||
+			!IsNullVirtualAllocatorResultPattern(before, current) ||
+			activeContext.Memory is not IGuestMemoryAllocator allocator ||
+			!allocator.TryAllocateGuestMemory(16, 16, out var allocation) ||
+			allocation == 0)
+		{
+			return false;
+		}
+
+		// The virtual allocation callback has returned null. The faulting code has
+		// already copied that result into R14 and is about to initialize the new
+		// 16-byte node. Supply a guest-owned fallback allocation and retry the store.
+		WriteCtxU64(contextRecord, CTX_RAX, allocation);
+		WriteCtxU64(contextRecord, CTX_R14, allocation);
+		var recovery = Interlocked.Increment(ref _nullVirtualAllocatorRecoveries);
+		if (recovery <= 16 || (recovery & (recovery - 1)) == 0)
+		{
+			Console.Error.WriteLine(
+				$"[LOADER][WARN] Recovered null virtual allocator result #{recovery}: " +
+				$"rip=0x{rip:X16} allocation=0x{allocation:X16} size=0x10 alignment=0x10");
+			Console.Error.Flush();
+		}
+
+		return true;
+	}
+
+	internal static bool IsNullVirtualAllocatorResultPattern(
+		ReadOnlySpan<byte> before,
+		ReadOnlySpan<byte> current)
+	{
+		ReadOnlySpan<byte> expectedBefore = new byte[]
+		{
+			0x48, 0x8B, 0x3A,             // mov rdi,[rdx]
+			0xBE, 0x10, 0x00, 0x00, 0x00, // mov esi,0x10
+			0xBA, 0x10, 0x00, 0x00, 0x00, // mov edx,0x10
+			0x31, 0xC9,                   // xor ecx,ecx
+			0x48, 0x8B, 0x07,             // mov rax,[rdi]
+			0xFF, 0x50, 0x48,             // call qword ptr [rax+0x48]
+			0x49, 0x89, 0xC6,             // mov r14,rax
+		};
+		ReadOnlySpan<byte> expectedCurrent = new byte[] { 0x48, 0x89, 0x58, 0x08 }; // mov [rax+8],rbx
+		return before.SequenceEqual(expectedBefore) && current.SequenceEqual(expectedCurrent);
 	}
 
 	private static bool IsBenignHostDebugException(uint exceptionCode)

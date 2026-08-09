@@ -19346,9 +19346,17 @@ public static partial class AgcExports
         var directory = Path.Combine(AppContext.BaseDirectory, "shader-dumps");
         Directory.CreateDirectory(directory);
         var name = $"{shaderAddress:X16}-{stateFingerprint:X16}.{stage}";
-        File.WriteAllBytes(
-            Path.Combine(directory, $"{name}.{shader.PayloadFileExtension}"),
-            shader.Payload);
+        var payloadPath = Path.Combine(directory, $"{name}.{shader.PayloadFileExtension}");
+        var irPath = Path.Combine(directory, $"{name}.ir.txt");
+        // The state fingerprint is part of the name, so an existing pair is the
+        // same translation. Avoid rewriting multi-megabyte diagnostic files on
+        // every launch; dumping must not add recurring I/O to game startup.
+        if (File.Exists(payloadPath) && File.Exists(irPath))
+        {
+            return;
+        }
+
+        File.WriteAllBytes(payloadPath, shader.Payload);
 
         var lines = new List<string>(program.Instructions.Count + 2)
         {
@@ -19366,7 +19374,7 @@ public static partial class AgcExports
                 $"{instruction.Control}");
         }
 
-        File.WriteAllLines(Path.Combine(directory, $"{name}.ir.txt"), lines);
+        File.WriteAllLines(irPath, lines);
     }
 
     /// <summary>

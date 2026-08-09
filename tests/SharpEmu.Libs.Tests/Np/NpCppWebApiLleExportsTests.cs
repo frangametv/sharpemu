@@ -11,6 +11,7 @@ public sealed class NpCppWebApiLleExportsTests
 {
     private const string LegacyInitializeNid = "UYPxv8MIzGo";
     private const string OfflineProfilesNid = "dv8KUvfjc8c";
+    private const string OfflineHeaderValueNid = "QWRYQMQSpIc";
 
     [Fact]
     public void GtaProviderCatalog_RegistersAll436ExactGen5NidsAsLlePreferred()
@@ -20,10 +21,11 @@ public sealed class NpCppWebApiLleExportsTests
             .ToArray();
         var catalog = gen5.Where(export => export.Nid != LegacyInitializeNid).ToArray();
 
-        Assert.Equal(437, gen5.Length);
-        Assert.Equal(436, catalog.Length);
-        Assert.Equal(436, catalog.Select(export => export.Nid).Distinct().Count());
-        Assert.All(catalog.Where(export => export.Nid != OfflineProfilesNid), export =>
+        Assert.Equal(438, gen5.Length);
+        Assert.Equal(437, catalog.Length);
+        Assert.Equal(437, catalog.Select(export => export.Nid).Distinct().Count());
+        Assert.All(catalog.Where(export =>
+            export.Nid != OfflineProfilesNid && export.Nid != OfflineHeaderValueNid), export =>
         {
             Assert.Equal(Generation.Gen5, export.Target);
             Assert.True(export.PreferLle);
@@ -34,6 +36,12 @@ public sealed class NpCppWebApiLleExportsTests
         Assert.Equal(
             (SysAbiFunction)NpCppWebApiLleExports.GetPublicProfilesOffline,
             offlineProfiles.Function);
+
+        var offlineHeader = Assert.Single(catalog, export => export.Nid == OfflineHeaderValueNid);
+        Assert.False(offlineHeader.PreferLle);
+        Assert.Equal(
+            (SysAbiFunction)NpCppWebApiLleExports.GetOfflineResponseHeaderValue,
+            offlineHeader.Function);
 
         AssertExport(
             catalog,
@@ -89,6 +97,23 @@ public sealed class NpCppWebApiLleExportsTests
         Span<byte> result = stackalloc byte[24];
         Assert.True(memory.TryRead(outputAddress, result));
         Assert.True(result.SequenceEqual(stackalloc byte[24]));
+    }
+
+    [Fact]
+    public void OfflineHeaderLookupClearsOutputAndReturnsProviderMissingHeaderError()
+    {
+        const ulong outputAddress = 0x2000;
+        var memory = new FakeCpuMemory(0x1000, 0x2000);
+        Assert.True(memory.TryWrite(outputAddress, BitConverter.GetBytes(0xA5A5A5A5A5A5A5A5UL)));
+        var context = new CpuContext(memory, Generation.Gen5);
+        context[CpuRegister.Rdi] = 0;
+        context[CpuRegister.Rdx] = outputAddress;
+
+        Assert.Equal(
+            unchecked((int)0x80553512),
+            NpCppWebApiLleExports.GetOfflineResponseHeaderValue(context));
+        Assert.True(context.TryReadUInt64(outputAddress, out var pointer));
+        Assert.Equal(0UL, pointer);
     }
 
     private static void AssertExport(

@@ -683,6 +683,92 @@ public static class JsonExports
     }
 
     [SysAbiExport(
+        Nid = "-NxEk7XLkDY",
+        ExportName = "_ZN3sce4Json5Value11referObjectEv",
+        Target = Generation.Gen5,
+        LibraryName = "libSceJson2")]
+    public static int ValueReferObject(CpuContext ctx) => ReturnAggregateStorage(ctx, expectedType: 7);
+
+    [SysAbiExport(
+        Nid = "nM5XqdeXFPw",
+        ExportName = "_ZN3sce4Json5Value10referArrayEv",
+        Target = Generation.Gen5,
+        LibraryName = "libSceJson2")]
+    public static int ValueReferArray(CpuContext ctx) => ReturnAggregateStorage(ctx, expectedType: 6);
+
+    [SysAbiExport(
+        Nid = "ERuf9y0DY84",
+        ExportName = "_ZN3sce4Json6ObjectixERKNS0_6StringE",
+        Target = Generation.Gen5,
+        LibraryName = "libSceJson2")]
+    public static int ObjectIndexString(CpuContext ctx)
+    {
+        var objectStorage = ctx[CpuRegister.Rdi];
+        ctx[CpuRegister.Rdi] = objectStorage >= 0x10 ? objectStorage - 0x10 : 0;
+        return ReturnNamedValue(ctx, JsonObjectHeap.GetStringOrEmpty(ctx[CpuRegister.Rsi]));
+    }
+
+    [SysAbiExport(
+        Nid = "zQtLRTqceMY",
+        ExportName = "_ZN3sce4Json5Array9push_backERKNS0_5ValueE",
+        Target = Generation.Gen5,
+        LibraryName = "libSceJson2")]
+    public static int ArrayPushBack(CpuContext ctx)
+    {
+        var arrayStorage = ctx[CpuRegister.Rdi];
+        var valueAddress = arrayStorage >= 0x10 ? arrayStorage - 0x10 : 0;
+        var current = GetValue(valueAddress);
+        var items = current.ValueKind == System.Text.Json.JsonValueKind.Array
+            ? current.EnumerateArray().Select(static item => item.GetRawText()).ToList()
+            : new List<string>();
+        items.Add(GetValue(ctx[CpuRegister.Rsi]).GetRawText());
+        using var document = JsonDocument.Parse($"[{string.Join(',', items)}]");
+        StoreValue(ctx, valueAddress, document.RootElement);
+        ctx[CpuRegister.Rax] = arrayStorage;
+        return 0;
+    }
+
+    [SysAbiExport(
+        Nid = "bAM9Qwofus0",
+        ExportName = "_ZNK3sce4Json5Array4backEv",
+        Target = Generation.Gen5,
+        LibraryName = "libSceJson2")]
+    public static int ArrayBack(CpuContext ctx)
+    {
+        var arrayStorage = ctx[CpuRegister.Rdi];
+        var valueAddress = arrayStorage >= 0x10 ? arrayStorage - 0x10 : 0;
+        var array = GetValue(valueAddress);
+        if (array.ValueKind != System.Text.Json.JsonValueKind.Array || array.GetArrayLength() == 0 ||
+            !TryGetOrAllocateValueReference(ctx, new JsonReferenceKey(valueAddress, "#back"), out var result))
+        {
+            ctx[CpuRegister.Rax] = 0;
+            return 0;
+        }
+
+        StoreValue(ctx, result, array[array.GetArrayLength() - 1]);
+        ctx[CpuRegister.Rax] = result;
+        return 0;
+    }
+
+    [SysAbiExport(
+        Nid = "R7FDWtcN6f8",
+        ExportName = "_ZN3sce4Json5Value9serializeERNS0_6StringE",
+        Target = Generation.Gen5,
+        LibraryName = "libSceJson2")]
+    public static int ValueSerialize(CpuContext ctx)
+    {
+        var destination = ctx[CpuRegister.Rsi];
+        if (destination == 0)
+        {
+            return SetReturn(ctx, (int)OrbisGen2Result.ORBIS_GEN2_ERROR_INVALID_ARGUMENT);
+        }
+
+        _strings[destination] = new JsonStringState(GetValue(ctx[CpuRegister.Rdi]).GetRawText());
+        ctx.TryWriteUInt64(destination, 0);
+        return SetReturn(ctx, 0);
+    }
+
+    [SysAbiExport(
         Nid = "bI5AGFMydrA",
         ExportName = "_ZN3sce4Json5ArrayC1ERKS1_",
         Target = Generation.Gen4 | Generation.Gen5,
@@ -1013,6 +1099,15 @@ public static class JsonExports
     {
         var thisAddress = ctx[CpuRegister.Rdi];
         ctx[CpuRegister.Rax] = thisAddress == 0 ? 0 : thisAddress + 0x10;
+        return 0;
+    }
+
+    private static int ReturnAggregateStorage(CpuContext ctx, int expectedType)
+    {
+        var thisAddress = ctx[CpuRegister.Rdi];
+        ctx[CpuRegister.Rax] = thisAddress != 0 && GetValueType(GetValue(thisAddress)) == expectedType
+            ? thisAddress + 0x10
+            : 0;
         return 0;
     }
 

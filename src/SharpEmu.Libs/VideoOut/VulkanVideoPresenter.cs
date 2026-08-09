@@ -6641,7 +6641,7 @@ internal static unsafe class VulkanVideoPresenter
             }
         }
 
-        private void ExecuteOrderedGuestFlipWait(VulkanOrderedGuestFlipWait work)
+        private bool TryExecuteOrderedGuestFlipWait(VulkanOrderedGuestFlipWait work)
         {
             var captured = work.Version != 0 &&
                 _capturedGuestFlipVersions.Contains(work.Version);
@@ -6650,16 +6650,20 @@ internal static unsafe class VulkanVideoPresenter
                 $"queue={_activeGuestQueue.Name} submission={_activeGuestQueue.SubmissionId} " +
                 $"handle={work.VideoOutHandle} index={work.DisplayBufferIndex} " +
                 $"capture_complete={(captured ? 1 : 0)}");
-            // Demon's Souls executes wait-safe markers before their flip capture;
-            // an assert here would fail-fast the process, so warn once instead.
-            // Dedup on a flag, not the (per-frame-unique) version, to bound growth.
+            // Logical guest queues are drained round-robin, so the wait-safe
+            // marker can reach the presenter before the flip from a sibling
+            // queue. Requeue this marker and let that producer queue run.
+            // Treating it as completed loses the guest's frame-ordering edge
+            // and can leave the title spinning with no subsequent frames.
             if (work.Version != 0 && !captured && !_loggedFlipWaitOrderViolation)
             {
                 _loggedFlipWaitOrderViolation = true;
                 Console.Error.WriteLine(
                     $"[LOADER][WARN] vk.flip_wait_order version={work.Version} " +
-                    "executed before its flip capture; continuing.");
+                    "executed before its flip capture; deferring its queue.");
             }
+
+            return GuestPresentationScheduling.IsFlipWaitReady(work.Version, captured);
         }
 
         private bool _loggedFlipWaitOrderViolation;
@@ -16901,7 +16905,7 @@ internal static unsafe class VulkanVideoPresenter
                         case VulkanOrderedGuestFlipWait flipWait:
                             using (RenderPhaseProfile.Measure(RenderPhaseProfile.Phase.Flip))
                             {
-                                ExecuteOrderedGuestFlipWait(flipWait);
+                                deferGuestWork = !TryExecuteOrderedGuestFlipWait(flipWait);
                             }
 
                             break;
@@ -16925,21 +16929,12 @@ internal static unsafe class VulkanVideoPresenter
 
                 if (deferGuestWork)
                 {
-                    // macOS: non-blocking defer — exclude this logical queue for
-                    // the rest of the tick so sibling queues can still progress.
-                    // Windows/Linux already blocked in WaitForFences; excluding
-                    // the only busy queue ends the drain immediately and leaves
-                    // OrderedGuestAction stacked. Leave the item at the front and
-                    // end this Render; the next tick retries after GPU progress.
-                    if (OperatingSystem.IsMacOS())
-                    {
-                        deferredOrderedQueues ??= new HashSet<string>(StringComparer.Ordinal);
-                        deferredOrderedQueues.Add(pendingGuestWork.Queue.Name);
-                    }
-                    else
-                    {
-                        break;
-                    }
+                    // Exclude only this logical queue for the rest of the tick.
+                    // A sibling queue may contain the GPU work or flip capture
+                    // needed to satisfy the deferred head. If no sibling is
+                    // ready, TryTakeGuestWork ends the drain naturally.
+                    deferredOrderedQueues ??= new HashSet<string>(StringComparer.Ordinal);
+                    deferredOrderedQueues.Add(pendingGuestWork.Queue.Name);
                 }
 
                 if (workStart != 0)

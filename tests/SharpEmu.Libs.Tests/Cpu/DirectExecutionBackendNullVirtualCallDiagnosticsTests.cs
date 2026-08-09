@@ -65,4 +65,46 @@ public sealed class DirectExecutionBackendNullVirtualCallDiagnosticsTests
             accessTarget: 8,
             out _));
     }
+
+    [Fact]
+    public void GtaNullVirtualAllocatorResult_MatchesExactAllocationSequence()
+    {
+        byte[] before =
+        {
+            0x48, 0x8B, 0x3A,
+            0xBE, 0x10, 0x00, 0x00, 0x00,
+            0xBA, 0x10, 0x00, 0x00, 0x00,
+            0x31, 0xC9,
+            0x48, 0x8B, 0x07,
+            0xFF, 0x50, 0x48,
+            0x49, 0x89, 0xC6,
+        };
+        byte[] current = { 0x48, 0x89, 0x58, 0x08 };
+
+        Assert.True(DirectExecutionBackend.IsNullVirtualAllocatorResultPattern(before, current));
+    }
+
+    [Fact]
+    public void NullVirtualAllocatorResult_RejectsDifferentSizeOrFaultingStore()
+    {
+        byte[] before =
+        {
+            0x48, 0x8B, 0x3A,
+            0xBE, 0x20, 0x00, 0x00, 0x00,
+            0xBA, 0x10, 0x00, 0x00, 0x00,
+            0x31, 0xC9,
+            0x48, 0x8B, 0x07,
+            0xFF, 0x50, 0x48,
+            0x49, 0x89, 0xC6,
+        };
+
+        Assert.False(DirectExecutionBackend.IsNullVirtualAllocatorResultPattern(
+            before,
+            new byte[] { 0x48, 0x89, 0x58, 0x08 }));
+
+        before[4] = 0x10;
+        Assert.False(DirectExecutionBackend.IsNullVirtualAllocatorResultPattern(
+            before,
+            new byte[] { 0x48, 0x89, 0x48, 0x08 }));
+    }
 }

@@ -13,6 +13,28 @@ namespace SharpEmu.Libs.Np;
 
 public static class NpCppWebApiLleExports
 {
+    private const int NpCppWebApiErrorHeaderNotFound = unchecked((int)0x80553512);
+
+    // The guest provider assumes ResponseHeaderBase::this is non-null and
+    // immediately reads this+8. An offline transaction has no response header,
+    // so route the imported call through HLE and preserve the provider's own
+    // missing-header error contract without dereferencing a null object.
+    [SysAbiExport(
+        Nid = "QWRYQMQSpIc",
+        ExportName = "_ZN3sce2Np9CppWebApi6Common18ResponseHeaderBase14getHeaderValueEPKcRNS2_12IntrusivePtrINS2_6StringEEE",
+        Target = Generation.Gen5,
+        LibraryName = "libSceNpCppWebApi")]
+    public static int GetOfflineResponseHeaderValue(CpuContext ctx)
+    {
+        var outputIntrusivePointer = ctx[CpuRegister.Rdx];
+        if (outputIntrusivePointer != 0)
+        {
+            _ = ctx.TryWriteUInt64(outputIntrusivePointer, 0);
+        }
+
+        return ctx.SetReturn(NpCppWebApiErrorHeaderNotFound);
+    }
+
     // Ghidra entry 00435cc0 copies the response's 24-byte profiles vector
     // (this+0x30) into the hidden return slot. Offline WebApi completion can
     // legitimately provide no response object, so return an empty vector

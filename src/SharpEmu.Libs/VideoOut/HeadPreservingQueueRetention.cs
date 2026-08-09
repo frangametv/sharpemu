@@ -36,6 +36,14 @@ internal static class HeadPreservingQueueRetention
 internal static class GuestPresentationScheduling
 {
     /// <summary>
+    /// A wait-safe marker may be selected from a different logical GPU queue
+    /// before the flip it refers to has been drained. It is ready only after
+    /// that immutable flip generation exists; version zero has no predecessor.
+    /// </summary>
+    public static bool IsFlipWaitReady(long version, bool captureComplete) =>
+        version == 0 || captureComplete;
+
+    /// <summary>
     /// An ordered flip has captured an immutable guest-image generation and
     /// enqueued its presentation. Yielding the guest-work drain at this point
     /// gives that FIFO head a presentation opportunity before newer flips can

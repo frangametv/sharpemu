@@ -13,13 +13,6 @@ namespace SharpEmu.Libs.Lle;
 
 public static class Json2LleExports
 {
-    // Ghidra entry 00004430; body addresses 14.
-    [SysAbiExport(
-        Nid = "-NxEk7XLkDY",
-        ExportName = "_ZN3sce4Json5Value11referObjectEv",
-        Target = Generation.Gen5,
-        LibraryName = "libSceJson2",
-        PreferLle = true)]
     // Ghidra entry 00001eb0; body addresses 70.
     [SysAbiExport(
         Nid = "3xUXnmUkXfo",
@@ -31,13 +24,6 @@ public static class Json2LleExports
     [SysAbiExport(
         Nid = "5JmzZt8twAo",
         ExportName = "_ZN3sce4Json6ObjectD1Ev",
-        Target = Generation.Gen5,
-        LibraryName = "libSceJson2",
-        PreferLle = true)]
-    // Ghidra entry 0000e450; body addresses 575.
-    [SysAbiExport(
-        Nid = "ERuf9y0DY84",
-        ExportName = "_ZN3sce4Json6ObjectixERKNS0_6StringE",
         Target = Generation.Gen5,
         LibraryName = "libSceJson2",
         PreferLle = true)]
@@ -62,13 +48,6 @@ public static class Json2LleExports
         Target = Generation.Gen5,
         LibraryName = "libSceJson2",
         PreferLle = true)]
-    // Ghidra entry 000038d0; body addresses 143.
-    [SysAbiExport(
-        Nid = "R7FDWtcN6f8",
-        ExportName = "_ZN3sce4Json5Value9serializeERNS0_6StringE",
-        Target = Generation.Gen5,
-        LibraryName = "libSceJson2",
-        PreferLle = true)]
     // Ghidra entry 0000d320; body addresses 218.
     [SysAbiExport(
         Nid = "a+W7HHlwpBs",
@@ -76,24 +55,10 @@ public static class Json2LleExports
         Target = Generation.Gen5,
         LibraryName = "libSceJson2",
         PreferLle = true)]
-    // Ghidra entry 0000c180; body addresses 30.
-    [SysAbiExport(
-        Nid = "bAM9Qwofus0",
-        ExportName = "_ZNK3sce4Json5Array4backEv",
-        Target = Generation.Gen5,
-        LibraryName = "libSceJson2",
-        PreferLle = true)]
     // Ghidra entry 0000af70; body addresses 139.
     [SysAbiExport(
         Nid = "cn9svYGWKDQ",
         ExportName = "_ZN3sce4Json6StringaSERKS1_",
-        Target = Generation.Gen5,
-        LibraryName = "libSceJson2",
-        PreferLle = true)]
-    // Ghidra entry 00004420; body addresses 14.
-    [SysAbiExport(
-        Nid = "nM5XqdeXFPw",
-        ExportName = "_ZN3sce4Json5Value10referArrayEv",
         Target = Generation.Gen5,
         LibraryName = "libSceJson2",
         PreferLle = true)]
@@ -115,13 +80,6 @@ public static class Json2LleExports
     [SysAbiExport(
         Nid = "urOpESTBZmo",
         ExportName = "_ZN3sce4Json6ObjectaSERKS1_",
-        Target = Generation.Gen5,
-        LibraryName = "libSceJson2",
-        PreferLle = true)]
-    // Ghidra entry 0000c240; body addresses 419.
-    [SysAbiExport(
-        Nid = "zQtLRTqceMY",
-        ExportName = "_ZN3sce4Json5Array9push_backERKNS0_5ValueE",
         Target = Generation.Gen5,
         LibraryName = "libSceJson2",
         PreferLle = true)]

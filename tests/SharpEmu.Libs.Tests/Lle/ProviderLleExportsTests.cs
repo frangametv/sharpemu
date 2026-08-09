@@ -35,7 +35,8 @@ public sealed class ProviderLleExportsTests
         "1q1titRBL6o", "b-oySn+G2tE", "e1DFTg+Sd8U", "LHFXRrlTPD8",
         "r98I08t+LOg", "uZW-mqsxkrM", "w1KFAHVqpaU", "ypVBz4uPKcQ",
         "gyTyVn+bXMw", "IADmD4tScBY", "NUeBrN7hzf0", "oBmw4xrmfKs",
-        "x01jxu+vxlc",
+        "x01jxu+vxlc", "-NxEk7XLkDY", "ERuf9y0DY84", "R7FDWtcN6f8",
+        "bAM9Qwofus0", "nM5XqdeXFPw", "zQtLRTqceMY",
     ];
 
     private static readonly IReadOnlyDictionary<string, (string ExportName, string LibraryName)> Provider23Expected =
@@ -84,7 +85,7 @@ public sealed class ProviderLleExportsTests
             ["libSceHttp"] = 1,
             ["libSceIme"] = 1,
             ["libSceImeDialog"] = 1,
-            ["libSceJson2"] = 17,
+            ["libSceJson2"] = 11,
             ["libSceLibcInternal"] = 4,
             ["libSceNet"] = 5,
             ["libSceNetCtl"] = 3,
@@ -119,14 +120,14 @@ public sealed class ProviderLleExportsTests
         };
 
     [Fact]
-    public void GtaProviderCatalogs_RegisterAll388FallbackNidsAnd13SemanticHleReplacements()
+    public void GtaProviderCatalogs_RegisterAll382FallbackNidsAnd19SemanticHleReplacements()
     {
         var exports = SharpEmu.Generated.SysAbiExportRegistry.CreateExports(Generation.Gen5)
             .Where(IsProviderCatalogExport)
             .ToArray();
 
-        Assert.Equal(388, exports.Length);
-        Assert.Equal(388, exports.Select(export => export.Nid).Distinct(StringComparer.Ordinal).Count());
+        Assert.Equal(382, exports.Length);
+        Assert.Equal(382, exports.Select(export => export.Nid).Distinct(StringComparer.Ordinal).Count());
         Assert.All(exports, export =>
         {
             Assert.NotEqual(Generation.None, export.Target & Generation.Gen5);
