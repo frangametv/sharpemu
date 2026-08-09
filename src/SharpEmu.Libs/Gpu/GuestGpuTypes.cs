@@ -74,7 +74,31 @@ internal readonly record struct TextureContentIdentity(
     bool Arrayed = false,
     uint ArrayLayers = 1,
     uint Type = 9,
-    uint Depth = 1);
+    uint Depth = 1)
+{
+    private const uint Gen5TextureType3D = 10;
+
+    /// <summary>Builds the canonical backend cache key for a decoded guest
+    /// texture, including every field that changes its content or shape.</summary>
+    internal static TextureContentIdentity FromGuestTexture(
+        GuestDrawTexture texture) => new(
+        texture.Address,
+        texture.Width,
+        texture.Height,
+        texture.Format,
+        texture.NumberType,
+        texture.DstSelect,
+        texture.TileMode,
+        texture.Pitch,
+        texture.SourceOffset,
+        texture.Sampler,
+        texture.ArrayedView,
+        Math.Max(texture.ArrayLayers, 1u),
+        texture.Type,
+        texture.Type == Gen5TextureType3D
+            ? Math.Max(texture.Depth, 1u)
+            : 1u);
+}
 
 internal sealed record GuestMemoryBuffer(
     ulong BaseAddress,

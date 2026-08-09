@@ -4,6 +4,8 @@
 using System.Buffers.Binary;
 using SharpEmu.Core.Loader;
 using SharpEmu.Core.Memory;
+using SharpEmu.HLE;
+using SharpEmu.HLE.Host;
 using Xunit;
 
 namespace SharpEmu.Libs.Tests.Loader;
@@ -215,6 +217,120 @@ public sealed class SelfLoaderTests
         Assert.Empty(image.MappedRegions);
     }
 
+    [Fact]
+    public void LoadAdditional_WhenExactPlacementIsExhausted_KeepsPs5ModuleRange()
+    {
+        if (!Environment.Is64BitProcess)
+        {
+            return;
+        }
+
+        const int payloadOffset = ElfHeaderSize + ProgramHeaderSize;
+        var image = new byte[payloadOffset + 1];
+        WriteMinimalElfHeader(image, programHeaderCount: 1);
+        WriteProgramHeader(
+            image.AsSpan(ElfHeaderSize, ProgramHeaderSize),
+            type: (uint)ProgramHeaderType.Load,
+            flags: (uint)(ProgramHeaderFlags.Read | ProgramHeaderFlags.Execute),
+            offset: payloadOffset,
+            virtualAddress: 0,
+            fileSize: 1,
+            memorySize: 1,
+            alignment: 1);
+        image[payloadOffset] = 0xC3;
+
+        var hostMemory = new FailExactAllocationsHostMemory(HostPlatform.Current.Memory);
+        using var memory = new PhysicalVirtualMemory(hostMemory);
+        var loader = new SelfLoader();
+        var modules = new ModuleManager();
+        _ = loader.Load(image, memory, modules);
+        hostMemory.FailNextAllocations = 256;
+
+        _ = loader.LoadAdditional(image, memory, modules, fs: null, mountRoot: null);
+
+        Assert.InRange(
+            hostMemory.FallbackProbeAddress,
+            0x0000_0008_0400_0000UL,
+            0x0000_0008_FFFF_FFFFUL);
+    }
+
+    private sealed class FailExactAllocationsHostMemory(IHostMemory inner) : IHostMemory
+    {
+        private int _failNextAllocations;
+
+        public int FailNextAllocations
+        {
+            get => _failNextAllocations;
+            set
+            {
+                _failNextAllocations = value;
+                FallbackProbeAddress = 0;
+            }
+        }
+
+        public ulong FallbackProbeAddress { get; private set; }
+
+        public ulong Allocate(
+            ulong desiredAddress,
+            ulong size,
+            HostPageProtection protection)
+        {
+            if (_failNextAllocations > 0)
+            {
+                _failNextAllocations--;
+                return 0;
+            }
+
+            return inner.Allocate(desiredAddress, size, protection);
+        }
+
+        public ulong Reserve(
+            ulong desiredAddress,
+            ulong size,
+            HostPageProtection protection) =>
+            inner.Reserve(desiredAddress, size, protection);
+
+        public bool Commit(
+            ulong address,
+            ulong size,
+            HostPageProtection protection) =>
+            inner.Commit(address, size, protection);
+
+        public bool Free(ulong address) => inner.Free(address);
+
+        public bool Protect(
+            ulong address,
+            ulong size,
+            HostPageProtection protection,
+            out uint rawOldProtection) =>
+            inner.Protect(address, size, protection, out rawOldProtection);
+
+        public bool ProtectRaw(
+            ulong address,
+            ulong size,
+            uint rawProtection,
+            out uint rawOldProtection) =>
+            inner.ProtectRaw(address, size, rawProtection, out rawOldProtection);
+
+        public bool Query(ulong address, out HostRegionInfo info)
+        {
+            if (_failNextAllocations > 0)
+            {
+                info = default;
+                return false;
+            }
+
+            if (FallbackProbeAddress == 0)
+            {
+                FallbackProbeAddress = address;
+            }
+
+            return inner.Query(address, out info);
+        }
+
+        public void FlushInstructionCache(ulong address, ulong size) =>
+            inner.FlushInstructionCache(address, size);
+    }
     private static byte[] CreateSelfImage(uint magic, byte version, uint keyType, ushort flags)
     {
         var imageData = new byte[SelfHeaderSize + ElfHeaderSize];

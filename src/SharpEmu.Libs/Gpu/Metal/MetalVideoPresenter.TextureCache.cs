@@ -34,17 +34,9 @@ internal static partial class MetalVideoPresenter
     /// <summary>Builds the same identity the AGC layer checks before skipping
     /// a texel copy; the two must agree field-for-field or skips and cache
     /// entries would never line up.</summary>
-    private static TextureContentIdentity GetDrawTextureIdentity(GuestDrawTexture texture) => new(
-        texture.Address,
-        texture.Width,
-        texture.Height,
-        texture.Format,
-        texture.NumberType,
-        texture.DstSelect,
-        texture.TileMode,
-        texture.Pitch,
-        texture.SourceOffset,
-        texture.Sampler);
+    private static TextureContentIdentity GetDrawTextureIdentity(
+        GuestDrawTexture texture) =>
+        TextureContentIdentity.FromGuestTexture(texture);
 
     /// <summary>Storage textures are shader-writable on the GPU, so their
     /// content identity is not stable. CPU rewrites of protected/CPU-backed

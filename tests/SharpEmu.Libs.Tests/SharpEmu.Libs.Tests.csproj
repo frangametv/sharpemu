@@ -24,7 +24,7 @@ SPDX-License-Identifier: GPL-2.0-or-later
   </ItemGroup>
 
   <ItemGroup>
-    <EmbeddedResource Include="..\..\docs\gta-v\gta-v-gen5-nid-inventory-base-615bae08.csv">
+    <EmbeddedResource Include="..\..\AcelogicFile\docs\gta-v\gta-v-gen5-nid-inventory-base-615bae08.csv">
       <LogicalName>SharpEmu.Libs.Tests.GtaVGen5NidInventory.csv</LogicalName>
     </EmbeddedResource>
   </ItemGroup>

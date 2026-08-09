@@ -1,84 +1,61 @@
-﻿<!--
+<!--
 Copyright (C) 2026 SharpEmu Emulator Project
+Copyright (C) 2026 FranGameTv
 SPDX-License-Identifier: GPL-2.0-or-later
 -->
 
-# SharpEmu
+# SharpEmu — Fran
 
 <p align="center">
-  <img src="./assets/images/logo.png" width=30% height=30% />
+  <img src="./assets/images/logo.png" width="260" alt="SharpEmu logo">
 </p>
 
 <p align="center">
-  An experimental PlayStation 5 emulator for Windows, Linux and macOS.  
+  Experimental PlayStation 5 emulator fork maintained by FranGameTv.
 </p>
-
----
 
 <p align="center">
-  <a href="#support">
-    <img src="https://img.shields.io/badge/Support-GitHub%20Sponsors%20%26%20Crypto-EA4AAA?style=for-the-badge&logo=githubsponsors&logoColor=white" alt="Support SharpEmu">
-  </a>
+  <img src="https://img.shields.io/badge/Discord-%40FranGameTv-5865F2?style=for-the-badge&logo=discord&logoColor=white" alt="Discord @FranGameTv">
 </p>
 
----
+> [!WARNING]
+> SharpEmu is at a very early stage. Astro Bot and Grand Theft Auto V are
+> development targets, not playable-game claims. Crashes, missing graphics and
+> incorrect behaviour are expected.
 
-> [!NOTE]  
-> SharpEmu supports Windows x64, Linux x64, and macOS x64. Apple Silicon Macs
-> can run the macOS x64 build through Rosetta 2, and Windows on ARM devices
-> (e.g. Snapdragon) can run the Windows x64 build through Windows' built-in
-> x64 emulation.
+## About this fork
 
-> [!WARNING]  
-> SharpEmu is an experimental PS5 emulator developed from scratch in C#. The current focus is on accuracy and infrastructure setup rather than game-specific compatibility.
+This repository is an unofficial development fork of
+[SharpEmu](https://github.com/sharpemu/sharpemu).
 
-## Info
+The project is kept aligned with upstream SharpEmu while selected changes from
+Acelogic's fork are manually reviewed, adapted and maintained here. Those
+changes provided important groundwork for investigating real execution and
+rendering progress in **Astro Bot** and **Grand Theft Auto V**.
 
-SharpEmu is an emulator project currently in its early stages of development.
+The goal is practical and evidence-driven: test a game, study its logs, fix a
+verified problem and test again. Changes are not included merely because they
+exist in another fork; they must be understandable, useful and safe for the
+current codebase.
 
-This project is developed purely for research and educational purposes. There are no commercial goals associated with it. We enjoy learning about system architecture and reverse engineering.
+## Current focus
 
-SharpEmu focuses exclusively on the PlayStation 5.  
-Our goal is **not** to emulate PS4 games, as there is already an excellent emulator dedicated to that platform: **ShadPS4**.
+- Keep the project synchronized with useful upstream SharpEmu development.
+- Preserve and improve the valuable Acelogic work already integrated.
+- Investigate Astro Bot rendering, shader and runtime failures.
+- Advance GTA V through loader, kernel, audio, AGC and GPU failures.
+- Improve Vulkan on Windows/Linux and Metal/MoltenVK support on macOS.
+- Add focused regression tests for every fix that can be reproduced safely.
 
-## Games Tested
+SharpEmu can already load real `eboot.bin` files, execute native CPU code, load
+system modules and reach early graphics or video-output stages in some games.
+It is not yet a general-purpose or stable PS5 emulator.
 
-|               Demons Souls Remake                   |                     Dreaming Sarah                         |
-| :-----------------------------------------------------------: | :--------------------------------------------------------------------------------------------: |
-| ![Bloodborne screenshot](./.github/images/demons-souls.jpg) | ![Dreaming Sarah](./.github/images/dreaming-sarah.jpg) |
+## Download and Run
 
-|                  Void Terrarium                     |                 Dead Cells                    |
-| :------------------------------------------------------------------------: | :------------------------------------------------------------------: |
-| ![Void Terrarium](./.github/images/void-terrarium.jpg) | ![Dead Cells](./.github/images/dead-cells.jpg) |
-
-## Status
-
-The emulator can currently load the `eboot.bin` of real games, execute native CPU instructions, and partially handle kernel-related functionality. However, several critical components are still missing.
-
-Current capabilities include:
-
-* Loading `eboot.bin` and `.elf` files
-* Executing native CPU instructions
-* Reading basic game metadata (title, version, etc.)
-* Loading system modules (`prx` / `sys_module`)
-* Partial support for some kernel functions  
-* `Fiber` and `AMPR` exports
-* PlayGo scenarios
-* Initial loading game files
-* Shader/resource submits and AGC initial
-* Video outputs in some games
-* Experimental, read-only [System UI boot harness](./AcelogicFile/SYSTEM_UI.md)
-
-Some games have reached like `sceVideoOut` and AGC stages.
-
-SharpEmu supports Windows, Linux, and macOS hosts. Video output uses Vulkan on
-Windows and Linux, and MoltenVK on macOS. Platform support is still experimental,
-so compatibility and performance vary by game, operating system, and GPU driver.
-
-## Using
-
-Download the release archive for your operating system, extract it, and launch
-SharpEmu with the path to a legally obtained game's `eboot.bin`.
+Prebuilt packages for Windows, Linux and macOS are available from
+[GitHub Releases](https://github.com/frangametv/sharpemu/releases). Select the
+archive for your operating system and extract it before launching SharpEmu.
 
 Windows PowerShell:
 
@@ -91,74 +68,55 @@ Linux and macOS:
 
 ```bash
 chmod +x ./SharpEmu
-
-./SharpEmu "/path/to/game/eboot.bin" 2>&1 |
-  tee SharpEmu.log
+./SharpEmu "/path/to/game/eboot.bin" 2>&1 | tee SharpEmu.log
 ```
 
-A Vulkan-capable GPU and current graphics driver are required. The macOS
-release includes the MoltenVK Vulkan implementation.
+A Vulkan-capable GPU and an up-to-date graphics driver are required. The macOS
+package includes MoltenVK and runs as an x64 application, including through
+Rosetta 2 on Apple Silicon.
 
-For artifact-independent System UI bring-up using your own extracted system
-software, see [System UI boot mode](./AcelogicFile/SYSTEM_UI.md).
+The custom label displayed in the user interface can be changed in
+[`CUSTOM_VERSION.txt`](./CUSTOM_VERSION.txt).
 
-> [!IMPORTANT]  
-> This project does **not** support or condone piracy.  
-> All games used during development and testing are dumped from consoles that we personally own.  
-> Users are expected to use legally obtained copies of their games.
+## Build from source
 
-## Build
+Install the .NET SDK version specified in [`global.json`](./global.json), then:
 
-1. Install the .NET SDK version specified in [`global.json`](./global.json).
-2. Clone the repository: `git clone https://github.com/sharpemu/sharpemu.git`
-3. Open the solution file (`SharpEmu.slnx`) in **VSCode**.
-4. Build the project: `dotnet build` or `dotnet publish`
-5. Build artifacts will be located in the `artifacts` directory.
+```bash
+git clone https://github.com/frangametv/sharpemu.git
+cd sharpemu
+dotnet build SharpEmu.slnx -c Release
+```
 
-## Disclaimer
+Build output is written under `artifacts`.
 
-SharpEmu is an experimental emulator intended for research and educational purposes.
+## Legal notice
 
-This project does not contain any copyrighted system firmware, game data, or proprietary PlayStation assets.
+This project is intended exclusively for research and education. It does not
+contain firmware, games, keys or proprietary PlayStation assets. Use only
+software and system files legally obtained from hardware you own. Piracy is not
+supported or condoned.
 
-## Special Thanks
+## Credits
 
-The following projects were extremely helpful during development:
+- The [official SharpEmu project](https://github.com/sharpemu/sharpemu) and its contributors.
+- **Acelogic**, for the substantial compatibility research and implementation
+  work that forms part of this fork's foundation.
+- Community researchers whose ideas are reviewed and independently validated
+  before being adapted here.
+- [ShadPS4](https://github.com/shadps4-emu/shadPS4),
+  [Kyty](https://github.com/InoriRus/Kyty) and Ryujinx for valuable emulator
+  architecture references.
 
-* **[ShadPS4](https://github.com/shadps4-emu/shadPS4)**  
-Helped with understanding the basic architecture of the PlayStation 4.
+## Contact and contributing
 
-* **[Kyty](https://github.com/InoriRus/Kyty)**  
-One of the few PS5 emulator projects available and very useful for studying native code execution.
+For development discussion and test results, contact **@FranGameTv** on
+Discord. Bug reports are most useful when they include the game title ID, the
+exact build version and a complete log.
 
-* **Ryujinx**  
-Provided valuable references for filesystem handling and low-level C# implementation patterns.
+Before contributing code, read [`CONTRIBUTING.md`](./CONTRIBUTING.md).
 
-# License
+## License
 
-- [**GPL-2.0 license**](https://github.com/sharpemu/sharpemu/blob/main/LICENSE)
-
-## Support
-
-Support SharpEmu via GitHub Sponsors or cryptocurrency. Every contribution helps fund ongoing development and long-term maintenance. GitHub Sponsors is the preferred way to support the project, but cryptocurrency donations are also appreciated.
-
-### ETH/USDT
-
-`0xF315F5d986c790bB3A58DbE60F1B2760997dEd82`
-
-### BTC
-
-`bc1qmr9k8899njys5ny63xsues4jgmkk96erslrkmv`
-
-## Contributing
-
-Before opening an issue or pull request, please read our contribution guidelines:
-
-**[CONTRIBUTING.md](./CONTRIBUTING.md)**
-
-The guide covers:
-- Coding style and formatting
-- AI-assisted contributions
-- Pull request expectations
-- Testing guidelines
-- Legal and reverse engineering policy
+SharpEmu and this fork are distributed under the
+[GPL-2.0 license](./LICENSE.txt).
