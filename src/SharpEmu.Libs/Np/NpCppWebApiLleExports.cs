@@ -13,6 +13,28 @@ namespace SharpEmu.Libs.Np;
 
 public static class NpCppWebApiLleExports
 {
+    // Ghidra entry 00435cc0 copies the response's 24-byte profiles vector
+    // (this+0x30) into the hidden return slot. Offline WebApi completion can
+    // legitimately provide no response object, so return an empty vector
+    // instead of dereferencing a null `this` pointer.
+    [SysAbiExport(
+        Nid = "dv8KUvfjc8c",
+        ExportName = "_ZN3sce2Np9CppWebApi11UserProfile2V125GetPublicProfilesResponse11getProfilesEv",
+        Target = Generation.Gen5,
+        LibraryName = "libSceNpCppWebApi")]
+    public static int GetPublicProfilesOffline(CpuContext ctx)
+    {
+        var returnSlotAddress = ctx[CpuRegister.Rdi];
+        if (returnSlotAddress == 0 ||
+            !ctx.Memory.TryWrite(returnSlotAddress, stackalloc byte[24]))
+        {
+            return ctx.SetReturn(OrbisGen2Result.ORBIS_GEN2_ERROR_INVALID_ARGUMENT);
+        }
+
+        ctx[CpuRegister.Rax] = returnSlotAddress;
+        return (int)OrbisGen2Result.ORBIS_GEN2_OK;
+    }
+
     // Ghidra entry 0015d890; body addresses 4.
     [SysAbiExport(
         Nid = "+6Xo+7GdUGM",
@@ -2201,13 +2223,6 @@ public static class NpCppWebApiLleExports
     [SysAbiExport(
         Nid = "dqGIvYiZAso",
         ExportName = "_ZN3sce2Np9CppWebApi6Common6VectorINS2_12IntrusivePtrINS1_14SessionManager2V120RequestPlayerSessionEEEEC1EPNS2_10LibContextE",
-        Target = Generation.Gen5,
-        LibraryName = "libSceNpCppWebApi",
-        PreferLle = true)]
-    // Ghidra entry 00435cc0; body addresses 56.
-    [SysAbiExport(
-        Nid = "dv8KUvfjc8c",
-        ExportName = "_ZN3sce2Np9CppWebApi11UserProfile2V125GetPublicProfilesResponse11getProfilesEv",
         Target = Generation.Gen5,
         LibraryName = "libSceNpCppWebApi",
         PreferLle = true)]

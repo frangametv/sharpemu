@@ -24,6 +24,12 @@ SPDX-License-Identifier: GPL-2.0-or-later
   <img src="https://img.shields.io/badge/Discord-%40FranGameTv-5865F2?style=for-the-badge&logo=discord&logoColor=white" alt="Discord @FranGameTv">
 </p>
 
+> [!TIP]
+> ### Fran3: Progress Incoming, wait for the next release!
+> Fran3 is already taking **Astro Bot** further than the official SharpEmu
+> `main` branch. Great improvements are happening, but more work and testing are
+> still needed. Stay tuned over the next few days!
+
 > [!WARNING]
 > SharpEmu is at a very early stage. Astro Bot and Grand Theft Auto V are
 > development targets in this fork. Crashes, missing graphics and
