@@ -112,7 +112,13 @@ public static class AudioPropagationExports
         }
 
         var memoryInfo = ParseMemoryInfo(memoryInfoBytes);
-        if (memoryInfo.PrimaryAddress == 0)
+        // Preserve the firmware's pointer-first validation for malformed
+        // descriptors, but accept a valid descriptor without guest backing.
+        // The emulated service keeps its authoritative state in managed
+        // memory, and some titles only use QueryMemory to size an optional
+        // caller-owned allocation.
+        if (memoryInfo.PrimaryAddress == 0 &&
+            (memoryInfo.Tag != MemoryInfoTag || memoryInfo.Size != MemoryInfoSize))
         {
             return SetReturn(ctx, ErrorInvalidPointer);
         }
@@ -151,11 +157,6 @@ public static class AudioPropagationExports
             return SetReturn(ctx, ErrorInsufficientMemory);
         }
 
-        if (memoryInfo.SecondarySize != 0 && memoryInfo.SecondaryAddress == 0)
-        {
-            return SetReturn(ctx, ErrorInvalidPointer);
-        }
-
         lock (RegistryGate)
         {
             if (Systems.Count >= MaxSystems)
@@ -181,8 +182,12 @@ public static class AudioPropagationExports
             }
 
             Systems.Add(handle, state);
-            _ = ctx.Memory.TryWrite(memoryInfo.PrimaryAddress, primaryHeader);
-            if (secondaryHeader is not null)
+            if (memoryInfo.PrimaryAddress != 0)
+            {
+                _ = ctx.Memory.TryWrite(memoryInfo.PrimaryAddress, primaryHeader);
+            }
+
+            if (secondaryHeader is not null && memoryInfo.SecondaryAddress != 0)
             {
                 _ = ctx.Memory.TryWrite(memoryInfo.SecondaryAddress, secondaryHeader);
             }

@@ -199,6 +199,23 @@ public sealed class AudioPropagationExportsTests
     }
 
     [Fact]
+    public void SystemCreateAcceptsManagedOnlyBacking()
+    {
+        WriteValidConfig();
+        WriteMemoryInfoHeader();
+        Assert.Equal(0, QueryMemory());
+        WriteUInt64(SystemOutputAddress, 0);
+        PrepareCreateRegisters();
+
+        Assert.Equal(0, AudioPropagationExports.SystemCreate(_ctx));
+        var system = ReadUInt64(SystemOutputAddress);
+        Assert.NotEqual(0UL, system);
+        Assert.True(AudioPropagationExports.TryGetDebugSnapshot(system, out var snapshot));
+        Assert.Equal(0, snapshot.MaterialCount);
+        Assert.Equal(0, snapshot.RoomCount);
+    }
+
+    [Fact]
     public void StatefulExportsAcceptDistinctMemoryFacadeForSameGuestAddressSpace()
     {
         var system = CreateSystem(materialCapacity: 2, flags: 4);
