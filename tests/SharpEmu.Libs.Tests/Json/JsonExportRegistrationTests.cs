@@ -53,6 +53,18 @@ public sealed class JsonExportRegistrationTests
     }
 
     [Fact]
+    public void InitializerConstructorKeepsNativeBackingStoreAdvisory()
+    {
+        const ulong mappedBase = 0x1_0000_0000;
+        const ulong nativeInitializer = 0x2_0000_0010;
+        var ctx = new CpuContext(new FakeCpuMemory(mappedBase, 0x1000), Generation.Gen5);
+        ctx[CpuRegister.Rdi] = nativeInitializer;
+
+        Assert.Equal(0, JsonExports.InitializerConstructor(ctx));
+        Assert.Equal(nativeInitializer, ctx[CpuRegister.Rax]);
+    }
+
+    [Fact]
     public void QuakeUnresolvedJsonNids_ResolveToJsonExports()
     {
         var manager = CreateRegisteredManager();

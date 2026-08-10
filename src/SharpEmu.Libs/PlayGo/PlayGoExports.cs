@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 
 using SharpEmu.HLE;
+using SharpEmu.Libs.Kernel;
 using System.Buffers.Binary;
 using System.Text.RegularExpressions;
 using System.Xml.Linq;
@@ -68,7 +69,10 @@ public static class PlayGoExports
         }
 
         Span<byte> bufferSizeBytes = stackalloc byte[sizeof(uint)];
-        if (!ctx.Memory.TryRead(initParamsAddress + PlayGoInitBufSizeOffset, bufferSizeBytes))
+        if (!KernelMemoryCompatExports.TryReadCompat(
+                ctx,
+                initParamsAddress + PlayGoInitBufSizeOffset,
+                bufferSizeBytes))
         {
             return (int)OrbisGen2Result.ORBIS_GEN2_ERROR_MEMORY_FAULT;
         }
@@ -140,7 +144,7 @@ public static class PlayGoExports
 
         Span<byte> handleBytes = stackalloc byte[sizeof(uint)];
         BinaryPrimitives.WriteUInt32LittleEndian(handleBytes, PlayGoHandle);
-        if (!ctx.Memory.TryWrite(outHandleAddress, handleBytes))
+        if (!KernelMemoryCompatExports.TryWriteCompat(ctx, outHandleAddress, handleBytes))
         {
             return (int)OrbisGen2Result.ORBIS_GEN2_ERROR_MEMORY_FAULT;
         }
@@ -425,7 +429,7 @@ public static class PlayGoExports
                 // scans ids 0,1,2,... until BAD_CHUNK_ID, and answering OK for every
                 // id makes that scan wrap the ushort range and spin forever.
                 loci[i] = PlayGoLocusNotDownloaded;
-                return ctx.Memory.TryWrite(outLoci, loci)
+                return KernelMemoryCompatExports.TryWriteCompat(ctx, outLoci, loci)
                     ? OrbisPlayGoErrorBadChunkId
                     : (int)OrbisGen2Result.ORBIS_GEN2_ERROR_MEMORY_FAULT;
             }
@@ -434,7 +438,7 @@ public static class PlayGoExports
         }
 
         TracePlayGoLocus(ctx, numberOfEntries, chunkIds, outLoci);
-        return ctx.Memory.TryWrite(outLoci, loci)
+        return KernelMemoryCompatExports.TryWriteCompat(ctx, outLoci, loci)
             ? (int)OrbisGen2Result.ORBIS_GEN2_OK
             : (int)OrbisGen2Result.ORBIS_GEN2_ERROR_MEMORY_FAULT;
     }
@@ -478,7 +482,7 @@ public static class PlayGoExports
         Span<byte> progress = stackalloc byte[sizeof(ulong) * 2];
         BinaryPrimitives.WriteUInt64LittleEndian(progress, 0);
         BinaryPrimitives.WriteUInt64LittleEndian(progress[sizeof(ulong)..], 0);
-        return ctx.Memory.TryWrite(outProgress, progress)
+        return KernelMemoryCompatExports.TryWriteCompat(ctx, outProgress, progress)
             ? (int)OrbisGen2Result.ORBIS_GEN2_OK
             : (int)OrbisGen2Result.ORBIS_GEN2_ERROR_MEMORY_FAULT;
     }

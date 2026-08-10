@@ -4099,9 +4099,7 @@ public static partial class KernelMemoryCompatExports
             return (int)OrbisGen2Result.ORBIS_GEN2_ERROR_MEMORY_FAULT;
         }
 
-        Span<byte> sizeBytes = stackalloc byte[sizeof(ulong)];
-        BinaryPrimitives.WriteUInt64LittleEndian(sizeBytes, FlexibleMemorySizeBytes);
-        return ctx.Memory.TryWrite(outSizeAddress, sizeBytes)
+        return TryWriteUInt64Compat(ctx, outSizeAddress, FlexibleMemorySizeBytes)
             ? (int)OrbisGen2Result.ORBIS_GEN2_OK
             : (int)OrbisGen2Result.ORBIS_GEN2_ERROR_MEMORY_FAULT;
     }

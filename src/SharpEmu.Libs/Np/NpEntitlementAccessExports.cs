@@ -4,6 +4,7 @@
 using System.Buffers.Binary;
 using System.Text;
 using SharpEmu.HLE;
+using SharpEmu.Libs.Kernel;
 
 namespace SharpEmu.Libs.Np;
 
@@ -55,7 +56,7 @@ public static class NpEntitlementAccessExports
 
         Span<byte> clear = stackalloc byte[BootParamClearSize];
         clear.Clear();
-        if (!ctx.Memory.TryWrite(bootParam, clear))
+        if (!KernelMemoryCompatExports.TryWriteCompat(ctx, bootParam, clear))
         {
             return ctx.SetReturn(OrbisGen2Result.ORBIS_GEN2_ERROR_MEMORY_FAULT);
         }
@@ -79,7 +80,7 @@ public static class NpEntitlementAccessExports
 
         Span<byte> skuFlagBytes = stackalloc byte[sizeof(uint)];
         BinaryPrimitives.WriteUInt32LittleEndian(skuFlagBytes, SkuFlagFull);
-        if (!ctx.Memory.TryWrite(skuFlagAddress, skuFlagBytes))
+        if (!KernelMemoryCompatExports.TryWriteCompat(ctx, skuFlagAddress, skuFlagBytes))
         {
             return ctx.SetReturn(OrbisGen2Result.ORBIS_GEN2_ERROR_MEMORY_FAULT);
         }
@@ -107,7 +108,7 @@ public static class NpEntitlementAccessExports
         var hitNum = (uint)OwnedAddcontEntitlements.Length;
         Span<byte> hitNumBytes = stackalloc byte[sizeof(uint)];
         BinaryPrimitives.WriteUInt32LittleEndian(hitNumBytes, hitNum);
-        if (!ctx.Memory.TryWrite(hitNumAddress, hitNumBytes))
+        if (!KernelMemoryCompatExports.TryWriteCompat(ctx, hitNumAddress, hitNumBytes))
         {
             return ctx.SetReturn(OrbisGen2Result.ORBIS_GEN2_ERROR_MEMORY_FAULT);
         }
@@ -119,7 +120,7 @@ public static class NpEntitlementAccessExports
                 ? stackalloc byte[clearBytes]
                 : new byte[clearBytes];
             clear.Clear();
-            if (!ctx.Memory.TryWrite(listAddress, clear))
+            if (!KernelMemoryCompatExports.TryWriteCompat(ctx, listAddress, clear))
             {
                 return ctx.SetReturn(OrbisGen2Result.ORBIS_GEN2_ERROR_MEMORY_FAULT);
             }
@@ -158,7 +159,7 @@ public static class NpEntitlementAccessExports
         }
 
         Span<byte> labelBytes = stackalloc byte[EntitlementLabelSize];
-        if (!ctx.Memory.TryRead(labelAddress, labelBytes))
+        if (!KernelMemoryCompatExports.TryReadCompat(ctx, labelAddress, labelBytes))
         {
             return ctx.SetReturn(OrbisGen2Result.ORBIS_GEN2_ERROR_MEMORY_FAULT);
         }
@@ -166,7 +167,7 @@ public static class NpEntitlementAccessExports
         var label = ReadEntitlementLabel(labelBytes);
         Span<byte> info = stackalloc byte[AddcontEntitlementInfoSize];
         info.Clear();
-        if (!ctx.Memory.TryWrite(infoAddress, info))
+        if (!KernelMemoryCompatExports.TryWriteCompat(ctx, infoAddress, info))
         {
             return ctx.SetReturn(OrbisGen2Result.ORBIS_GEN2_ERROR_MEMORY_FAULT);
         }
@@ -214,7 +215,7 @@ public static class NpEntitlementAccessExports
                 sizeof(uint)),
             entitlement.DownloadStatus);
 
-        return ctx.Memory.TryWrite(address, info);
+        return KernelMemoryCompatExports.TryWriteCompat(ctx, address, info);
     }
 
     private static string ReadEntitlementLabel(ReadOnlySpan<byte> bytes)

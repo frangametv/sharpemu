@@ -52,4 +52,23 @@ public sealed class KernelStrtoCompatExportsTests
         Assert.True(context.TryReadUInt64(EndPointerAddress, out var endPointer));
         Assert.Equal(InputAddress + 3, endPointer);
     }
+
+    [Fact]
+    public void Strtoll_ReadsTerminatedInputAtEndOfMappedRange()
+    {
+        var memory = new FakeCpuMemory(MemoryBase, 0x1000);
+        var boundaryInputAddress = MemoryBase + 0xFF8;
+        memory.WriteCString(boundaryInputAddress, "42");
+        var context = new CpuContext(memory, Generation.Gen5);
+        context[CpuRegister.Rdi] = boundaryInputAddress;
+        context[CpuRegister.Rsi] = EndPointerAddress;
+        context[CpuRegister.Rdx] = 10;
+
+        var result = KernelRuntimeCompatExports.LibcStrtoll(context);
+
+        Assert.Equal((int)OrbisGen2Result.ORBIS_GEN2_OK, result);
+        Assert.Equal(42UL, context[CpuRegister.Rax]);
+        Assert.True(context.TryReadUInt64(EndPointerAddress, out var endPointer));
+        Assert.Equal(boundaryInputAddress + 2, endPointer);
+    }
 }

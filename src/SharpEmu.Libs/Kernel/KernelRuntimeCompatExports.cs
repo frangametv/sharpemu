@@ -2524,17 +2524,17 @@ public static class KernelRuntimeCompatExports
             return (int)OrbisGen2Result.ORBIS_GEN2_OK;
         }
 
-        var buffer = GC.AllocateUninitializedArray<byte>(256);
-        if (!ctx.Memory.TryRead(inputAddress, buffer))
+        if (!KernelMemoryCompatExports.TryReadNullTerminatedUtf8(
+                ctx,
+                inputAddress,
+                256,
+                out var input))
         {
             return ctx.SetReturn(OrbisGen2Result.ORBIS_GEN2_ERROR_MEMORY_FAULT);
         }
 
-        var length = Array.IndexOf(buffer, (byte)0);
-        if (length < 0)
-        {
-            length = buffer.Length;
-        }
+        var buffer = Encoding.UTF8.GetBytes(input);
+        var length = buffer.Length;
 
         var index = 0;
         while (index < length && buffer[index] is (byte)' ' or (byte)'\t' or (byte)'\n' or (byte)'\r' or (byte)'\v' or (byte)'\f')

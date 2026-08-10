@@ -9,6 +9,7 @@ using System.Text;
 using System.Text.Json;
 using System.Threading;
 using SharpEmu.HLE;
+using SharpEmu.Libs.Kernel;
 
 namespace SharpEmu.Libs.Json;
 
@@ -95,10 +96,15 @@ public static class JsonExports
     public static int InitializerConstructor(CpuContext ctx)
     {
         var thisAddress = ctx[CpuRegister.Rdi];
-        if (thisAddress == 0 || !ctx.Memory.TryWrite(thisAddress, new byte[] { 0 }))
+        if (thisAddress == 0)
         {
             return SetReturn(ctx, (int)OrbisGen2Result.ORBIS_GEN2_ERROR_MEMORY_FAULT);
         }
+
+        // Some native C++ heaps are host-backed and are not represented by the
+        // primary guest-memory facade. The constructor has no state beyond its
+        // zero marker, so keep that store advisory like the pre-#770 baseline.
+        _ = KernelMemoryCompatExports.TryWriteCompat(ctx, thisAddress, new byte[] { 0 });
 
         TraceJson("Initializer.ctor", thisAddress, 0);
         ctx[CpuRegister.Rax] = thisAddress;
