@@ -59,6 +59,11 @@ internal static class GpuWaitRegistry
     // cycle forever even though a real producer did signal it. Keyed by (memory,
     // address) so distinct guest processes never alias.
     private static readonly Dictionary<(object, ulong), ulong> _lastProduced = new();
+    // A narrow AGC bookkeeping wait that timed out without any observable
+    // producer would otherwise suspend again at every occurrence in the same
+    // command stream. Remember those labels until a real producer appears.
+    private static readonly HashSet<(object Memory, ulong Address)>
+        _recoveredProducerless = new();
 
     // Fran3 wait recovery added after #770 still needs all per-thread memory
     // decorators to resolve to the same guest-memory identity. Keep this small
@@ -346,6 +351,7 @@ internal static class GpuWaitRegistry
     /// </summary>
     public static bool LatchSatisfiedByValue(object memory, ulong address, ulong value)
     {
+        memory = Canonicalize(memory)!;
         var latchedAny = false;
         lock (_gate)
         {
@@ -381,6 +387,7 @@ internal static class GpuWaitRegistry
     /// </summary>
     public static List<WaitingDcb>? CollectExpiredRetries(object memory, long nowTicks)
     {
+        memory = Canonicalize(memory)!;
         List<WaitingDcb>? expired = null;
         lock (_gate)
         {
@@ -462,8 +469,12 @@ internal static class GpuWaitRegistry
         return expired;
     }
 
-    /// <summary>Atomically removes one previously snapshotted waiter.</summary>
-    public static bool TryRemove(in WaitingDcb candidate)
+    /// <summary>
+    /// Atomically removes one expired producerless waiter and remembers its
+    /// label. Later occurrences of the same narrow wait can then bypass the
+    /// artificial timeout instead of paying it repeatedly.
+    /// </summary>
+    public static bool TryRecoverProducerless(in WaitingDcb candidate)
     {
         lock (_gate)
         {
@@ -489,6 +500,8 @@ internal static class GpuWaitRegistry
                     _waiters.Remove(candidate.WaitAddress);
                 }
 
+                _recoveredProducerless.Add((candidate.Memory!, candidate.WaitAddress));
+
                 return true;
             }
 
@@ -496,8 +509,28 @@ internal static class GpuWaitRegistry
         }
     }
 
+    public static bool ShouldBypassRecoveredProducerless(in WaitingDcb waiter)
+    {
+        var memory = Canonicalize(waiter.Memory);
+        if (memory is null ||
+            waiter.IsStandard ||
+            !waiter.Is64Bit ||
+            waiter.CompareFunction != 3 ||
+            waiter.Mask != uint.MaxValue ||
+            (waiter.ReferenceValue & waiter.Mask) != 1)
+        {
+            return false;
+        }
+
+        lock (_gate)
+        {
+            return _recoveredProducerless.Contains((memory, waiter.WaitAddress));
+        }
+    }
+
     public static List<WaitingDcb>? CollectAllForMemory(object memory)
     {
+        memory = Canonicalize(memory)!;
         List<WaitingDcb>? collected = null;
         lock (_gate)
         {
@@ -530,6 +563,9 @@ internal static class GpuWaitRegistry
                     _waiters.Remove(address);
                 }
             }
+
+            _recoveredProducerless.RemoveWhere(
+                key => ReferenceEquals(key.Memory, memory));
         }
 
         return collected;
@@ -583,6 +619,7 @@ internal static class GpuWaitRegistry
     /// breaker. Also latches any already-waiting waiter it satisfies.</summary>
     public static bool RecordProduced(object memory, ulong address, ulong value)
     {
+        memory = Canonicalize(memory)!;
         lock (_gate)
         {
             if (_lastProduced.Count >= 8192)
@@ -598,6 +635,7 @@ internal static class GpuWaitRegistry
             }
 
             _lastProduced[(memory, address)] = value;
+            _recoveredProducerless.Remove((memory, address));
         }
 
         return LatchSatisfiedByValue(memory, address, value);
@@ -616,6 +654,7 @@ internal static class GpuWaitRegistry
         long nowTicks,
         long minAgeTicks)
     {
+        memory = Canonicalize(memory)!;
         List<WaitingDcb>? broken = null;
         lock (_gate)
         {
@@ -682,6 +721,7 @@ internal static class GpuWaitRegistry
         {
             _waiters.Clear();
             _lastProduced.Clear();
+            _recoveredProducerless.Clear();
         }
     }
 }

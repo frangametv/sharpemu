@@ -22,8 +22,13 @@ public sealed class GpuWaitRegistryProducerlessRecoveryTests : IDisposable
 
         var waiter = Assert.Single(recovered!);
         Assert.Equal(0x4020_2D00UL, waiter.WaitAddress);
-        Assert.True(GpuWaitRegistry.TryRemove(waiter));
+        Assert.True(GpuWaitRegistry.TryRecoverProducerless(waiter));
         Assert.Equal(0, GpuWaitRegistry.CountForMemory(_memory));
+        Assert.True(GpuWaitRegistry.ShouldBypassRecoveredProducerless(waiter));
+
+        // Observing a real producer restores strict wait semantics.
+        GpuWaitRegistry.RecordProduced(_memory, waiter.WaitAddress, 1);
+        Assert.False(GpuWaitRegistry.ShouldBypassRecoveredProducerless(waiter));
     }
 
     [Theory]
