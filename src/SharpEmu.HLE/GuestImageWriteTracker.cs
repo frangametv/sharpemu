@@ -116,8 +116,14 @@ public static unsafe class GuestImageWriteTracker
 
     private static RangeSnapshot _rangeSnapshot = RangeSnapshot.Empty;
 
-    private static readonly bool _enabled =
-        Environment.GetEnvironmentVariable("SHARPEMU_GUEST_IMAGE_CPU_SYNC") != "0";
+    // Keep the expensive page-protection path explicitly opt-in. Enabling it
+    // implicitly made every Astro Bot run pay the diagnostic CPU/GPU sync cost
+    // and regressed boot progress compared with the pre-#770 baseline.
+    private static readonly bool _enabled = IsCpuSyncEnabled(
+        Environment.GetEnvironmentVariable("SHARPEMU_GUEST_IMAGE_CPU_SYNC"));
+
+    internal static bool IsCpuSyncEnabled(string? value) =>
+        string.Equals(value, "1", StringComparison.Ordinal);
     private static readonly bool _configuredGuestMemoryTraceEnabled = string.Equals(
         Environment.GetEnvironmentVariable(
             "SHARPEMU_TRACE_GUEST_MEMORY_CPU_WRITES"),

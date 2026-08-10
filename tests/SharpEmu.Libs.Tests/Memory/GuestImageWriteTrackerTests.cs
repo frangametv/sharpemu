@@ -16,6 +16,16 @@ public sealed class GuestImageWriteTrackerTestCollection
 [Collection("GuestImageWriteTracker")]
 public sealed unsafe class GuestImageWriteTrackerTests
 {
+    [Theory]
+    [InlineData(null, false)]
+    [InlineData("", false)]
+    [InlineData("0", false)]
+    [InlineData("1", true)]
+    public void CpuSyncIsExplicitOptIn(string? value, bool expected)
+    {
+        Assert.Equal(expected, GuestImageWriteTracker.IsCpuSyncEnabled(value));
+    }
+
     private const nuint PageSize = 4096;
     private const nuint HostPageAlignment = 16384;
     private const uint MemCommit = 0x1000;

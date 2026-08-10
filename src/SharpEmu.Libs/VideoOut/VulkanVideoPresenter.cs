@@ -6650,17 +6650,15 @@ internal static unsafe class VulkanVideoPresenter
                 $"queue={_activeGuestQueue.Name} submission={_activeGuestQueue.SubmissionId} " +
                 $"handle={work.VideoOutHandle} index={work.DisplayBufferIndex} " +
                 $"capture_complete={(captured ? 1 : 0)}");
-            // Logical guest queues are drained round-robin, so the wait-safe
-            // marker can reach the presenter before the flip from a sibling
-            // queue. Requeue this marker and let that producer queue run.
-            // Treating it as completed loses the guest's frame-ordering edge
-            // and can leave the title spinning with no subsequent frames.
+            // Demon's Souls and Astro Bot execute wait-safe markers before
+            // their flip capture. The marker is advisory in this situation:
+            // retaining it at the queue head starves later title-scene work.
             if (work.Version != 0 && !captured && !_loggedFlipWaitOrderViolation)
             {
                 _loggedFlipWaitOrderViolation = true;
                 Console.Error.WriteLine(
                     $"[LOADER][WARN] vk.flip_wait_order version={work.Version} " +
-                    "executed before its flip capture; deferring its queue.");
+                    "executed before its flip capture; continuing.");
             }
 
             return GuestPresentationScheduling.IsFlipWaitReady(work.Version, captured);
@@ -16929,12 +16927,18 @@ internal static unsafe class VulkanVideoPresenter
 
                 if (deferGuestWork)
                 {
-                    // Exclude only this logical queue for the rest of the tick.
-                    // A sibling queue may contain the GPU work or flip capture
-                    // needed to satisfy the deferred head. If no sibling is
-                    // ready, TryTakeGuestWork ends the drain naturally.
-                    deferredOrderedQueues ??= new HashSet<string>(StringComparer.Ordinal);
-                    deferredOrderedQueues.Add(pendingGuestWork.Queue.Name);
+                    // macOS uses a non-blocking defer so sibling queues may
+                    // progress. Windows/Linux have already waited on fences;
+                    // end this drain and retry the retained head next tick.
+                    if (OperatingSystem.IsMacOS())
+                    {
+                        deferredOrderedQueues ??= new HashSet<string>(StringComparer.Ordinal);
+                        deferredOrderedQueues.Add(pendingGuestWork.Queue.Name);
+                    }
+                    else
+                    {
+                        break;
+                    }
                 }
 
                 if (workStart != 0)

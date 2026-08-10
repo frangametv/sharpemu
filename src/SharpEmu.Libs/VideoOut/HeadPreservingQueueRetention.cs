@@ -36,12 +36,11 @@ internal static class HeadPreservingQueueRetention
 internal static class GuestPresentationScheduling
 {
     /// <summary>
-    /// A wait-safe marker may be selected from a different logical GPU queue
-    /// before the flip it refers to has been drained. It is ready only after
-    /// that immutable flip generation exists; version zero has no predecessor.
+    /// A wait-safe marker may be selected before its referenced flip capture.
+    /// The pre-#770 presenter treated this marker as advisory; blocking the
+    /// logical queue here prevents Astro Bot from reaching its title sequence.
     /// </summary>
-    public static bool IsFlipWaitReady(long version, bool captureComplete) =>
-        version == 0 || captureComplete;
+    public static bool IsFlipWaitReady(long version, bool captureComplete) => true;
 
     /// <summary>
     /// An ordered flip has captured an immutable guest-image generation and

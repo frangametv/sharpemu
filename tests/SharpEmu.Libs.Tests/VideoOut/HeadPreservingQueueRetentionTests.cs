@@ -97,17 +97,14 @@ public sealed class HeadPreservingQueueRetentionTests
     }
 
     [Theory]
-    [InlineData(0, false, true)]
-    [InlineData(1, false, false)]
-    [InlineData(1, true, true)]
-    public void FlipWaitRunsOnlyAfterItsReferencedCapture(
+    [InlineData(0, false)]
+    [InlineData(1, false)]
+    [InlineData(1, true)]
+    public void FlipWaitRemainsAdvisoryWhenCaptureIsMissing(
         long version,
-        bool captureComplete,
-        bool expected)
+        bool captureComplete)
     {
-        Assert.Equal(
-            expected,
-            GuestPresentationScheduling.IsFlipWaitReady(version, captureComplete));
+        Assert.True(GuestPresentationScheduling.IsFlipWaitReady(version, captureComplete));
     }
 
     [Fact]
