@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 
 using System.Buffers.Binary;
+using System.Runtime.InteropServices;
 using SharpEmu.Core.Loader;
 using SharpEmu.Core.Memory;
 using SharpEmu.HLE;
@@ -220,7 +221,8 @@ public sealed class SelfLoaderTests
     [Fact]
     public void LoadAdditional_WhenExactPlacementIsExhausted_KeepsPs5ModuleRange()
     {
-        if (!Environment.Is64BitProcess)
+        if (!Environment.Is64BitProcess ||
+            RuntimeInformation.ProcessArchitecture != Architecture.X64)
         {
             return;
         }
