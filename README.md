@@ -25,10 +25,13 @@ SPDX-License-Identifier: GPL-2.0-or-later
 </p>
 
 > [!TIP]
-> ### Fran3: Progress Incoming, wait for the next release!
-> Fran3 is already taking **Astro Bot** further than the official SharpEmu
-> `main` branch. Great improvements are happening, but more work and testing are
-> still needed. Stay tuned over the next few days!
+> ### Fran4: Getting Closer to Graphics!
+> Fran4 is already taking **Astro Bot** further than the official SharpEmu
+> `main` branch. We're now **very close to getting actual frames on screen**
+> instead of just a black screen.
+>
+> Great progress is being made, but a bit more work and testing is still needed.
+> **Stay tuned for the next release, expected next week!**
 
 > [!WARNING]
 > SharpEmu is at a very early stage. Astro Bot and Grand Theft Auto V are
