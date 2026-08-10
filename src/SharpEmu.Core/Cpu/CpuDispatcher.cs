@@ -47,6 +47,7 @@ public sealed class CpuDispatcher : ICpuDispatcher, IDisposable
     private readonly IVirtualMemory _virtualMemory;
     private readonly IModuleManager _moduleManager;
     private INativeCpuBackend? _nativeCpuBackend;
+    private bool _preferAllLleLibcForApplication;
 
     public CpuDispatcher(
         IVirtualMemory virtualMemory,
@@ -57,6 +58,20 @@ public sealed class CpuDispatcher : ICpuDispatcher, IDisposable
         _moduleManager = moduleManager ?? throw new ArgumentNullException(nameof(moduleManager));
         _nativeCpuBackend = nativeCpuBackend;
     }
+
+    public void ConfigureApplicationInfo(string? title, string? titleId)
+    {
+        _preferAllLleLibcForApplication = ShouldPreferAllLleLibcForApplication(title, titleId);
+        if (_nativeCpuBackend is DirectExecutionBackend backend)
+        {
+            backend.ConfigureApplicationCompatibility(_preferAllLleLibcForApplication);
+        }
+    }
+
+    internal static bool ShouldPreferAllLleLibcForApplication(string? title, string? titleId) =>
+        string.Equals(title?.Trim(), "ASTRO BOT", StringComparison.OrdinalIgnoreCase) ||
+        string.Equals(titleId?.Trim(), "PPSA21564", StringComparison.OrdinalIgnoreCase) ||
+        string.Equals(titleId?.Trim(), "PPSA21567", StringComparison.OrdinalIgnoreCase);
 
     public ulong? LastEntryPoint { get; private set; }
 
@@ -299,6 +314,11 @@ public sealed class CpuDispatcher : ICpuDispatcher, IDisposable
         debugHook?.OnFrameEnter(debugFrame!);
 
         _nativeCpuBackend ??= new DirectExecutionBackend(_moduleManager);
+        if (_nativeCpuBackend is DirectExecutionBackend directExecutionBackend)
+        {
+            directExecutionBackend.ConfigureApplicationCompatibility(
+                _preferAllLleLibcForApplication);
+        }
         // Let backend stall reports reference the same frame as entry.
         (_nativeCpuBackend as DirectExecutionBackend)?.SetActiveDebugFrame(debugFrame);
         if (_nativeCpuBackend.TryExecute(

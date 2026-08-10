@@ -170,6 +170,10 @@ public sealed class SharpEmuRuntime : ISharpEmuRuntime
         KernelMemoryCompatExports.ConfigureApplicationInfo(image.TitleId);
         SaveDataExports.ConfigureApplicationInfo(image.TitleId);
         SystemServiceExports.ConfigureApplicationInfo(image.TitleId);
+        if (_cpuDispatcher is CpuDispatcher cpuDispatcher)
+        {
+            cpuDispatcher.ConfigureApplicationInfo(image.Title, image.TitleId);
+        }
         if (systemSoftwareLayout is null)
         {
             LogAppBundleInfo(normalizedEbootPath, image);

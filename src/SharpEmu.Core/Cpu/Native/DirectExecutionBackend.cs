@@ -194,6 +194,7 @@ public sealed unsafe partial class DirectExecutionBackend : INativeCpuBackend, I
 	private const ulong TlsModuleAllocStride = 65536uL;
 
 	private readonly IModuleManager _moduleManager;
+	private bool _preferAllLleLibcForApplication;
 
 	private nint _tlsHandlerAddress;
 
@@ -1132,6 +1133,11 @@ public sealed unsafe partial class DirectExecutionBackend : INativeCpuBackend, I
 		PrewarmNativeGuestWorkers(Math.Max(NativeWorkerMaxConcurrent, 4));
 	}
 
+	internal void ConfigureApplicationCompatibility(bool preferAllLleLibc)
+	{
+		_preferAllLleLibcForApplication = preferAllLleLibc;
+	}
+
 	public bool TryExecute(CpuContext context, ulong entryPoint, Generation generation, IReadOnlyDictionary<ulong, string> importStubs, IReadOnlyDictionary<string, ulong> runtimeSymbols, IReadOnlyDictionary<string, ulong> runtimeDataSymbols, CpuExecutionOptions executionOptions, out OrbisGen2Result result)
 	{
 		Console.Error.WriteLine("[LOADER][INFO] === Execute START ===");
@@ -1263,6 +1269,10 @@ public sealed unsafe partial class DirectExecutionBackend : INativeCpuBackend, I
 	private bool SetupImportStubs(IReadOnlyDictionary<ulong, string> importStubs)
 	{
 		Console.Error.WriteLine($"[LOADER][INFO] Setting up {importStubs.Count} import stubs...");
+		if (_preferAllLleLibcForApplication)
+		{
+			Console.Error.WriteLine("[LOADER][INFO] Application compatibility: full LLE libc routing enabled.");
+		}
 		ClearImportHandlerTrampolines();
 		_importEntries = new ImportStubEntry[importStubs.Count];
 		HashSet<ulong> hashSet = new HashSet<ulong>(importStubs.Keys);
@@ -1779,6 +1789,10 @@ public sealed unsafe partial class DirectExecutionBackend : INativeCpuBackend, I
 			return true;
 		}
 		if (string.Equals(value, "0", StringComparison.Ordinal))
+		{
+			return true;
+		}
+		if (_preferAllLleLibcForApplication)
 		{
 			return true;
 		}

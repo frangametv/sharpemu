@@ -1,6 +1,7 @@
 // Copyright (C) 2026 SharpEmu Emulator Project
 // SPDX-License-Identifier: GPL-2.0-or-later
 
+using SharpEmu.Core.Cpu;
 using SharpEmu.Core.Cpu.Native;
 using SharpEmu.HLE;
 using Xunit;
@@ -9,6 +10,29 @@ namespace SharpEmu.Libs.Tests.Cpu;
 
 public sealed class DirectExecutionBackendLlePreferenceTests
 {
+    [Theory]
+    [InlineData("ASTRO BOT", "PPSA21567")]
+    [InlineData("astro bot", null)]
+    [InlineData(null, "PPSA21564")]
+    [InlineData(null, "PPSA21567")]
+    public void AstroBotAutomaticallyUsesTheValidatedFullLleLibcPolicy(
+        string? title,
+        string? titleId)
+    {
+        Assert.True(CpuDispatcher.ShouldPreferAllLleLibcForApplication(title, titleId));
+    }
+
+    [Theory]
+    [InlineData("Astro's Playroom", "PPSA01325")]
+    [InlineData("Another Game", "PPSA00000")]
+    [InlineData(null, null)]
+    public void OtherApplicationsKeepTheDefaultMixedLibcPolicy(string? title, string? titleId)
+    {
+        Assert.False(CpuDispatcher.ShouldPreferAllLleLibcForApplication(
+            title,
+            titleId));
+    }
+
     [Fact]
     public void ExplicitLlePreference_AllowsNonKernelRegisteredExport()
     {
