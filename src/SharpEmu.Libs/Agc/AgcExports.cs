@@ -9615,22 +9615,6 @@ public static partial class AgcExports
             }
         }
 
-        state.UcRegisters.TryGetValue(VgtPrimitiveType, out var earlyPrimitiveType);
-        if (IsRectListPrimitive(earlyPrimitiveType) &&
-            (exportEvaluation.VertexInputs is null || exportEvaluation.VertexInputs.Count == 0) &&
-            !VertexProgramExportsParameters(exportState.Program) &&
-            GetInterpolatedAttributeCount(pixelState) != 0)
-        {
-            ReturnPooledEvaluationArrays(exportEvaluation);
-            ReturnPooledEvaluationArrays(pixelEvaluation);
-            error =
-                $"rect-list-no-param-exports ps_inputs={GetInterpolatedAttributeCount(pixelState)}";
-            TraceAgcShader(
-                $"agc.rect_list_skip es=0x{exportShaderAddress:X16} " +
-                $"ps=0x{pixelShaderAddress:X16} {error}");
-            return false;
-        }
-
         // Every bound color target the shader exports to. Deferred renderers
         // draw a multi-render-target G-buffer (up to eight slots) in one pass.
         // Fall back to slot 0 if we cannot match any export to a bound target.
@@ -11867,20 +11851,6 @@ public static partial class AgcExports
         target < ColorTargetCount
             ? (packedMasks >> (int)(target * 4)) & 0xFu
             : 0;
-
-    private static bool VertexProgramExportsParameters(Gen5ShaderProgram program)
-    {
-        foreach (var instruction in program.Instructions)
-        {
-            if (instruction.Control is Gen5ExportControl export &&
-                export.Target is >= 32 and < 64)
-            {
-                return true;
-            }
-        }
-
-        return false;
-    }
 
     private static uint GetInterpolatedAttributeCount(Gen5ShaderState state)
     {
@@ -16953,9 +16923,6 @@ public static partial class AgcExports
             18 => 1,
             _ => 2,
         };
-
-    private static bool IsRectListPrimitive(uint primitiveType) =>
-        AgcPrimitiveHelpers.IsRectListPrimitive(primitiveType);
 
     private static int SetIndirectPatchAddress(CpuContext ctx, string registerSpace)
     {
