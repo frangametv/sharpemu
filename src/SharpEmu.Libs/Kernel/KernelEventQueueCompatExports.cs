@@ -931,7 +931,7 @@ public static class KernelEventQueueCompatExports
         short filter,
         ulong data)
     {
-        var shouldWake = false;
+        List<EventQueueState>? wakeQueues = null;
         var triggeredCount = 0;
         List<(ulong Handle, KernelQueuedEvent Event, int PendingCount)>? tracedEvents = null;
         lock (_eventQueueGate)
@@ -957,6 +957,13 @@ public static class KernelEventQueueCompatExports
                         _pendingEvents[handle] = queue;
                     }
 
+                    // GPU interrupt events must not coalesce: the AGC driver's
+                    // interrupt thread accounts exactly one completion per
+                    // delivered kevent (it never reads the kevent payload), so
+                    // merging N triggers into one pending entry silently drops
+                    // N-1 completions and wedges its dependency counters. Queue
+                    // a distinct entry per trigger, with a defensive cap so an
+                    // undrained queue cannot grow without bound.
                     var queuedEvent = new KernelQueuedEvent(
                         registration.Ident,
                         registration.Filter,
@@ -964,13 +971,21 @@ public static class KernelEventQueueCompatExports
                         1,
                         data,
                         registration.UserData);
-                    QueueOrUpdateEvent(queue, queuedEvent);
+                    if (CountPendingEvents(queue, registration.Ident, registration.Filter) < 256)
+                    {
+                        queue.AddLast(queuedEvent);
+                    }
+                    else
+                    {
+                        QueueOrUpdateEvent(queue, queuedEvent);
+                    }
+
+                    (wakeQueues ??= []).Add(state);
                     CaptureTargetedProducer(
                         ref tracedEvents,
                         handle,
                         queuedEvent,
                         queue.Count);
-                    shouldWake = true;
                     triggeredCount++;
 
                     // A single queue only needs to be woken once, even if multiple
@@ -982,9 +997,16 @@ public static class KernelEventQueueCompatExports
 
         TraceTargetedProducers("registered_filter", tracedEvents);
 
-        if (shouldWake)
+        if (wakeQueues is not null)
         {
-            WakeEventQueue(0);
+            foreach (var state in wakeQueues)
+            {
+                WakeEventQueue(
+                    state,
+                    _logEqueue
+                        ? $"source=trigger-filter filter={filter} data=0x{data:X16}"
+                        : null);
+            }
         }
 
         return triggeredCount;
@@ -1157,6 +1179,61 @@ public static class KernelEventQueueCompatExports
         }
 
         return true;
+    }
+
+    private static int DeliverReservedEvents(
+        CpuContext ctx,
+        KernelQueuedEvent[] events,
+        int count,
+        ulong eventsAddress,
+        ulong outCountAddress)
+    {
+        var deliveredCount = 0;
+        try
+        {
+            for (; deliveredCount < count; deliveredCount++)
+            {
+                if (!WriteKernelEvent(
+                        ctx,
+                        eventsAddress + ((ulong)deliveredCount * KernelEventSize),
+                        events[deliveredCount]))
+                {
+                    return (int)OrbisGen2Result.ORBIS_GEN2_ERROR_MEMORY_FAULT;
+                }
+            }
+
+            if (outCountAddress != 0 &&
+                !TryWriteUInt32(ctx, outCountAddress, (uint)deliveredCount))
+            {
+                return (int)OrbisGen2Result.ORBIS_GEN2_ERROR_MEMORY_FAULT;
+            }
+
+            return deliveredCount > 0
+                ? (int)OrbisGen2Result.ORBIS_GEN2_OK
+                : (int)OrbisGen2Result.ORBIS_GEN2_ERROR_TIMED_OUT;
+        }
+        finally
+        {
+            ArrayPool<KernelQueuedEvent>.Shared.Return(events);
+        }
+    }
+
+    private static int CountPendingEvents(
+        KernelEventDeque queue,
+        ulong ident,
+        short filter)
+    {
+        var count = 0;
+        for (var i = 0; i < queue.Count; i++)
+        {
+            var pending = queue[i];
+            if (pending.Ident == ident && pending.Filter == filter)
+            {
+                count++;
+            }
+        }
+
+        return count;
     }
 
     private static void QueueOrUpdateEvent(
