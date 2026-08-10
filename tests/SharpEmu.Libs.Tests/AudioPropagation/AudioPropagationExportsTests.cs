@@ -174,6 +174,31 @@ public sealed class AudioPropagationExportsTests
     }
 
     [Fact]
+    public void SystemCreateAcceptsWriteOnlyFreshBackingAllocation()
+    {
+        WriteValidConfig();
+        WriteMemoryInfoHeader();
+        Assert.Equal(0, QueryMemory());
+        PrepareCreateMemory();
+        WriteUInt64(SystemOutputAddress, 0);
+
+        var writeOnlyFreshBacking = new RecordingFaultingCpuMemory(
+            _memory,
+            readFaultStartAddress: PrimaryBackingAddress);
+        var context = new CpuContext(writeOnlyFreshBacking, Generation.Gen5);
+        context[CpuRegister.Rdi] = ConfigAddress;
+        context[CpuRegister.Rsi] = MemoryInfoAddress;
+        context[CpuRegister.Rdx] = SystemOutputAddress;
+
+        Assert.Equal(0, AudioPropagationExports.SystemCreate(context));
+        Assert.NotEqual(0UL, ReadUInt64(SystemOutputAddress));
+        Assert.Equal(0x5348_4150_5359_5331UL, ReadUInt64(PrimaryBackingAddress));
+        Assert.DoesNotContain(
+            writeOnlyFreshBacking.ReadAttempts,
+            access => access.Address >= PrimaryBackingAddress);
+    }
+
+    [Fact]
     public void StatefulExportsAcceptDistinctMemoryFacadeForSameGuestAddressSpace()
     {
         var system = CreateSystem(materialCapacity: 2, flags: 4);

@@ -156,17 +156,6 @@ public static class AudioPropagationExports
             return SetReturn(ctx, ErrorInvalidPointer);
         }
 
-        var originalPrimary = new byte[0x30];
-        Span<byte> originalOutput = stackalloc byte[sizeof(ulong)];
-        byte[]? originalSecondary = memoryInfo.SecondarySize != 0 ? new byte[0x10] : null;
-        if (!ctx.Memory.TryRead(memoryInfo.PrimaryAddress, originalPrimary) ||
-            !ctx.Memory.TryRead(outputAddress, originalOutput) ||
-            (originalSecondary is not null &&
-             !ctx.Memory.TryRead(memoryInfo.SecondaryAddress, originalSecondary)))
-        {
-            return SetReturn(ctx, ErrorInvalidPointer);
-        }
-
         lock (RegistryGate)
         {
             if (Systems.Count >= MaxSystems)
@@ -177,26 +166,26 @@ public static class AudioPropagationExports
             var handle = AllocateHandle(kind: 1);
             var state = new AudioPropagationSystemState(handle, ctx.Memory, unvalidatedConfig, memoryInfo);
             var primaryHeader = BuildPrimaryBackingHeader(handle, memoryInfo, unvalidatedConfig);
-            var secondaryHeader = originalSecondary is null
+            var secondaryHeader = memoryInfo.SecondarySize == 0
                 ? null
                 : BuildSecondaryBackingHeader(handle);
 
-            if (!ctx.Memory.TryWrite(memoryInfo.PrimaryAddress, primaryHeader) ||
-                (secondaryHeader is not null &&
-                 !ctx.Memory.TryWrite(memoryInfo.SecondaryAddress, secondaryHeader)) ||
-                !TryWriteUInt64(ctx, outputAddress, handle))
+            // The backing returned by some PS5 allocators is writable but not
+            // readable until its first store. Requiring a rollback snapshot
+            // rejected Astro Bot immediately after a successful QueryMemory.
+            // The emulated service owns its actual state; only the caller's
+            // output handle is mandatory, while backing headers are advisory.
+            if (!TryWriteUInt64(ctx, outputAddress, handle))
             {
-                _ = ctx.Memory.TryWrite(memoryInfo.PrimaryAddress, originalPrimary);
-                if (originalSecondary is not null)
-                {
-                    _ = ctx.Memory.TryWrite(memoryInfo.SecondaryAddress, originalSecondary);
-                }
-
-                _ = ctx.Memory.TryWrite(outputAddress, originalOutput);
                 return SetReturn(ctx, ErrorInvalidPointer);
             }
 
             Systems.Add(handle, state);
+            _ = ctx.Memory.TryWrite(memoryInfo.PrimaryAddress, primaryHeader);
+            if (secondaryHeader is not null)
+            {
+                _ = ctx.Memory.TryWrite(memoryInfo.SecondaryAddress, secondaryHeader);
+            }
         }
 
         return SetSuccess(ctx);
