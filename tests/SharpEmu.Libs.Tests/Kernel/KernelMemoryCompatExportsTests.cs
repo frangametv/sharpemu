@@ -193,6 +193,59 @@ public sealed class KernelMemoryCompatExportsTests
     }
 
     [Fact]
+    public void HostWriteFallback_DoesNotBypassRecognizedGuestWriteFailure()
+    {
+        var native = Marshal.AllocHGlobal(8);
+        try
+        {
+            Marshal.WriteInt64(native, 0x1122334455667788);
+            var address = unchecked((ulong)native);
+            var context = new CpuContext(
+                new ReadableRejectingCpuMemory(address),
+                Generation.Gen5);
+
+            Assert.False(KernelMemoryCompatExports.TryWriteCompat(
+                context,
+                address,
+                BitConverter.GetBytes(0x7766554433221100L)));
+            Assert.Equal(0x1122334455667788, Marshal.ReadInt64(native));
+        }
+        finally
+        {
+            Marshal.FreeHGlobal(native);
+        }
+    }
+
+    [Fact]
+    public void HostReadFallback_DoesNotBypassRecognizedTruncatedGuestRange()
+    {
+        var native = Marshal.AllocHGlobal(8);
+        try
+        {
+            Marshal.WriteInt64(native, 0x1122334455667788);
+            var address = unchecked((ulong)native);
+            var context = new CpuContext(
+                new ReadableRejectingCpuMemory(address),
+                Generation.Gen5);
+            Span<byte> destination = stackalloc byte[8];
+            destination.Fill(0xCC);
+
+            Assert.False(KernelMemoryCompatExports.TryReadCompat(
+                context,
+                address,
+                destination));
+            Assert.True(destination.SequenceEqual(new byte[]
+            {
+                0xCC, 0xCC, 0xCC, 0xCC, 0xCC, 0xCC, 0xCC, 0xCC,
+            }));
+        }
+        finally
+        {
+            Marshal.FreeHGlobal(native);
+        }
+    }
+
+    [Fact]
     public void AvailableDirectMemorySize_FragmentedRangeReturnsLargestAlignedSpan()
     {
         const ulong firstAllocationStart = 0x0020_0000;
@@ -1020,5 +1073,21 @@ public sealed class KernelMemoryCompatExportsTests
         var result = KernelMemoryCompatExports.KernelMunmap(context);
 
         Assert.Equal((int)OrbisGen2Result.ORBIS_GEN2_ERROR_NOT_FOUND, result);
+    }
+
+    private sealed class ReadableRejectingCpuMemory(ulong address) : ICpuMemory
+    {
+        public bool TryRead(ulong virtualAddress, Span<byte> destination)
+        {
+            if (virtualAddress != address || destination.Length != 1)
+            {
+                return false;
+            }
+
+            destination[0] = 0x5A;
+            return true;
+        }
+
+        public bool TryWrite(ulong virtualAddress, ReadOnlySpan<byte> source) => false;
     }
 }

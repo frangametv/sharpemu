@@ -7186,6 +7186,17 @@ public static partial class KernelMemoryCompatExports
             return true;
         }
 
+        // A short successful probe means this is a modeled guest address.  In
+        // that case the failed full read (for example, one crossing the end of
+        // a guest mapping) is authoritative.  Do not reinterpret the same
+        // numeric address as host memory merely because the host happens to
+        // have a VM region there.
+        Span<byte> guestProbe = stackalloc byte[1];
+        if (ctx.Memory.TryRead(address, guestProbe))
+        {
+            return false;
+        }
+
         if (!TryReadTrackedLibcHeap(address, destination) &&
             !TryReadHostMemory(address, destination))
         {
@@ -7251,6 +7262,16 @@ public static partial class KernelMemoryCompatExports
         if (ctx.Memory.TryWrite(address, source))
         {
             return true;
+        }
+
+        // Preserve guest protection, range and injected-failure semantics.
+        // macOS/ARM64 can map host VM regions at addresses also used by the
+        // guest model, so a raw host fallback must only handle addresses that
+        // the guest memory does not recognize at all.
+        Span<byte> guestProbe = stackalloc byte[1];
+        if (ctx.Memory.TryRead(address, guestProbe))
+        {
+            return false;
         }
 
         if (!TryWriteTrackedLibcHeap(address, source) &&
