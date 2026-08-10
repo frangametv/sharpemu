@@ -65,7 +65,7 @@ internal static class GpuWaitRegistry
     private static readonly HashSet<(object Memory, ulong Address)>
         _recoveredProducerless = new();
 
-    // Fran3 wait recovery added after #770 still needs all per-thread memory
+    // Fran wait recovery added after #770 still needs all per-thread memory
     // decorators to resolve to the same guest-memory identity. Keep this small
     // invariant without restoring the reverted arena/orphan submission logic.
     private static object? Canonicalize(object? memory)

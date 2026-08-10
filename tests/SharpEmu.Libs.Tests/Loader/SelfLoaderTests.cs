@@ -246,10 +246,15 @@ public sealed class SelfLoaderTests
         _ = loader.Load(image, memory, modules);
         hostMemory.FailNextAllocations = 256;
 
-        _ = loader.LoadAdditional(image, memory, modules, fs: null, mountRoot: null);
+        var additionalImage = loader.LoadAdditional(
+            image,
+            memory,
+            modules,
+            fs: null,
+            mountRoot: null);
 
         Assert.InRange(
-            hostMemory.FallbackProbeAddress,
+            additionalImage.EntryPoint,
             0x0000_0008_0400_0000UL,
             0x0000_0008_FFFF_FFFFUL);
     }

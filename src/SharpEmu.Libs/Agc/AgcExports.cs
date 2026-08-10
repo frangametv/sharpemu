@@ -556,7 +556,7 @@ public static partial class AgcExports
     private static readonly ConditionalWeakTable<object, RegisterDefaultsAllocation> _registerDefaultsAllocations = new();
     private static readonly ConditionalWeakTable<object, SubmittedGpuState> _submittedGpuStates = new();
 
-    // Later Fran3 state tracking is shared by native worker wrappers. Preserve
+    // Later Fran state tracking is shared by native worker wrappers. Preserve
     // that identity rule while deliberately leaving #770's arena machinery out.
     private static object CanonicalMemory(object memory)
     {

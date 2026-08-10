@@ -407,6 +407,16 @@ public static unsafe class HostMemory
                     return (nuint)sizeof(BasicInfo);
                 }
 
+                // NativeMemory, the CLR, and native libraries create mappings
+                // outside this compatibility layer.  Windows VirtualQuery sees
+                // those mappings, so the POSIX implementation must do the same;
+                // otherwise valid host-backed guest pointers are rejected as
+                // free memory on Linux and macOS.
+                if (TryQueryExternalMapping(pageAddress, out info))
+                {
+                    return (nuint)sizeof(BasicInfo);
+                }
+
                 // Untracked host memory (runtime heaps, stacks, libraries) is
                 // reported as a free block reaching to the next tracked region
                 // so scanning callers keep advancing.
@@ -429,6 +439,119 @@ public static unsafe class HostMemory
                 info.Type = 0;
                 return (nuint)sizeof(BasicInfo);
             }
+        }
+
+        private static bool TryQueryExternalMapping(ulong address, out BasicInfo info)
+        {
+            info = default;
+            if (OperatingSystem.IsLinux())
+            {
+                try
+                {
+                    foreach (var line in File.ReadLines("/proc/self/maps"))
+                    {
+                        var fields = line.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+                        if (fields.Length < 2)
+                        {
+                            continue;
+                        }
+
+                        var bounds = fields[0].Split('-', 2);
+                        if (bounds.Length != 2 ||
+                            !ulong.TryParse(bounds[0], System.Globalization.NumberStyles.HexNumber, null, out var start) ||
+                            !ulong.TryParse(bounds[1], System.Globalization.NumberStyles.HexNumber, null, out var end) ||
+                            address < start || address >= end)
+                        {
+                            continue;
+                        }
+
+                        var permissions = fields[1];
+                        var readable = permissions.Length > 0 && permissions[0] == 'r';
+                        var writable = permissions.Length > 1 && permissions[1] == 'w';
+                        var executable = permissions.Length > 2 && permissions[2] == 'x';
+                        var protect = writable
+                            ? (executable ? PAGE_EXECUTE_READWRITE : PAGE_READWRITE)
+                            : executable
+                                ? PAGE_EXECUTE_READ
+                                : readable ? PAGE_READONLY : PAGE_NOACCESS;
+                        info.BaseAddress = start;
+                        info.AllocationBase = start;
+                        info.AllocationProtect = protect;
+                        info.RegionSize = end - start;
+                        info.State = MEM_COMMIT;
+                        info.Protect = protect;
+                        info.Type = MEM_PRIVATE;
+                        return true;
+                    }
+                }
+                catch (IOException)
+                {
+                    return false;
+                }
+
+                return false;
+            }
+
+            if (OperatingSystem.IsMacOS())
+            {
+                var regionAddress = address;
+                ulong regionSize = 0;
+                var count = MachVmRegionBasicInfo64Count;
+                if (mach_vm_region(
+                        mach_task_self(),
+                        ref regionAddress,
+                        ref regionSize,
+                        MachVmRegionBasicInfo64,
+                        out var regionInfo,
+                        ref count,
+                        out _) != KERN_SUCCESS ||
+                    regionAddress > address ||
+                    regionSize == 0 ||
+                    address - regionAddress >= regionSize)
+                {
+                    return false;
+                }
+
+                var readable = (regionInfo.Protection & VmProtRead) != 0;
+                var writable = (regionInfo.Protection & VmProtWrite) != 0;
+                var executable = (regionInfo.Protection & VmProtExecute) != 0;
+                var protect = writable
+                    ? (executable ? PAGE_EXECUTE_READWRITE : PAGE_READWRITE)
+                    : executable
+                        ? PAGE_EXECUTE_READ
+                        : readable ? PAGE_READONLY : PAGE_NOACCESS;
+                info.BaseAddress = regionAddress;
+                info.AllocationBase = regionAddress;
+                info.AllocationProtect = protect;
+                info.RegionSize = regionSize;
+                info.State = MEM_COMMIT;
+                info.Protect = protect;
+                info.Type = MEM_PRIVATE;
+                return true;
+            }
+
+            return false;
+        }
+
+        private const int MachVmRegionBasicInfo64 = 9;
+        private const uint MachVmRegionBasicInfo64Count = 9;
+        private const int VmProtRead = 1;
+        private const int VmProtWrite = 2;
+        private const int VmProtExecute = 4;
+
+        [StructLayout(LayoutKind.Sequential)]
+        private struct MachVmRegionBasicInfo64Data
+        {
+            public int Protection;
+            public int MaxProtection;
+            public uint Inheritance;
+            public byte Shared;
+            public byte Reserved;
+            public ushort Padding;
+            public ulong Offset;
+            public uint Behavior;
+            public ushort UserWiredCount;
+            public ushort Padding2;
         }
 
         private static bool OverlapsTrackedRegionLocked(ulong start, ulong size)
@@ -577,5 +700,15 @@ public static unsafe class HostMemory
 
         [DllImport("libSystem.B.dylib")]
         private static extern int mach_vm_deallocate(uint target, ulong address, ulong size);
+
+        [DllImport("libSystem.B.dylib")]
+        private static extern int mach_vm_region(
+            uint target,
+            ref ulong address,
+            ref ulong size,
+            int flavor,
+            out MachVmRegionBasicInfo64Data info,
+            ref uint infoCount,
+            out uint objectName);
     }
 }

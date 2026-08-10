@@ -6,6 +6,7 @@ using Xunit;
 
 namespace SharpEmu.Libs.Tests.Agc;
 
+[Collection(AgcCommandBufferChainCollection.Name)]
 public sealed class GpuWaitRegistryProducedRetentionTests
 {
     private const ulong WatchedLabel = 0x7020_0000_1000UL;

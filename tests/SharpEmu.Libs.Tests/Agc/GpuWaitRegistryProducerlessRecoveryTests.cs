@@ -6,6 +6,7 @@ using Xunit;
 
 namespace SharpEmu.Libs.Tests.Agc;
 
+[Collection(AgcCommandBufferChainCollection.Name)]
 public sealed class GpuWaitRegistryProducerlessRecoveryTests : IDisposable
 {
     private readonly object _memory = new();
