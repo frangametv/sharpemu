@@ -270,5 +270,78 @@ class PublishTests(unittest.TestCase):
         self.assertIn("osx-x64", publish_command)
 
 
+class LogComparisonTests(unittest.TestCase):
+    @staticmethod
+    def write_log(root: Path, name: str, lines: list[str]) -> Path:
+        path = root / name
+        path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+        return path
+
+    def test_analysis_tracks_astro_milestones_and_known_failures(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            path = self.write_log(
+                Path(directory),
+                "astro.log",
+                [
+                    "Setup 1958/1958 import stubs (direct bridge)",
+                    "apr_resolve path='/app0/Resident.xml' result=found",
+                    "apr_resolve path='/app0/Resident.xml' result=found",
+                    "GAME: Resident Load end 0.05s",
+                    "GAME: Armadillo Load end 3.76s",
+                    "GAME: Transition Load end 0.01s",
+                    "GAME: Level has started: ps_logo",
+                    "vk.flip_wait_order version=1 deferring its queue",
+                ],
+            )
+            analysis = HARNESS.analyze_log(path)
+
+        self.assertEqual(1958, analysis["import_stubs_ready"])
+        self.assertEqual(2, analysis["apr_resolve_count"])
+        self.assertEqual(1, analysis["apr_resolve_unique"])
+        self.assertEqual(1, analysis["resident_loads"])
+        self.assertEqual(1, analysis["armadillo_loads"])
+        self.assertEqual(1, analysis["transition_loads"])
+        self.assertEqual(["ps_logo"], analysis["levels"])
+        self.assertEqual(1, analysis["failures"]["deferred flip queue"])
+
+    def test_comparison_rejects_lost_progress_and_new_failure_markers(self) -> None:
+        baseline = {
+            "import_stubs_ready": 1958,
+            "resident_loads": 1,
+            "armadillo_loads": 3,
+            "transition_loads": 1,
+            "levels": ["ps_logo"],
+            "failures": {name: 0 for name in HARNESS.REGRESSION_MARKERS},
+        }
+        candidate = {
+            "import_stubs_ready": 1958,
+            "resident_loads": 1,
+            "armadillo_loads": 1,
+            "transition_loads": 0,
+            "levels": [],
+            "failures": {name: 0 for name in HARNESS.REGRESSION_MARKERS},
+        }
+        candidate["failures"]["discarded RECT_LIST draw"] = 2
+
+        regressions = HARNESS.compare_log_analysis(baseline, candidate)
+
+        self.assertTrue(any("Armadillo" in item for item in regressions))
+        self.assertTrue(any("Transition" in item for item in regressions))
+        self.assertTrue(any("ps_logo" in item for item in regressions))
+        self.assertTrue(any("RECT_LIST" in item for item in regressions))
+
+    def test_comparison_accepts_equal_milestones_and_failures(self) -> None:
+        analysis = {
+            "import_stubs_ready": 1958,
+            "resident_loads": 1,
+            "armadillo_loads": 3,
+            "transition_loads": 1,
+            "levels": ["ps_logo"],
+            "failures": {name: 0 for name in HARNESS.REGRESSION_MARKERS},
+        }
+
+        self.assertEqual([], HARNESS.compare_log_analysis(analysis, analysis))
+
+
 if __name__ == "__main__":
     unittest.main()

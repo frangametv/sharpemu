@@ -80,6 +80,18 @@ IMPORTANT_LINE = re.compile(
     r"AccessViolation|Illegal instruction|import thunk loop|vk\.guest_image",
     re.IGNORECASE,
 )
+APR_PATH = re.compile(r"apr_resolve path='([^']+)'", re.IGNORECASE)
+IMPORT_STUBS_READY = re.compile(r"Setup\s+(\d+)/(\d+)\s+import stubs", re.IGNORECASE)
+LEVEL_STARTED = re.compile(r"GAME:\s*Level has started:\s*(.*?)\s*$", re.IGNORECASE)
+REGRESSION_MARKERS = {
+    "deferred flip queue": re.compile(r"vk\.flip_wait_order.*deferring its queue", re.IGNORECASE),
+    "discarded RECT_LIST draw": re.compile(r"rect-list-no-param-exports", re.IGNORECASE),
+    "guest memory fault": re.compile(r"ORBIS_GEN2_ERROR_MEMORY_FAULT", re.IGNORECASE),
+    "Vulkan device lost": re.compile(r"DeviceLost", re.IGNORECASE),
+    "unhandled exception": re.compile(r"Unhandled(?:\s+exception)?", re.IGNORECASE),
+    "fatal error": re.compile(r"\bFATAL\b", re.IGNORECASE),
+    "import thunk loop": re.compile(r"import thunk loop exceeded", re.IGNORECASE),
+}
 TRANSIENT_STARTUP = re.compile(
     r"import thunk loop exceeded|UnmanagedCallersOnly|AccessViolation|"
     r"illegal instruction|0x8000082E6|TBB",
@@ -1904,9 +1916,117 @@ def doctor(args: argparse.Namespace) -> int:
     return 0 if game.is_file() and dotnet_ready else 1
 
 
+def analyze_log(path: str | Path) -> dict[str, object]:
+    log_path = Path(path).expanduser()
+    content = log_path.read_text(encoding="utf-8", errors="replace").splitlines()
+    apr_paths = [match.group(1) for line in content if (match := APR_PATH.search(line))]
+    import_stubs = [
+        (int(match.group(1)), int(match.group(2)))
+        for line in content
+        if (match := IMPORT_STUBS_READY.search(line))
+    ]
+    levels = [
+        match.group(1).strip()
+        for line in content
+        if (match := LEVEL_STARTED.search(line)) and match.group(1).strip()
+    ]
+    failures = {
+        name: sum(1 for line in content if pattern.search(line))
+        for name, pattern in REGRESSION_MARKERS.items()
+    }
+    ready, total = max(import_stubs, default=(0, 0))
+    return {
+        "path": str(log_path.resolve(strict=False)),
+        "lines": len(content),
+        "import_stubs_ready": ready,
+        "import_stubs_total": total,
+        "apr_resolve_count": len(apr_paths),
+        "apr_resolve_unique": len(set(apr_paths)),
+        "resident_loads": sum("GAME: Resident Load end" in line for line in content),
+        "armadillo_loads": sum("GAME: Armadillo Load end" in line for line in content),
+        "transition_loads": sum("GAME: Transition Load end" in line for line in content),
+        "levels": list(dict.fromkeys(levels)),
+        "failures": failures,
+    }
+
+
+def compare_log_analysis(
+    baseline: dict[str, object], candidate: dict[str, object]
+) -> list[str]:
+    regressions: list[str] = []
+    baseline_ready = int(baseline["import_stubs_ready"])
+    candidate_ready = int(candidate["import_stubs_ready"])
+    if candidate_ready < baseline_ready:
+        regressions.append(
+            f"import stubs ready fell from {baseline_ready} to {candidate_ready}"
+        )
+    for key, label in (
+        ("resident_loads", "Resident Load"),
+        ("armadillo_loads", "Armadillo Load"),
+        ("transition_loads", "Transition Load"),
+    ):
+        baseline_count = int(baseline[key])
+        candidate_count = int(candidate[key])
+        if candidate_count < baseline_count:
+            regressions.append(
+                f"{label} completions fell from {baseline_count} to {candidate_count}"
+            )
+    missing_levels = [
+        str(level)
+        for level in baseline["levels"]
+        if level not in candidate["levels"]
+    ]
+    if missing_levels:
+        regressions.append(f"missing levels reached by baseline: {', '.join(missing_levels)}")
+    baseline_failures = baseline["failures"]
+    candidate_failures = candidate["failures"]
+    assert isinstance(baseline_failures, dict) and isinstance(candidate_failures, dict)
+    for name in REGRESSION_MARKERS:
+        baseline_count = int(baseline_failures[name])
+        candidate_count = int(candidate_failures[name])
+        if candidate_count > baseline_count:
+            regressions.append(
+                f"{name} occurrences rose from {baseline_count} to {candidate_count}"
+            )
+    return regressions
+
+
+def print_log_analysis(label: str, analysis: dict[str, object]) -> None:
+    print(
+        f"{label}: imports={analysis['import_stubs_ready']}/{analysis['import_stubs_total']} "
+        f"resident={analysis['resident_loads']} armadillo={analysis['armadillo_loads']} "
+        f"transition={analysis['transition_loads']} levels={analysis['levels']} "
+        f"apr={analysis['apr_resolve_count']} ({analysis['apr_resolve_unique']} unique)"
+    )
+    failures = analysis["failures"]
+    assert isinstance(failures, dict)
+    present = [f"{name}={count}" for name, count in failures.items() if count]
+    print(f"{label} regression markers: {', '.join(present) if present else 'none'}")
+
+
+def compare_logs(baseline_path: str, candidate_path: str, *, as_json: bool = False) -> int:
+    baseline = analyze_log(baseline_path)
+    candidate = analyze_log(candidate_path)
+    regressions = compare_log_analysis(baseline, candidate)
+    if as_json:
+        print(json.dumps({"baseline": baseline, "candidate": candidate, "regressions": regressions}, indent=2))
+    else:
+        print_log_analysis("baseline", baseline)
+        print_log_analysis("candidate", candidate)
+        if regressions:
+            print("REGRESSION:")
+            for regression in regressions:
+                print(f"- {regression}")
+        else:
+            print("PASS: no Astro Bot milestone or known-failure regression detected")
+    return 1 if regressions else 0
+
+
 def summarize(path: str) -> int:
+    analysis = analyze_log(path)
     content = Path(path).expanduser().read_text(encoding="utf-8", errors="replace").splitlines()
     interesting = [line for line in content if IMPORTANT_LINE.search(line)]
+    print_log_analysis("log", analysis)
     print(f"lines: {len(content)}; significant: {len(interesting)}")
     for line in interesting[-40:]:
         print(line)
@@ -1993,6 +2113,10 @@ def create_parser() -> argparse.ArgumentParser:
     sub.add_parser("kill", help="close every SharpEmu process")
     summary = sub.add_parser("summarize", help="print milestones and failures from a run log")
     summary.add_argument("log")
+    compare = sub.add_parser("compare", help="fail when an Astro log regresses from a baseline")
+    compare.add_argument("baseline")
+    compare.add_argument("candidate")
+    compare.add_argument("--json", action="store_true", help="print machine-readable analysis")
     return parser
 
 
@@ -2007,6 +2131,8 @@ def main() -> int:
             return doctor(args)
         if args.command == "summarize":
             return summarize(args.log)
+        if args.command == "compare":
+            return compare_logs(args.baseline, args.candidate, as_json=args.json)
         if args.command == "build":
             root = repo_root()
             rid = args.rid or host_rid()
