@@ -623,7 +623,9 @@ public static class AvPlayerExports
         ulong handle,
         int width,
         int height,
-        ulong durationMilliseconds)
+        ulong durationMilliseconds,
+        ulong allocateTextureCallback = 0,
+        ulong allocateCallback = 0)
     {
         PlayerState? previous;
         lock (StateGate)
@@ -635,10 +637,32 @@ public static class AvPlayerExports
                 Width = width,
                 Height = height,
                 DurationMilliseconds = durationMilliseconds,
+                AllocateTextureCallback = allocateTextureCallback,
+                AllocateCallback = allocateCallback,
             };
         }
 
         previous?.Dispose();
+    }
+
+    internal static bool AllocateGuestVideoBuffersForTest(
+        CpuContext ctx,
+        ulong handle,
+        out ulong firstBuffer)
+    {
+        lock (StateGate)
+        {
+            if (!Players.TryGetValue(handle, out var player))
+            {
+                firstBuffer = 0;
+                return false;
+            }
+
+            var bufferSize = GetVideoBufferSize(player);
+            var allocated = AllocateGuestVideoBuffers(ctx, player, bufferSize);
+            firstBuffer = player.GuestBuffers[0];
+            return allocated && firstBuffer != 0;
+        }
     }
 
     internal static void RemovePlayerForTest(ulong handle)
@@ -1118,11 +1142,6 @@ public static class AvPlayerExports
                     return true;
                 }
             }
-            if (!player.TextureAllocatorFailed)
-            {
-                return true;
-            }
-
             player.TextureAllocatorFailed = true;
         }
 
