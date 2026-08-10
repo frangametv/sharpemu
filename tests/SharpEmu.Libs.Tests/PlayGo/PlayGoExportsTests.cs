@@ -2,7 +2,9 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 
 using System.Buffers.Binary;
+using System.Runtime.InteropServices;
 using SharpEmu.HLE;
+using SharpEmu.Libs.Kernel;
 using SharpEmu.Libs.PlayGo;
 using Xunit;
 
@@ -128,6 +130,32 @@ public sealed class PlayGoExportsTests : IDisposable
             (int)OrbisGen2Result.ORBIS_GEN2_OK,
             PlayGoExports.PlayGoGetLocus(_ctx));
         Assert.Equal(new byte[] { 0xA5 }, ReadLoci(1));
+    }
+
+    [Fact]
+    public void GetChunkId_WritesNativeMappedLibcPointers()
+    {
+        var handle = InitializeAndOpen();
+
+        _ctx[CpuRegister.Rdi] = 16;
+        Assert.Equal(0, KernelMemoryCompatExports.Malloc(_ctx));
+        var nativeOutput = _ctx[CpuRegister.Rax];
+        try
+        {
+            _ctx[CpuRegister.Rdi] = handle;
+            _ctx[CpuRegister.Rsi] = nativeOutput + sizeof(uint);
+            _ctx[CpuRegister.Rdx] = 1000;
+            _ctx[CpuRegister.Rcx] = nativeOutput;
+
+            Assert.Equal(0, PlayGoExports.PlayGoGetChunkId(_ctx));
+            Assert.Equal(1, Marshal.ReadInt32(unchecked((nint)nativeOutput)));
+            Assert.Equal(0, Marshal.ReadInt16(unchecked((nint)(nativeOutput + sizeof(uint)))));
+        }
+        finally
+        {
+            _ctx[CpuRegister.Rdi] = nativeOutput;
+            Assert.Equal(0, KernelMemoryCompatExports.Free(_ctx));
+        }
     }
 
     public void Dispose()

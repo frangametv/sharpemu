@@ -7215,7 +7215,7 @@ public static partial class KernelMemoryCompatExports
         return true;
     }
 
-    private static bool TryReadUInt16Compat(CpuContext ctx, ulong address, out ushort value)
+    internal static bool TryReadUInt16Compat(CpuContext ctx, ulong address, out ushort value)
     {
         Span<byte> bytes = stackalloc byte[sizeof(ushort)];
         if (!TryReadCompat(ctx, address, bytes))
@@ -7273,6 +7273,13 @@ public static partial class KernelMemoryCompatExports
     {
         Span<byte> bytes = stackalloc byte[sizeof(uint)];
         BinaryPrimitives.WriteUInt32LittleEndian(bytes, value);
+        return TryWriteCompat(ctx, address, bytes);
+    }
+
+    internal static bool TryWriteUInt16Compat(CpuContext ctx, ulong address, ushort value)
+    {
+        Span<byte> bytes = stackalloc byte[sizeof(ushort)];
+        BinaryPrimitives.WriteUInt16LittleEndian(bytes, value);
         return TryWriteCompat(ctx, address, bytes);
     }
 

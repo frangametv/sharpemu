@@ -63,7 +63,10 @@ public static class PlayGoExports
             return OrbisPlayGoErrorBadPointer;
         }
 
-        if (!ctx.TryReadUInt64(initParamsAddress + PlayGoInitBufAddrOffset, out var bufferAddress))
+        if (!KernelMemoryCompatExports.TryReadUInt64Compat(
+                ctx,
+                initParamsAddress + PlayGoInitBufAddrOffset,
+                out var bufferAddress))
         {
             return (int)OrbisGen2Result.ORBIS_GEN2_ERROR_MEMORY_FAULT;
         }
@@ -239,7 +242,7 @@ public static class PlayGoExports
         if (outChunkIdList == 0)
         {
             TracePlayGo($"get_chunk_id count_only entries={availableEntries} out_entries=0x{outEntries:X16}");
-            return ctx.TryWriteUInt32(outEntries, availableEntries)
+            return KernelMemoryCompatExports.TryWriteUInt32Compat(ctx, outEntries, availableEntries)
                 ? (int)OrbisGen2Result.ORBIS_GEN2_OK
                 : (int)OrbisGen2Result.ORBIS_GEN2_ERROR_MEMORY_FAULT;
         }
@@ -254,14 +257,17 @@ public static class PlayGoExports
         for (uint i = 0; i < entriesToWrite; i++)
         {
             var chunkId = chunkIds.Length == 0 ? (ushort)0 : chunkIds[i];
-            if (!ctx.TryWriteUInt16(outChunkIdList + (i * sizeof(ushort)), chunkId))
+            if (!KernelMemoryCompatExports.TryWriteUInt16Compat(
+                    ctx,
+                    outChunkIdList + (i * sizeof(ushort)),
+                    chunkId))
             {
                 return (int)OrbisGen2Result.ORBIS_GEN2_ERROR_MEMORY_FAULT;
             }
         }
 
         TracePlayGo($"get_chunk_id write requested={numberOfEntries} wrote={entriesToWrite} available={availableEntries}");
-        return ctx.TryWriteUInt32(outEntries, entriesToWrite)
+        return KernelMemoryCompatExports.TryWriteUInt32Compat(ctx, outEntries, entriesToWrite)
             ? (int)OrbisGen2Result.ORBIS_GEN2_OK
             : (int)OrbisGen2Result.ORBIS_GEN2_ERROR_MEMORY_FAULT;
     }
@@ -297,7 +303,7 @@ public static class PlayGoExports
 
         return ValidateChunkIds(ctx, chunkIds, numberOfEntries) is { } chunkError && chunkError != 0
             ? chunkError
-            : ctx.TryWriteInt64(outEta, 0)
+            : KernelMemoryCompatExports.TryWriteUInt64Compat(ctx, outEta, 0)
                 ? (int)OrbisGen2Result.ORBIS_GEN2_OK
                 : (int)OrbisGen2Result.ORBIS_GEN2_ERROR_MEMORY_FAULT;
     }
@@ -329,7 +335,7 @@ public static class PlayGoExports
             speed = _installSpeed;
         }
 
-        return ctx.TryWriteInt32(outSpeed, speed)
+        return KernelMemoryCompatExports.TryWriteUInt32Compat(ctx, outSpeed, unchecked((uint)speed))
             ? (int)OrbisGen2Result.ORBIS_GEN2_OK
             : (int)OrbisGen2Result.ORBIS_GEN2_ERROR_MEMORY_FAULT;
     }
@@ -361,7 +367,7 @@ public static class PlayGoExports
             languageMask = _languageMask;
         }
 
-        return ctx.TryWriteUInt64(outLanguageMask, languageMask)
+        return KernelMemoryCompatExports.TryWriteUInt64Compat(ctx, outLanguageMask, languageMask)
             ? (int)OrbisGen2Result.ORBIS_GEN2_OK
             : (int)OrbisGen2Result.ORBIS_GEN2_ERROR_MEMORY_FAULT;
     }
@@ -404,7 +410,10 @@ public static class PlayGoExports
         var loci = new byte[numberOfEntries];
         for (uint i = 0; i < numberOfEntries; i++)
         {
-            if (!ctx.TryReadUInt16(chunkIds + (i * sizeof(ushort)), out var chunkId))
+            if (!KernelMemoryCompatExports.TryReadUInt16Compat(
+                    ctx,
+                    chunkIds + (i * sizeof(ushort)),
+                    out var chunkId))
             {
                 return (int)OrbisGen2Result.ORBIS_GEN2_ERROR_MEMORY_FAULT;
             }
@@ -517,7 +526,7 @@ public static class PlayGoExports
         }
 
         TracePlayGo($"get_todo requested={numberOfEntries} wrote=0");
-        return ctx.TryWriteUInt32(outEntries, 0)
+        return KernelMemoryCompatExports.TryWriteUInt32Compat(ctx, outEntries, 0)
             ? (int)OrbisGen2Result.ORBIS_GEN2_OK
             : (int)OrbisGen2Result.ORBIS_GEN2_ERROR_MEMORY_FAULT;
     }
@@ -662,7 +671,10 @@ public static class PlayGoExports
     {
         for (uint i = 0; i < numberOfEntries; i++)
         {
-            if (!ctx.TryReadUInt16(chunkIds + (i * sizeof(ushort)), out var chunkId))
+            if (!KernelMemoryCompatExports.TryReadUInt16Compat(
+                    ctx,
+                    chunkIds + (i * sizeof(ushort)),
+                    out var chunkId))
             {
                 return (int)OrbisGen2Result.ORBIS_GEN2_ERROR_MEMORY_FAULT;
             }
@@ -828,7 +840,7 @@ public static class PlayGoExports
         var count = Interlocked.Increment(ref _locusTraceDiagnostics);
         if (entries != 1 || count <= 32 || count % 1000 == 0)
         {
-            _ = ctx.TryReadUInt16(chunkIds, out var firstChunkId);
+            _ = KernelMemoryCompatExports.TryReadUInt16Compat(ctx, chunkIds, out var firstChunkId);
             Console.Error.WriteLine(
                 $"[LOADER][TRACE] playgo.get_locus entries={entries} first_chunk={firstChunkId} " +
                 $"chunk_ids=0x{chunkIds:X16} out=0x{outLoci:X16}");
