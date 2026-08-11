@@ -264,6 +264,28 @@ W:\SharpEmuLab\Log\AstroBot-Main-2026-08-11_09-37.log
 
 ## Leads already rejected or unsafe
 
+### Rejected performance experiment (2026-08-11)
+
+Commit `0924a9a` attempted to decouple host fallback presentation from guest
+flip cadence and to cap FFmpeg decode output to the configured host resolution.
+The user run in
+`AstroBot-Fran4-2026-08-11_16-44-performance-regression.log` is a confirmed
+regression. The fallback opened a 3840x2160 source as 1280x720 at
+16:44:54.865. `TryGetFallbackPresentationFrame`, however, still advertised the
+guest source dimensions (3840x2160) for that smaller pixel buffer. About 80 ms
+later multiple WebApi workers entered a `0xC0000005` access-violation cascade;
+the fallback never reached `host_fallback_finished` and the process exited with
+code `-2146233082`.
+
+The experiment was reverted by `9e95339`. Fran4 was restored byte-for-byte to
+the known-good `632e727` executable (SHA-256
+`746E5001242EB82264A5CBD429DDC46C0EA164F70E3F6FCA0536507F5D2A55CB`). Do not
+reintroduce standalone fallback pacing together with decode downscaling. Any
+future optimization must be split into independently testable changes, must
+carry the decoded buffer's actual width and height with the frame, and must be
+packaged separately from the known-good Fran4 build until an ASTRO run
+completes the video and reaches `title_controller_ship`.
+
 - Do not treat the black screen alone as a swapchain/present failure; present
   is active and repeated nearly-black patterned frames have been captured.
 - Do not disable broad compute ranges or force fullscreen/solid shaders as a
