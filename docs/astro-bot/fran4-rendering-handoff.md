@@ -156,10 +156,22 @@ a bounded host playback:
    emulator's low frame rate;
 5. at EOF the fallback removes itself and guest rendering regains presentation.
 
-This follow-up still requires a live title confirmation. The expected proof is
-multiple increasing `AvPlayer host fallback frame presented` frame/serial
-values followed by `host_fallback_finished`. It improves full movie output; it
-does not claim to solve the independent title/menu geometry-production chain.
+The Fran4 run `PPSA21567-20260811-163141.log` confirmed the complete host
+movie visually and in the log. Presentation advanced through distinct serials
+(`frame=1 serial=2` through at least `frame=4 serial=5`), then emitted
+`host_fallback_finished` about 9.27 seconds after fallback startup and continued
+to `title_controller_ship`. The preserved log is
+`W:\SharpEmuLab\Log\AstroBot-Fran4-2026-08-11_16-31-full-video.log`
+(SHA-256
+`7CC6C9F382CDAC2FCB24E3A664D149588D863763F3FC93943A361E5F81D374C7`).
+
+The remaining movie issue is throughput, not correctness or lifetime. The
+first visible host frames were presented about 0.6, 0.6, and 1.1 seconds apart,
+so the 59.94-fps 3840x2160 source appears at roughly one frame per second while
+still completing on its wall-clock time base. Future work should preserve this
+known-good commit and isolate presentation cadence and 4K decode/BGRA upload
+cost. This improvement does not claim to solve the independent title/menu
+geometry-production chain.
 
 Two local validation launches on 2026-08-11 reached Vulkan initialization and
 early title submissions, but both terminated in the pre-existing native CPU
