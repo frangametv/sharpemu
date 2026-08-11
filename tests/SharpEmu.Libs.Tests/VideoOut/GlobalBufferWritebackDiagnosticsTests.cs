@@ -8,6 +8,44 @@ namespace SharpEmu.Libs.Tests.VideoOut;
 
 public sealed class GlobalBufferWritebackDiagnosticsTests
 {
+    [Fact]
+    public void AddressSamplesUseExactInteriorOffsetsAndClampAtTheEnd()
+    {
+        var bytes = Enumerable.Range(0, 16).Select(value => (byte)value).ToArray();
+
+        var samples = GlobalBufferWritebackDiagnostics.SampleAddresses(
+            bytes,
+            0x1000,
+            [0x0FFF, 0x1004, 0x100F, 0x1010],
+            maximumBytes: 4);
+
+        Assert.Collection(
+            samples,
+            sample =>
+            {
+                Assert.Equal(0x1004UL, sample.Address);
+                Assert.Equal(4, sample.Offset);
+                Assert.Equal([4, 5, 6, 7], sample.Bytes);
+            },
+            sample =>
+            {
+                Assert.Equal(0x100FUL, sample.Address);
+                Assert.Equal(15, sample.Offset);
+                Assert.Equal([15], sample.Bytes);
+            });
+    }
+
+    [Fact]
+    public void AddressSamplesRejectNonPositiveMaximumLength()
+    {
+        Assert.Throws<ArgumentOutOfRangeException>(() =>
+            GlobalBufferWritebackDiagnostics.SampleAddresses(
+                [1],
+                0x1000,
+                [0x1000],
+                maximumBytes: 0));
+    }
+
     [Theory]
     [InlineData(1, 0, true)]
     [InlineData(4, 0, true)]

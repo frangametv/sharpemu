@@ -15,8 +15,49 @@ internal readonly record struct GlobalBufferContentSummary(
     int LastNonzeroOffset,
     ulong Hash);
 
+internal readonly record struct GlobalBufferAddressSample(
+    ulong Address,
+    int Offset,
+    byte[] Bytes);
+
 internal static class GlobalBufferWritebackDiagnostics
 {
+    internal static GlobalBufferAddressSample[] SampleAddresses(
+        ReadOnlySpan<byte> current,
+        ulong baseAddress,
+        IReadOnlyList<ulong> addresses,
+        int maximumBytes = 64)
+    {
+        if (maximumBytes <= 0)
+        {
+            throw new ArgumentOutOfRangeException(nameof(maximumBytes));
+        }
+
+        var samples = new List<GlobalBufferAddressSample>();
+        foreach (var address in addresses)
+        {
+            if (address < baseAddress)
+            {
+                continue;
+            }
+
+            var relativeAddress = address - baseAddress;
+            if (relativeAddress >= (ulong)current.Length)
+            {
+                continue;
+            }
+
+            var offset = checked((int)relativeAddress);
+            var byteCount = Math.Min(maximumBytes, current.Length - offset);
+            samples.Add(new GlobalBufferAddressSample(
+                address,
+                offset,
+                current.Slice(offset, byteCount).ToArray()));
+        }
+
+        return samples.ToArray();
+    }
+
     internal static bool ShouldEmitAddressFilteredTrace(
         int occurrence,
         long changedBytes,

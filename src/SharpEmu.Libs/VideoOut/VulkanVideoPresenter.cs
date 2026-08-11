@@ -3834,6 +3834,7 @@ internal static unsafe class VulkanVideoPresenter
         private sealed class TranslatedDrawResources
         {
             public string DebugName = "SharpEmu translated";
+            public ulong ShaderAddress;
             public PipelineLayout PipelineLayout;
             public Pipeline Pipeline;
             public bool PipelineCached;
@@ -6225,6 +6226,15 @@ internal static unsafe class VulkanVideoPresenter
                     System.Diagnostics.Stopwatch.GetTimestamp() - submission.SubmittedTicks);
             }
 
+            // Everything referenced by this submission is now CPU-visible.
+            // Publish the completed timeline before diagnostics so an
+            // address-filtered readback does not try to wait for the very
+            // submission whose fence has just signalled.
+            if (submission.Timeline > _completedTimeline)
+            {
+                _completedTimeline = submission.Timeline;
+            }
+
             if (!_deviceLost)
             {
                 foreach (var image in submission.TraceImages)
@@ -6236,6 +6246,19 @@ internal static unsafe class VulkanVideoPresenter
             foreach (var trace in submission.InlineRefreshReadbacks)
             {
                 TraceGuestImageContents(trace.Image, trace);
+            }
+
+            if (!_deviceLost)
+            {
+                foreach (var resources in submission.Resources)
+                {
+                    if (HasAddressFilteredWritableGlobalBuffer(resources))
+                    {
+                        TraceAddressFilteredGlobalBufferWritebacks(
+                            resources,
+                            resources.ShaderAddress);
+                    }
+                }
             }
 
             // The fence has signalled, so the detile dispatch that used these
@@ -6258,10 +6281,6 @@ internal static unsafe class VulkanVideoPresenter
 
             ReleaseGuestCommandBuffer(submission.CommandBuffer);
             ReleaseGuestFence(submission.Fence, needsReset: true);
-            if (submission.Timeline > _completedTimeline)
-            {
-                _completedTimeline = submission.Timeline;
-            }
         }
 
         private void WaitForAllGuestSubmissionsForCpuVisibility()
@@ -7870,6 +7889,7 @@ internal static unsafe class VulkanVideoPresenter
             var resources = new TranslatedDrawResources
             {
                 DebugName = "SharpEmu draw",
+                ShaderAddress = shaderAddress,
                 Textures = new TextureResource[draw.Textures.Count],
                 GlobalMemoryBuffers =
                     new GlobalBufferResource[draw.GlobalMemoryBuffers.Count],
@@ -8118,6 +8138,7 @@ internal static unsafe class VulkanVideoPresenter
             var resources = new TranslatedDrawResources
             {
                 DebugName = BuildComputeDebugName(dispatch),
+                ShaderAddress = dispatch.ShaderAddress,
                 Textures = new TextureResource[dispatch.Textures.Count],
                 GlobalMemoryBuffers =
                     new GlobalBufferResource[dispatch.GlobalMemoryBuffers.Count],
@@ -13104,6 +13125,15 @@ internal static unsafe class VulkanVideoPresenter
                             sizeof(uint)));
                     debugRegisterHead.Add($"{dword}:{value:X8}");
                 }
+                var (_, traceAddresses) = _cachedAddressLists.GetOrAdd(
+                    "SHARPEMU_TRACE_GLOBAL_BUFFER_ADDRS",
+                    static name => ParseAddressList(
+                        Environment.GetEnvironmentVariable(name)));
+                var addressSamples =
+                    GlobalBufferWritebackDiagnostics.SampleAddresses(
+                        mappedBytes,
+                        buffer.BaseAddress,
+                        traceAddresses);
                 Console.Error.WriteLine(
                     "[LOADER][TRACE] " +
                     $"vk.global_writeback_full stage=post_fence_pre_publish " +
@@ -13117,7 +13147,10 @@ internal static unsafe class VulkanVideoPresenter
                     $"hash=0x{summary.Hash:X16} " +
                     $"changed_head={Convert.ToHexString(changedHead)} " +
                     $"changed_dwords=[{string.Join(',', changedDwords)}] " +
-                    $"debug_register_head=[{string.Join(',', debugRegisterHead)}]");
+                    $"debug_register_head=[{string.Join(',', debugRegisterHead)}] " +
+                    $"address_samples=[{string.Join(',', addressSamples.Select(sample =>
+                        $"0x{sample.Address:X16}+{sample.Offset}:" +
+                        Convert.ToHexString(sample.Bytes)))}]");
             }
         }
 
@@ -14168,19 +14201,6 @@ internal static unsafe class VulkanVideoPresenter
                     resources,
                     traceContents: false,
                     shaderAddress: work.ShaderAddress);
-
-                if (HasAddressFilteredWritableGlobalBuffer(resources))
-                {
-                    // Diagnostic-only synchronization for graphics-stage
-                    // storage-buffer writers. Compute writers already take
-                    // this path; without the graphics equivalent a VS, ES,
-                    // GS, or PS producer can evade the target readback.
-                    WaitForAllGuestSubmissionsForCpuVisibility();
-                    TraceAddressFilteredGlobalBufferWritebacks(
-                        resources,
-                        work.ShaderAddress);
-                    WriteBackAllDirtyGuestBuffers(_activeGuestQueue.Name);
-                }
 
                 if (work.PublishTarget)
                 {
