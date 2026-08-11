@@ -52,6 +52,30 @@ public static class AvPlayerExports
             PlayerState? latest = null;
             foreach (var player in Players.Values)
             {
+                if (player.FallbackPlayback is { } playback)
+                {
+                    if (playback.TryGetFrame(
+                            advanceClock: true,
+                            out var playbackPixels,
+                            out var advanced))
+                    {
+                        if (advanced || player.FallbackPresentationPixels is null)
+                        {
+                            player.FallbackPresentationPixels = playbackPixels;
+                            player.FallbackPresentationSerial =
+                                Interlocked.Increment(ref _fallbackPresentationSerial);
+                        }
+                    }
+                    else if (playback.IsFinished)
+                    {
+                        playback.Dispose();
+                        player.FallbackPlayback = null;
+                        player.FallbackPresentationPixels = null;
+                        player.FallbackPresentationSerial = 0;
+                        Trace($"host_fallback_finished handle=0x{player.Handle:X16}");
+                    }
+                }
+
                 if (player.FallbackPresentationPixels is null ||
                     player.FallbackPresentationSerial <= 0 ||
                     latest is not null &&
@@ -170,6 +194,8 @@ public static class AvPlayerExports
         public long NextAudioFrameIndex { get; set; }
         public byte[]? FallbackPresentationPixels { get; set; }
         public long FallbackPresentationSerial { get; set; }
+        public MediaFramePlayback? FallbackPlayback { get; set; }
+        public bool FallbackPlaybackAttempted { get; set; }
 
         public void Dispose()
         {
@@ -177,6 +203,8 @@ public static class AvPlayerExports
             DecoderOutput = null;
             AudioDecoderOutput?.Dispose();
             AudioDecoderOutput = null;
+            FallbackPlayback?.Dispose();
+            FallbackPlayback = null;
         }
 
         public void ResetPlayback()
@@ -189,6 +217,7 @@ public static class AvPlayerExports
             EndOfStream = false;
             FallbackPresentationPixels = null;
             FallbackPresentationSerial = 0;
+            FallbackPlaybackAttempted = false;
         }
     }
 
@@ -1060,6 +1089,7 @@ public static class AvPlayerExports
             player.FallbackPresentationPixels = bgra;
             player.FallbackPresentationSerial =
                 Interlocked.Increment(ref _fallbackPresentationSerial);
+            EnsureFallbackPlayback(player);
         }
         if (TraceVideoImages)
         {
@@ -1092,6 +1122,42 @@ public static class AvPlayerExports
             info[65] = 8;
         }
         return ctx.Memory.TryWrite(infoAddress, info);
+    }
+
+    /// <summary>
+    /// The title-provided allocators can reject large decoded surfaces.  In
+    /// that case the guest has no texture it can sample, and some titles pause
+    /// their AvPlayer after acquiring a poster frame.  Keep that compatibility
+    /// path useful by running a separate, bounded host playback to completion.
+    /// MediaFramePlayback performs decode work off the Vulkan thread, advances
+    /// on the movie clock, drops frames when rendering is slow, and relinquishes
+    /// presentation automatically at EOF so normal guest rendering resumes.
+    /// </summary>
+    private static void EnsureFallbackPlayback(PlayerState player)
+    {
+        if (player.FallbackPlaybackAttempted || player.SourcePath is null)
+        {
+            return;
+        }
+
+        player.FallbackPlaybackAttempted = true;
+        if (!FfmpegVideoDecoder.TryOpen(
+                player.SourcePath,
+                checked((uint)player.Width),
+                checked((uint)player.Height),
+                out var decoder) ||
+            decoder is null)
+        {
+            Console.Error.WriteLine(
+                $"[AVPLAYER][WARN] Could not start host fallback playback for '{player.SourcePath}'.");
+            return;
+        }
+
+        player.FallbackPlayback = new MediaFramePlayback(decoder);
+        Trace(
+            $"host_fallback_started handle=0x{player.Handle:X16} " +
+            $"{decoder.Width}x{decoder.Height} " +
+            $"fps={decoder.FramesPerSecondNumerator}/{decoder.FramesPerSecondDenominator}");
     }
 
     internal static int CalculateNv12Pitch(int width) =>

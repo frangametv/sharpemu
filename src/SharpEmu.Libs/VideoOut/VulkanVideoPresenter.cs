@@ -2762,9 +2762,14 @@ internal static unsafe class VulkanVideoPresenter
                 ref _tracedAvPlayerFallbackPresentationSerial,
                 serial) != serial)
         {
-            Console.Error.WriteLine(
-                $"[VIDEOOUT][INFO] AvPlayer host fallback frame presented: " +
-                $"serial={serial} size={width}x{height}.");
+            var frameCount = Interlocked.Increment(
+                ref _avPlayerFallbackPresentationCount);
+            if (frameCount <= 4 || frameCount % 60 == 0)
+            {
+                Console.Error.WriteLine(
+                    $"[VIDEOOUT][INFO] AvPlayer host fallback frame presented: " +
+                    $"frame={frameCount} serial={serial} size={width}x{height}.");
+            }
         }
         presentation = new Presentation(
             pixels,
@@ -2778,6 +2783,7 @@ internal static unsafe class VulkanVideoPresenter
     }
 
     private static long _tracedAvPlayerFallbackPresentationSerial;
+    private static long _avPlayerFallbackPresentationCount;
     private static readonly HashSet<long> _tracedGuestImagePresentRejections = new();
 
 	private static bool HasPendingGuestPresentation(long presentedSequence)

@@ -62,7 +62,7 @@ internal sealed class MediaFramePlayback : IDisposable
         _decoderThread = new Thread(DecodeLoop)
         {
             IsBackground = true,
-            Name = "SharpEmu Bink video decoder",
+            Name = "SharpEmu media video decoder",
         };
         _decoderThread.Start();
     }

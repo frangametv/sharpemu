@@ -40,6 +40,11 @@ ASTRO title run and the complete test suite.
   BGRA and hands it directly to the Vulkan presenter. A live ASTRO run emitted
   `AvPlayer host fallback frame presented: serial=1 size=3840x2160`, and the
   frame was visibly confirmed on the host window.
+- The follow-up `20260811-140236` run independently confirmed the same visible
+  frame. Its preserved copy is
+  `W:\SharpEmuLab\Log\AstroBot-Fran4-2026-08-11_14-02-first-frame.log`
+  (SHA-256
+  `96000472B1A9D22B40A6B761B230D4AFC3D37A966345D62748AAACFC1C7102D4`).
 - The exact game milestone
   `GAME: Level has started: title_controller_ship` is reached.
 - `worldmap` is subsequently loaded.
@@ -134,11 +139,34 @@ The verified diagnostic log is:
 artifacts/diagnostics/fran4-avplayer/astrobot-fran4-video-test.log
 ```
 
-This is a real visible-output improvement, but it does not yet provide full
-movie playback. ASTRO explicitly calls `sceAvPlayerPause` after the first video
-frame, so the presently verified result is one displayed frame. The next
-AvPlayer task is to determine whether the title is waiting for an audio/video
-state transition or deliberately using the first frame while `ps_logo` loads.
+This is a real visible-output improvement. The first implementation still
+depended on repeated guest `sceAvPlayerGetVideoData*` calls, however. ASTRO
+explicitly called `sceAvPlayerPause` after acquiring the first video frame, so
+that version froze on the first displayed image.
+
+The follow-up implementation makes the allocation-failure compatibility path
+a bounded host playback:
+
+1. the first guest frame is still returned exactly as before;
+2. a separate FFmpeg decoder and the existing `MediaFramePlayback` queue decode
+   BGRA frames away from the Vulkan presentation thread;
+3. the presenter advances those frames on the movie clock even if the guest
+   pauses the unusable guest-buffer path;
+4. late frames are dropped rather than stretching an 8.5-second movie at the
+   emulator's low frame rate;
+5. at EOF the fallback removes itself and guest rendering regains presentation.
+
+This follow-up still requires a live title confirmation. The expected proof is
+multiple increasing `AvPlayer host fallback frame presented` frame/serial
+values followed by `host_fallback_finished`. It improves full movie output; it
+does not claim to solve the independent title/menu geometry-production chain.
+
+Two local validation launches on 2026-08-11 reached Vulkan initialization and
+early title submissions, but both terminated in the pre-existing native CPU
+backend failure `attempted to call a UnmanagedCallersOnly method from managed
+code` before the AvPlayer sequence began. They therefore neither confirm nor
+invalidate this path. Their logs are retained under
+`artifacts/diagnostics/fran4-avplayer/astrobot-fran4-multiframe-*.log`.
 
 ### Geometry diagnostics
 
