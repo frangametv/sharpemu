@@ -125,6 +125,7 @@ internal static class GpuWaitRegistry
     /// </summary>
     public static OutstandingSnapshot SnapshotOutstanding(object? memory = null)
     {
+        memory = Canonicalize(memory);
         lock (_gate)
         {
             var outstanding = 0;
