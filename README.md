@@ -24,14 +24,15 @@ SPDX-License-Identifier: GPL-2.0-or-later
   <img src="https://img.shields.io/badge/Discord-%40FranGameTv-5865F2?style=for-the-badge&logo=discord&logoColor=white" alt="Discord @FranGameTv">
 </p>
 
-> [!TIP]
-> ### Fran4: Getting Closer to Graphics!
-> Fran4 is already taking **Astro Bot** further than the official SharpEmu
-> `main` branch. We're now **very close to getting actual frames on screen**
-> instead of just a black screen.
+> [!IMPORTANT]
+> ### Fran4 released: the Astro Bot intro is now visible!
+> **Fran4 has been released.** This version takes **Astro Bot** beyond the
+> black screen and displays the complete intro video. A validated Windows run
+> also advances to the title controller after playback finishes.
 >
-> Great progress is being made, but a bit more work and testing is still needed.
-> **Stay tuned for the next release, expected next week!**
+> This is an important milestone, but Fran4 remains an experimental preview:
+> video playback is still slow and the following 3D rendering path needs more
+> work and testing.
 
 > [!WARNING]
 > SharpEmu is at a very early stage. Astro Bot and Grand Theft Auto V are
@@ -55,14 +56,18 @@ verified problem and test again.
 
 - Keep the project synchronized with useful upstream SharpEmu development.
 - Preserve and improve the valuable Acelogic work already integrated.
-- Investigate Astro Bot rendering, shader and runtime failures.
+- Improve Astro Bot intro playback performance and continue investigating the
+  title/menu rendering, shader and runtime paths reached after the video.
 - Advance GTA V through loader, kernel, audio, AGC and GPU failures.
 - Improve Vulkan on Windows/Linux and Metal/MoltenVK support on macOS.
 - Add focused regression tests for every fix that can be reproduced safely.
 
-SharpEmu can already load real `eboot.bin` files, execute native CPU code, load
-system modules and reach early graphics or video-output stages in some games.
-It is not yet a general-purpose or stable PS5 emulator.
+SharpEmu can already load real `eboot.bin` files, execute native CPU code and
+load system modules. In Fran4, Astro Bot can display its complete intro video
+instead of remaining on a black screen and can advance to the title controller
+in the validated Windows test. Playback is currently slow, later guest 3D
+rendering remains incomplete, and SharpEmu is not yet a general-purpose or
+stable PS5 emulator.
 
 ## Download and Run
 
