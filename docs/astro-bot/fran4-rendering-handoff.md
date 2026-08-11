@@ -1,3 +1,9 @@
+<!--
+Copyright (C) 2026 SharpEmu Emulator Project
+Copyright (C) 2026 FranGameTv
+SPDX-License-Identifier: GPL-2.0-or-later
+-->
+
 # ASTRO BOT Fran4 rendering handoff
 
 Last updated: 2026-08-11
@@ -20,8 +26,8 @@ The longer inherited Acelogic journal remains in
 - Upstream was merged through `sharpemu/sharpemu@7caf430` by `93c5df7`.
 - The runtime changes from upstream PR #770 were deliberately reapplied by
   `f196999` after comparing the upstream and Fran runs.
-- The pre-PR-770 safety point is retained as branch
-  `backup/pre-fran4-pr770`.
+- The former pre-PR-770 safety point remains recoverable as commit `93c5df7`;
+  its temporary backup branch was removed before the Fran4 release.
 - Fran4 identifies itself as `0.0.3-fran4`.
 
 Do not discard the Acelogic history or replace `main` with upstream. Future
