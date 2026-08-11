@@ -48,13 +48,17 @@ SPDX-License-Identifier: GPL-2.0-or-later
   <!-- Runs after ResolveProjectReferences (which builds the task assembly) and before
        resource processing embeds the output. Skipped for design-time builds: the IDE
        resolves project references without compiling them, so on a fresh clone the task
-       assembly does not exist yet and loading it would break the design-time build. -->
+       assembly does not exist yet and loading it would break the design-time build.
+       SharpEmuUseExistingAerolibBinary is an explicit local-build escape hatch for SDKs
+       whose out-of-process TaskHostFactory is unavailable; it is honored only when the
+       generated catalog already exists. -->
   <Target Name="GenerateAerolibBinary"
           DependsOnTargets="ResolveProjectReferences"
           Inputs="$(SharpEmuAerolibNamesFile);$(SharpEmuAerolibTaskAssembly)"
           Outputs="$(IntermediateOutputPath)aerolib.bin">
     <GenerateAerolibBinaryTask NamesFile="$(SharpEmuAerolibNamesFile)"
-                               OutputFile="$(IntermediateOutputPath)aerolib.bin" />
+                               OutputFile="$(IntermediateOutputPath)aerolib.bin"
+                               Condition="'$(SharpEmuUseExistingAerolibBinary)' != 'true' Or !Exists('$(IntermediateOutputPath)aerolib.bin')" />
   </Target>
 
   <!-- The resource item is created inside a target (not statically) so design-time
