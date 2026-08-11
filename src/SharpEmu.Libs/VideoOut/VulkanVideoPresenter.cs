@@ -729,6 +729,16 @@ internal static unsafe class VulkanVideoPresenter
         return penalty;
     }
 
+    internal static bool ShouldDisableAmdComputePipelineOptimization(
+        uint vendorId,
+        bool isWindows,
+        string? configuredValue)
+    {
+        return isWindows &&
+            vendorId == AmdVendorId &&
+            !string.Equals(configuredValue, "0", StringComparison.Ordinal);
+    }
+
     private static bool _splashHidden;
     private static long _enqueuedGuestWorkSequence;
     // Largest contiguous completed sequence, retained for compact diagnostics.
@@ -3546,6 +3556,7 @@ internal static unsafe class VulkanVideoPresenter
         private uint _maxComputeWorkGroupSizeZ;
         private uint _maxComputeWorkGroupInvocations;
         private ulong _minStorageBufferOffsetAlignment = 1;
+        private bool _disableComputePipelineOptimization;
         private bool _supportsIndependentBlend;
         private uint _maxColorAttachments;
         private Device _device;
@@ -4836,9 +4847,21 @@ internal static unsafe class VulkanVideoPresenter
             LoadComputeDeviceLimits();
             _vk.GetPhysicalDeviceProperties(_physicalDevice, out var selected);
             _maxColorAttachments = selected.Limits.MaxColorAttachments;
+            _disableComputePipelineOptimization =
+                ShouldDisableAmdComputePipelineOptimization(
+                    selected.VendorID,
+                    OperatingSystem.IsWindows(),
+                    Environment.GetEnvironmentVariable("SHARPEMU_VK_AMD_COMPUTE_NO_OPT"));
             var selectedName = SilkMarshal.PtrToString((nint)selected.DeviceName) ?? "unknown";
             Console.Error.WriteLine(
                 $"[LOADER][INFO] Vulkan device: {selectedName} ({selected.DeviceType})");
+            if (_disableComputePipelineOptimization)
+            {
+                Console.Error.WriteLine(
+                    "[LOADER][INFO] Vulkan AMD Windows compute workaround enabled: " +
+                    "pipeline optimization disabled " +
+                    "(set SHARPEMU_VK_AMD_COMPUTE_NO_OPT=0 to disable).");
+            }
             VideoOutExports.SetSelectedGpuName(selectedName);
             if (_window is not null)
             {
@@ -8902,7 +8925,10 @@ internal static unsafe class VulkanVideoPresenter
                 var pipelineInfo = new ComputePipelineCreateInfo
                 {
                     SType = StructureType.ComputePipelineCreateInfo,
-                    Flags = PipelineCreateFlags.CreateDispatchBaseBit,
+                    Flags = PipelineCreateFlags.CreateDispatchBaseBit |
+                        (_disableComputePipelineOptimization
+                            ? PipelineCreateFlags.CreateDisableOptimizationBit
+                            : 0),
                     Stage = stage,
                     Layout = resources.PipelineLayout,
                 };

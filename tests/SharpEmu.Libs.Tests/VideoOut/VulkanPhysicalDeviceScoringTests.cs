@@ -91,4 +91,24 @@ public sealed class VulkanPhysicalDeviceScoringTests
         Assert.Equal(0, VulkanVideoPresenter.ComputeDevicePenalty(
             Device(PhysicalDeviceType.IntegratedGpu, vendorId), isWindows: true));
     }
+
+    [Theory]
+    [InlineData(AmdVendorId, true, null, true)]
+    [InlineData(AmdVendorId, true, "1", true)]
+    [InlineData(AmdVendorId, true, "0", false)]
+    [InlineData(AmdVendorId, false, null, false)]
+    [InlineData(NvidiaVendorId, true, null, false)]
+    public void ComputePipelineNoOptimizationWorkaroundIsScopedToAmdWindows(
+        uint vendorId,
+        bool isWindows,
+        string? configuredValue,
+        bool expected)
+    {
+        Assert.Equal(
+            expected,
+            VulkanVideoPresenter.ShouldDisableAmdComputePipelineOptimization(
+                vendorId,
+                isWindows,
+                configuredValue));
+    }
 }

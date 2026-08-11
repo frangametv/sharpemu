@@ -4569,7 +4569,7 @@ public static partial class KernelMemoryCompatExports
             return (int)OrbisGen2Result.ORBIS_GEN2_ERROR_INVALID_ARGUMENT;
         }
 
-        if (!ctx.TryReadUInt64(inOutAddressPointer, out var requestedAddress))
+        if (!TryReadUInt64Compat(ctx, inOutAddressPointer, out var requestedAddress))
         {
             return (int)OrbisGen2Result.ORBIS_GEN2_ERROR_MEMORY_FAULT;
         }
@@ -4624,7 +4624,7 @@ public static partial class KernelMemoryCompatExports
         GuestImageWriteTracker.TrackConfiguredGuestMemoryRanges(
             mappedAddress,
             length);
-        if (!ctx.TryWriteUInt64(inOutAddressPointer, mappedAddress))
+        if (!TryWriteUInt64Compat(ctx, inOutAddressPointer, mappedAddress))
         {
             return (int)OrbisGen2Result.ORBIS_GEN2_ERROR_MEMORY_FAULT;
         }

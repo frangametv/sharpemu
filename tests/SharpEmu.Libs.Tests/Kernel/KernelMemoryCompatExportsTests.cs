@@ -951,6 +951,42 @@ public sealed class KernelMemoryCompatExportsTests
     }
 
     [Fact]
+    public void MapNamedFlexibleMemory_AcceptsLibcBackedInOutPointer()
+    {
+        const ulong memoryBase = 0x13_0000_0000;
+        const ulong length = 0x1000;
+        var context = new CpuContext(new FakeCpuMemory(memoryBase, (int)length), Generation.Gen5);
+        var mappedAddressInOut = AllocateTracked(context, sizeof(ulong));
+        var mapped = false;
+        try
+        {
+            Marshal.WriteInt64(unchecked((nint)mappedAddressInOut), unchecked((long)memoryBase));
+            context[CpuRegister.Rdi] = mappedAddressInOut;
+            context[CpuRegister.Rsi] = length;
+            context[CpuRegister.Rdx] = 0x03;
+            context[CpuRegister.Rcx] = 0x10; // fixed mapping
+
+            Assert.Equal(0, KernelMemoryCompatExports.KernelMapNamedFlexibleMemory(context));
+            Assert.Equal(
+                memoryBase,
+                unchecked((ulong)Marshal.ReadInt64(unchecked((nint)mappedAddressInOut))));
+            mapped = true;
+        }
+        finally
+        {
+            if (mapped)
+            {
+                context[CpuRegister.Rdi] = memoryBase;
+                context[CpuRegister.Rsi] = length;
+                Assert.Equal(0, KernelMemoryCompatExports.KernelMunmap(context));
+            }
+
+            context[CpuRegister.Rdi] = mappedAddressInOut;
+            Assert.Equal(0, KernelMemoryCompatExports.Free(context));
+        }
+    }
+
+    [Fact]
     public void VirtualQuery_PreservesReservationPastFixedCommitAtSameBase()
     {
         const ulong memoryBase = 0x12_0000_0000;
