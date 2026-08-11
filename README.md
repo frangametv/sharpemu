@@ -25,11 +25,9 @@ SPDX-License-Identifier: GPL-2.0-or-later
 </p>
 
 > [!IMPORTANT]
-> ### Fran4 released: the Astro Bot intro is now visible!
+> ### Fran4: Astro Bot intro is now on screen!
 > **Fran4 has been released.** This version takes **Astro Bot** beyond the
-> black screen and displays the complete intro video. A validated Windows run
-> also advances to the title controller after playback finishes.
->
+> black screen and displays the complete intro video.
 > This is an important milestone, but Fran4 remains an experimental preview:
 > video playback is still slow and the following 3D rendering path needs more
 > work and testing.
