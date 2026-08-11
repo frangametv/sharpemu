@@ -24,6 +24,36 @@ public sealed class AvPlayerNv12LayoutTests
     }
 
     [Fact]
+    public void ConvertNv12ToBgra_UsesTheInterleavedChromaPlaneAndOpaqueAlpha()
+    {
+        byte[] nv12 =
+        [
+            16, 235,
+            81, 145,
+            128, 128,
+        ];
+        var bgra = new byte[2 * 2 * 4];
+
+        AvPlayerExports.ConvertNv12ToBgra(
+            nv12,
+            pitch: 2,
+            bufferHeight: 2,
+            width: 2,
+            height: 2,
+            bgra);
+
+        Assert.Equal(
+            new byte[]
+            {
+                0, 0, 0, 255,
+                255, 255, 255, 255,
+                76, 76, 76, 255,
+                150, 150, 150, 255,
+            },
+            bgra);
+    }
+
+    [Fact]
     public void CopyNv12ToGuestBuffer_UsesSourceStridesAndPitchedUvOffset()
     {
         const int width = 4;

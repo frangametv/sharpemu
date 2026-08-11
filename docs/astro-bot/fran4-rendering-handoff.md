@@ -33,6 +33,13 @@ ASTRO title run and the complete test suite.
 - The emulator creates and presents frames. The remaining black/uniform output
   is not explained by a missing swapchain present.
 - The PS Studios movie is decoded and the game advances beyond it.
+- The Fran4 `20260811-133753` run proved that the decoded PS Studios frame was
+  valid but stranded in HLE fallback memory: no sampled-image descriptor or
+  texture upload ever referenced its three 12,441,600-byte NV12 buffers.
+- A compatibility presentation path now converts that fallback NV12 frame to
+  BGRA and hands it directly to the Vulkan presenter. A live ASTRO run emitted
+  `AvPlayer host fallback frame presented: serial=1 size=3840x2160`, and the
+  frame was visibly confirmed on the host window.
 - The exact game milestone
   `GAME: Level has started: title_controller_ship` is reached.
 - `worldmap` is subsequently loaded.
@@ -102,6 +109,38 @@ the expected export path. Final presentation, generic shader decoding, and
 generic buffer writeback are lower-priority suspects.
 
 ## Change made in this iteration
+
+### AvPlayer fallback presentation
+
+The game-provided texture and generic allocation callbacks both return null for
+the 3840x2160 PS Studios movie buffers. The decoder then correctly writes a
+nonempty NV12 frame to HLE-managed guest memory, but that address is outside the
+guest texture-binding path used by the title. This was the immediate reason the
+decoded movie was invisible.
+
+Fran4 now:
+
+1. defers AvPlayer video-buffer allocation until the first video-data request,
+   after `sceAvPlayerStart`, matching the reference AvPlayer lifetime more
+   closely;
+2. keeps the guest callback allocation path as the preferred path;
+3. only when both guest allocators fail, converts the decoded NV12 frame to
+   BGRA and exposes it to the Vulkan presenter;
+4. gives Bink presentation priority, so the existing Bink bridge is unchanged.
+
+The verified diagnostic log is:
+
+```text
+artifacts/diagnostics/fran4-avplayer/astrobot-fran4-video-test.log
+```
+
+This is a real visible-output improvement, but it does not yet provide full
+movie playback. ASTRO explicitly calls `sceAvPlayerPause` after the first video
+frame, so the presently verified result is one displayed frame. The next
+AvPlayer task is to determine whether the title is waiting for an audio/video
+state transition or deliberately using the first frame while `ps_logo` loads.
+
+### Geometry diagnostics
 
 The address-filtered global-buffer diagnostic previously had two problems:
 

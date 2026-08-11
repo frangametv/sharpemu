@@ -2728,7 +2728,7 @@ internal static unsafe class VulkanVideoPresenter
 
     private static void TryReplaceWithBinkFrame(ref Presentation presentation)
     {
-        if (!HostMovieBridge.TryDecodeNextFrame(
+        if (HostMovieBridge.TryDecodeNextFrame(
                 advanceClock: true,
                 out var pixels,
                 out var width,
@@ -2737,9 +2737,35 @@ internal static unsafe class VulkanVideoPresenter
                 out _,
                 out _))
         {
+            presentation = new Presentation(
+                pixels,
+                width,
+                height,
+                presentation.Sequence,
+                GuestDrawKind.None,
+                TranslatedDraw: null,
+                presentation.RequiredGuestWorkSequence,
+                IsSplash: false);
             return;
         }
 
+        if (!AvPlayerExports.TryGetFallbackPresentationFrame(
+                out pixels,
+                out width,
+                out height,
+                out var serial))
+        {
+            return;
+        }
+
+        if (Interlocked.Exchange(
+                ref _tracedAvPlayerFallbackPresentationSerial,
+                serial) != serial)
+        {
+            Console.Error.WriteLine(
+                $"[VIDEOOUT][INFO] AvPlayer host fallback frame presented: " +
+                $"serial={serial} size={width}x{height}.");
+        }
         presentation = new Presentation(
             pixels,
             width,
@@ -2751,6 +2777,7 @@ internal static unsafe class VulkanVideoPresenter
             IsSplash: false);
     }
 
+    private static long _tracedAvPlayerFallbackPresentationSerial;
     private static readonly HashSet<long> _tracedGuestImagePresentRejections = new();
 
 	private static bool HasPendingGuestPresentation(long presentedSequence)

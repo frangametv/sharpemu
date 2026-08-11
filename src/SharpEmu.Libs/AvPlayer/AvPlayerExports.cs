@@ -39,6 +39,46 @@ public static class AvPlayerExports
         StringComparison.Ordinal);
     private static int _traceCount;
     private static int _videoPayloadTraceCount;
+    private static long _fallbackPresentationSerial;
+
+    internal static bool TryGetFallbackPresentationFrame(
+        out byte[] pixels,
+        out uint width,
+        out uint height,
+        out long serial)
+    {
+        lock (StateGate)
+        {
+            PlayerState? latest = null;
+            foreach (var player in Players.Values)
+            {
+                if (player.FallbackPresentationPixels is null ||
+                    player.FallbackPresentationSerial <= 0 ||
+                    latest is not null &&
+                    player.FallbackPresentationSerial <= latest.FallbackPresentationSerial)
+                {
+                    continue;
+                }
+
+                latest = player;
+            }
+
+            if (latest?.FallbackPresentationPixels is not { } frame)
+            {
+                pixels = [];
+                width = 0;
+                height = 0;
+                serial = 0;
+                return false;
+            }
+
+            pixels = frame;
+            width = checked((uint)latest.Width);
+            height = checked((uint)latest.Height);
+            serial = latest.FallbackPresentationSerial;
+            return width != 0 && height != 0;
+        }
+    }
 
     internal static bool ShouldTraceVideoBufferAddress(ulong address)
     {
@@ -128,6 +168,8 @@ public static class AvPlayerExports
         public ulong AudioBufferBase { get; set; }
         public int NextAudioBuffer { get; set; }
         public long NextAudioFrameIndex { get; set; }
+        public byte[]? FallbackPresentationPixels { get; set; }
+        public long FallbackPresentationSerial { get; set; }
 
         public void Dispose()
         {
@@ -145,6 +187,8 @@ public static class AvPlayerExports
             NextAudioFrameIndex = 0;
             SkippedFrameDebt = 0;
             EndOfStream = false;
+            FallbackPresentationPixels = null;
+            FallbackPresentationSerial = 0;
         }
     }
 
@@ -753,10 +797,6 @@ public static class AvPlayerExports
             autoStart = player.AutoStart;
             Trace($"source guest='{guestPath}' host='{hostPath}' {width}x{height} fps={fps:F3} duration_ms={duration} auto_start={player.AutoStart}");
         }
-
-
-        EnsureGuestVideoBuffers(ctx, player);
-
         NotifyEvent(ctx, player, 2); // StateReady
         if (autoStart)
         {
@@ -1006,6 +1046,21 @@ public static class AvPlayerExports
         {
             return false;
         }
+        if (player.TextureAllocatorFailed)
+        {
+            var bgra = GC.AllocateUninitializedArray<byte>(
+                checked(player.Width * player.Height * 4));
+            ConvertNv12ToBgra(
+                frameData,
+                pitch,
+                bufferHeight,
+                player.Width,
+                player.Height,
+                bgra);
+            player.FallbackPresentationPixels = bgra;
+            player.FallbackPresentationSerial =
+                Interlocked.Increment(ref _fallbackPresentationSerial);
+        }
         if (TraceVideoImages)
         {
             var traceIndex = Interlocked.Increment(ref _videoPayloadTraceCount);
@@ -1045,6 +1100,49 @@ public static class AvPlayerExports
     internal static int CalculateNv12BufferSize(int pitch, int height) =>
         checked(pitch * height * 3 / 2);
 
+    internal static void ConvertNv12ToBgra(
+        ReadOnlySpan<byte> nv12,
+        int pitch,
+        int bufferHeight,
+        int width,
+        int height,
+        Span<byte> bgra)
+    {
+        var requiredNv12 = CalculateNv12BufferSize(pitch, bufferHeight);
+        var requiredBgra = checked(width * height * 4);
+        if (pitch < width || bufferHeight < height ||
+            nv12.Length < requiredNv12 || bgra.Length < requiredBgra)
+        {
+            throw new ArgumentException("NV12 frame dimensions do not match the supplied buffers.");
+        }
+
+        var chromaOffset = checked(pitch * bufferHeight);
+        for (var y = 0; y < height; y++)
+        {
+            var lumaRow = y * pitch;
+            var chromaRow = chromaOffset + ((y >> 1) * pitch);
+            var outputRow = y * width * 4;
+            for (var x = 0; x < width; x++)
+            {
+                var luma = nv12[lumaRow + x];
+                var chromaColumn = x & ~1;
+                var u = nv12[chromaRow + chromaColumn];
+                var v = nv12[chromaRow + chromaColumn + 1];
+                var c = Math.Max(0, luma - 16);
+                var d = u - 128;
+                var e = v - 128;
+                var output = outputRow + (x * 4);
+                bgra[output] = ClampToByte((298 * c + 516 * d + 128) >> 8);
+                bgra[output + 1] = ClampToByte((298 * c - 100 * d - 208 * e + 128) >> 8);
+                bgra[output + 2] = ClampToByte((298 * c + 409 * e + 128) >> 8);
+                bgra[output + 3] = byte.MaxValue;
+            }
+        }
+    }
+
+    private static byte ClampToByte(int value) =>
+        checked((byte)Math.Clamp(value, byte.MinValue, byte.MaxValue));
+
     private static int GetVideoBufferSize(PlayerState player) =>
         checked(
             AlignUp(player.Width, FramePitchAlignment) *
@@ -1073,23 +1171,6 @@ public static class AvPlayerExports
         {
             source.Slice(sourceChromaOffset + (row * sourceChromaStride), width)
                 .CopyTo(destination.Slice(destinationChromaOffset + (row * destinationPitch), width));
-        }
-    }
-
-    private static void EnsureGuestVideoBuffers(CpuContext ctx, PlayerState player)
-    {
-        lock (StateGate)
-        {
-            if (player.GuestBuffers[0] != 0 || player.Width <= 0 || player.Height <= 0)
-            {
-                return;
-            }
-
-            var bufferSize = GetVideoBufferSize(player);
-            if (AllocateGuestVideoBuffers(ctx, player, bufferSize))
-            {
-                player.GuestBufferStride = bufferSize;
-            }
         }
     }
 
