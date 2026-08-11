@@ -1141,14 +1141,10 @@ public static class AvPlayerExports
         }
 
         player.FallbackPlaybackAttempted = true;
-        var (maximumWidth, maximumHeight) = ResolveFallbackDecodeBounds(
-            player.Width,
-            player.Height,
-            HostVideoHost.CurrentOptions);
         if (!FfmpegVideoDecoder.TryOpen(
                 player.SourcePath,
-                maximumWidth,
-                maximumHeight,
+                checked((uint)player.Width),
+                checked((uint)player.Height),
                 out var decoder) ||
             decoder is null)
         {
@@ -1160,20 +1156,8 @@ public static class AvPlayerExports
         player.FallbackPlayback = new MediaFramePlayback(decoder);
         Trace(
             $"host_fallback_started handle=0x{player.Handle:X16} " +
-            $"source={player.Width}x{player.Height} " +
-            $"output={decoder.Width}x{decoder.Height} " +
+            $"{decoder.Width}x{decoder.Height} " +
             $"fps={decoder.FramesPerSecondNumerator}/{decoder.FramesPerSecondDenominator}");
-    }
-
-    internal static (uint Width, uint Height) ResolveFallbackDecodeBounds(
-        int sourceWidth,
-        int sourceHeight,
-        HostVideoOptions options)
-    {
-        var normalized = options.Normalize();
-        return (
-            checked((uint)Math.Min(sourceWidth, normalized.Width)),
-            checked((uint)Math.Min(sourceHeight, normalized.Height)));
     }
 
     internal static int CalculateNv12Pitch(int width) =>

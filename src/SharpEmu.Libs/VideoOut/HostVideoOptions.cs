@@ -59,21 +59,10 @@ public sealed record HostVideoOptions
 
 public static class HostVideoHost
 {
-    private static HostVideoOptions _currentOptions = HostVideoOptions.Default;
-
-    internal static HostVideoOptions CurrentOptions =>
-        Volatile.Read(ref _currentOptions);
-
     public static bool TryConfigureVideo(HostVideoOptions options)
     {
         var normalized = options.Normalize();
-        var configured = VulkanVideoPresenter.TryConfigureVideo(normalized) &
-                         MetalVideoPresenter.TryConfigureVideo(normalized);
-        if (configured)
-        {
-            Volatile.Write(ref _currentOptions, normalized);
-        }
-
-        return configured;
+        return VulkanVideoPresenter.TryConfigureVideo(normalized) &
+               MetalVideoPresenter.TryConfigureVideo(normalized);
     }
 }
