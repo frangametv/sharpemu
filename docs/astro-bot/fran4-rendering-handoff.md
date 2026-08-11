@@ -173,6 +173,26 @@ known-good commit and isolate presentation cadence and 4K decode/BGRA upload
 cost. This improvement does not claim to solve the independent title/menu
 geometry-production chain.
 
+The next performance iteration keeps commit `632e727` as the rollback baseline
+and removes both measured sources of avoidable work:
+
+1. AvPlayer's compatibility decoder now uses the configured host output as its
+   maximum extent. The observed 3840x2160 source therefore decodes directly to
+   1920x1080 for the default Fran4 window, reducing each BGRA frame from about
+   33.2 MiB to 8.3 MiB and avoiding the presenter's per-frame managed resize.
+2. Vulkan can synthesize a pixels-only presentation for every new AvPlayer
+   serial while retaining the last guest sequence. Playback no longer needs a
+   new guest flip to expose an already decoded host frame, and queued guest
+   flips remain intact for the transition at EOF.
+
+The policy and presentation-serial tests pass, as does the complete
+`SharpEmu.Libs.Tests` suite (1617/1617). A local title launch again hit the
+pre-existing `UnmanagedCallersOnly` native CPU failure before AvPlayer began,
+so frame-rate improvement requires confirmation from the packaged Fran4 run.
+The expected log difference is `host_fallback_started ... output=1920x1080`
+and many more increasing serials, including the periodic `frame=60` marker,
+before `host_fallback_finished`.
+
 Two local validation launches on 2026-08-11 reached Vulkan initialization and
 early title submissions, but both terminated in the pre-existing native CPU
 backend failure `attempted to call a UnmanagedCallersOnly method from managed

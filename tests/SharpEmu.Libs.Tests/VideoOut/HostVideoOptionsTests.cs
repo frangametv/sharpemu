@@ -8,6 +8,21 @@ namespace SharpEmu.Libs.Tests.VideoOut;
 
 public sealed class HostVideoOptionsTests
 {
+    [Theory]
+    [InlineData(1, 0, true)]
+    [InlineData(2, 1, true)]
+    [InlineData(2, 2, false)]
+    [InlineData(0, -1, false)]
+    public void AvPlayerFallbackSerialAdvancesIndependentlyOfGuestFlips(
+        long serial,
+        long presentedSerial,
+        bool expected)
+    {
+        Assert.Equal(
+            expected,
+            VulkanVideoPresenter.IsNewAvPlayerFallbackSerial(serial, presentedSerial));
+    }
+
     [Fact]
     public void NormalizeClampsUnsafeHostValues()
     {

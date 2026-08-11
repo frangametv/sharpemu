@@ -4,12 +4,26 @@
 using System.Buffers.Binary;
 using SharpEmu.HLE;
 using SharpEmu.Libs.AvPlayer;
+using SharpEmu.Libs.VideoOut;
 using Xunit;
 
 namespace SharpEmu.Libs.Tests.AvPlayer;
 
 public sealed class AvPlayerStreamInfoTests
 {
+    [Fact]
+    public void HostFallbackDecodeBoundsAvoidUpscalingAndMatchTheOutputWindow()
+    {
+        var window = new HostVideoOptions { Width = 1920, Height = 1080 };
+
+        Assert.Equal(
+            (1920u, 1080u),
+            AvPlayerExports.ResolveFallbackDecodeBounds(3840, 2160, window));
+        Assert.Equal(
+            (1280u, 720u),
+            AvPlayerExports.ResolveFallbackDecodeBounds(1280, 720, window));
+    }
+
     private const string StreamInfoExNid = "ctTAcF5DiKQ";
     private const ulong BaseAddress = 0x1_0000_0000;
     private const int MemorySize = 0x2000;

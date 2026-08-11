@@ -2692,8 +2692,9 @@ internal static unsafe class VulkanVideoPresenter
                     return true;
                 }
 
-                presentation = default;
-                return false;
+                return TryTakeStandaloneAvPlayerFallbackPresentation(
+                    presentedSequence,
+                    out presentation);
             }
 
             if (_latestPresentation is not { } latest ||
@@ -2716,8 +2717,9 @@ internal static unsafe class VulkanVideoPresenter
                         $"seq={rej.Sequence} presentedSeq={presentedSequence} reason={reason}");
                 }
 
-                presentation = default;
-                return false;
+                return TryTakeStandaloneAvPlayerFallbackPresentation(
+                    presentedSequence,
+                    out presentation);
             }
 
             presentation = latest;
@@ -2758,19 +2760,7 @@ internal static unsafe class VulkanVideoPresenter
             return;
         }
 
-        if (Interlocked.Exchange(
-                ref _tracedAvPlayerFallbackPresentationSerial,
-                serial) != serial)
-        {
-            var frameCount = Interlocked.Increment(
-                ref _avPlayerFallbackPresentationCount);
-            if (frameCount <= 4 || frameCount % 60 == 0)
-            {
-                Console.Error.WriteLine(
-                    $"[VIDEOOUT][INFO] AvPlayer host fallback frame presented: " +
-                    $"frame={frameCount} serial={serial} size={width}x{height}.");
-            }
-        }
+        RecordAvPlayerFallbackPresentation(serial, width, height);
         presentation = new Presentation(
             pixels,
             width,
@@ -2780,6 +2770,67 @@ internal static unsafe class VulkanVideoPresenter
             TranslatedDraw: null,
             presentation.RequiredGuestWorkSequence,
             IsSplash: false);
+    }
+
+    /// <summary>
+    /// AvPlayer compatibility playback owns its own movie clock.  It must not
+    /// wait for another guest flip after the title pauses an unusable guest
+    /// texture path; present each newly decoded serial independently while
+    /// retaining the guest sequence so queued flips remain available at EOF.
+    /// </summary>
+    private static bool TryTakeStandaloneAvPlayerFallbackPresentation(
+        long presentedSequence,
+        out Presentation presentation)
+    {
+        if (!AvPlayerExports.TryGetFallbackPresentationFrame(
+                out var pixels,
+                out var width,
+                out var height,
+                out var serial) ||
+            !IsNewAvPlayerFallbackSerial(
+                serial,
+                Interlocked.Read(ref _tracedAvPlayerFallbackPresentationSerial)))
+        {
+            presentation = default;
+            return false;
+        }
+
+        RecordAvPlayerFallbackPresentation(serial, width, height);
+        presentation = new Presentation(
+            pixels,
+            width,
+            height,
+            presentedSequence,
+            GuestDrawKind.None,
+            TranslatedDraw: null,
+            RequiredGuestWorkSequence: 0,
+            IsSplash: false);
+        return true;
+    }
+
+    internal static bool IsNewAvPlayerFallbackSerial(long serial, long presentedSerial) =>
+        serial > 0 && serial != presentedSerial;
+
+    private static void RecordAvPlayerFallbackPresentation(
+        long serial,
+        uint width,
+        uint height)
+    {
+        if (Interlocked.Exchange(
+                ref _tracedAvPlayerFallbackPresentationSerial,
+                serial) == serial)
+        {
+            return;
+        }
+
+        var frameCount = Interlocked.Increment(
+            ref _avPlayerFallbackPresentationCount);
+        if (frameCount <= 4 || frameCount % 60 == 0)
+        {
+            Console.Error.WriteLine(
+                $"[VIDEOOUT][INFO] AvPlayer host fallback frame presented: " +
+                $"frame={frameCount} serial={serial} size={width}x{height}.");
+        }
     }
 
     private static long _tracedAvPlayerFallbackPresentationSerial;
