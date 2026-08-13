@@ -61,7 +61,12 @@ public static class AvPlayerExports
                             out var playbackPixels,
                             out var advanced))
                     {
-                        if (advanced || player.FallbackPresentationPixels is null)
+                        var skipFirstDecodedFrame =
+                            player.SkipFirstFallbackPlaybackFrame;
+                        if (ShouldPublishFallbackPlaybackFrame(
+                                advanced,
+                                player.FallbackPresentationPixels is not null,
+                                ref skipFirstDecodedFrame))
                         {
                             player.FallbackPresentationPixels = playbackPixels;
                             player.FallbackPresentationWidth = playback.Width;
@@ -69,17 +74,30 @@ public static class AvPlayerExports
                             player.FallbackPresentationSerial =
                                 Interlocked.Increment(ref _fallbackPresentationSerial);
                         }
+                        player.SkipFirstFallbackPlaybackFrame =
+                            skipFirstDecodedFrame;
                     }
                     else if (playback.IsFinished)
                     {
                         playback.Dispose();
                         player.FallbackPlayback = null;
-                        player.FallbackPresentationPixels = null;
-                        player.FallbackPresentationWidth = 0;
-                        player.FallbackPresentationHeight = 0;
-                        player.FallbackPresentationSerial = 0;
-                        Trace($"host_fallback_finished handle=0x{player.Handle:X16}");
+                        player.FallbackPlaybackCompleted = true;
+                        Trace(
+                            $"host_fallback_finished handle=0x{player.Handle:X16} " +
+                            "holding_last_frame=true");
                     }
+                }
+
+                // The host decoder can finish long before a heavily throttled
+                // guest AvPlayer reaches EOF.  Keep its final image over the
+                // stale guest texture until the guest has actually consumed
+                // the stream; otherwise frame zero becomes visible again and
+                // the intro appears to start a second time.
+                if (ShouldReleaseCompletedFallback(
+                        player.FallbackPlaybackCompleted,
+                        player.EndOfStream))
+                {
+                    ClearFallbackPresentation(player);
                 }
 
                 if (player.FallbackPresentationPixels is null ||
@@ -108,6 +126,36 @@ public static class AvPlayerExports
             serial = latest.FallbackPresentationSerial;
             return IsValidBgraFrame(pixels, width, height);
         }
+    }
+
+    internal static bool ShouldPublishFallbackPlaybackFrame(
+        bool advanced,
+        bool hasPresentation,
+        ref bool skipFirstDecodedFrame)
+    {
+        if (advanced && hasPresentation && skipFirstDecodedFrame)
+        {
+            skipFirstDecodedFrame = false;
+            return false;
+        }
+
+        return advanced || !hasPresentation;
+    }
+
+    internal static bool ShouldReleaseCompletedFallback(
+        bool fallbackPlaybackCompleted,
+        bool guestEndOfStream) =>
+        fallbackPlaybackCompleted && guestEndOfStream;
+
+    private static void ClearFallbackPresentation(PlayerState player)
+    {
+        player.FallbackPresentationPixels = null;
+        player.FallbackPresentationWidth = 0;
+        player.FallbackPresentationHeight = 0;
+        player.FallbackPresentationSerial = 0;
+        player.FallbackPlaybackCompleted = false;
+        player.SkipFirstFallbackPlaybackFrame = false;
+        Trace($"host_fallback_released handle=0x{player.Handle:X16} guest_eof=true");
     }
 
     internal static bool ShouldTraceVideoBufferAddress(ulong address)
@@ -207,6 +255,8 @@ public static class AvPlayerExports
         public long FallbackPresentationSerial { get; set; }
         public MediaFramePlayback? FallbackPlayback { get; set; }
         public bool FallbackPlaybackAttempted { get; set; }
+        public bool FallbackPlaybackCompleted { get; set; }
+        public bool SkipFirstFallbackPlaybackFrame { get; set; }
 
         public void Dispose()
         {
@@ -233,6 +283,8 @@ public static class AvPlayerExports
             FallbackPresentationHeight = 0;
             FallbackPresentationSerial = 0;
             FallbackPlaybackAttempted = false;
+            FallbackPlaybackCompleted = false;
+            SkipFirstFallbackPlaybackFrame = false;
         }
     }
 
@@ -1180,6 +1232,8 @@ public static class AvPlayerExports
                 player.FallbackPresentationHeight = checked((uint)player.Height);
                 player.FallbackPresentationSerial =
                     Interlocked.Increment(ref _fallbackPresentationSerial);
+                player.SkipFirstFallbackPlaybackFrame =
+                    player.FallbackPlayback is not null;
             }
         }
         if (TraceVideoImages)

@@ -83,4 +83,38 @@ public sealed class AvPlayerAbiTests
         Assert.False(AvPlayerExports.IsValidBgraFrame(fullHdFrame, 3840, 2160));
         Assert.False(AvPlayerExports.IsValidBgraFrame(fullHdFrame, 0, 1080));
     }
+
+    [Fact]
+    public void PosterSuppressesTheDuplicateFirstHostDecodedFrame()
+    {
+        var skipFirstDecodedFrame = true;
+
+        Assert.False(AvPlayerExports.ShouldPublishFallbackPlaybackFrame(
+            advanced: true,
+            hasPresentation: true,
+            ref skipFirstDecodedFrame));
+        Assert.False(skipFirstDecodedFrame);
+
+        Assert.True(AvPlayerExports.ShouldPublishFallbackPlaybackFrame(
+            advanced: true,
+            hasPresentation: true,
+            ref skipFirstDecodedFrame));
+    }
+
+    [Theory]
+    [InlineData(false, false, false)]
+    [InlineData(false, true, false)]
+    [InlineData(true, false, false)]
+    [InlineData(true, true, true)]
+    public void CompletedFallbackIsReleasedOnlyAtGuestEndOfStream(
+        bool fallbackCompleted,
+        bool guestEndOfStream,
+        bool expected)
+    {
+        Assert.Equal(
+            expected,
+            AvPlayerExports.ShouldReleaseCompletedFallback(
+                fallbackCompleted,
+                guestEndOfStream));
+    }
 }
