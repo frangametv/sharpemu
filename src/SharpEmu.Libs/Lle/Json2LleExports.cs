@@ -4,10 +4,11 @@
 //
 // Ghidra 12.1.2_PUBLIC_20260605 program: libSceJson2.sprx
 // Analyzed provider SHA-256: 1ca532e78ed5e02c553e99ebb01751df6baaefa0bd6481c69db56e08536ba06c
-// Each registration prefers the loaded guest export. The shared HLE handler
-// is deliberately fail-closed and never claims provider behavior.
+// Each registration prefers the loaded guest export. When that provider is
+// unavailable, the individual semantic HLE handlers preserve object state.
 
 using SharpEmu.HLE;
+using SharpEmu.Libs.Json;
 
 namespace SharpEmu.Libs.Lle;
 
@@ -20,6 +21,9 @@ public static class Json2LleExports
         Target = Generation.Gen5,
         LibraryName = "libSceJson2",
         PreferLle = true)]
+    public static int ValueObjectConstructor(CpuContext ctx) =>
+        JsonExports.ValueObjectConstructor(ctx);
+
     // Ghidra entry 0000d520; body addresses 83.
     [SysAbiExport(
         Nid = "5JmzZt8twAo",
@@ -27,6 +31,9 @@ public static class Json2LleExports
         Target = Generation.Gen5,
         LibraryName = "libSceJson2",
         PreferLle = true)]
+    public static int ObjectDestructor(CpuContext ctx) =>
+        JsonExports.ObjectDestructor(ctx);
+
     // Ghidra entry 0000ad30; body addresses 15.
     [SysAbiExport(
         Nid = "EUH+EmT-v9E",
@@ -34,6 +41,9 @@ public static class Json2LleExports
         Target = Generation.Gen5,
         LibraryName = "libSceJson2",
         PreferLle = true)]
+    public static int StringLength(CpuContext ctx) =>
+        JsonExports.StringLength(ctx);
+
     // Ghidra entry 000048f0; body addresses 350.
     [SysAbiExport(
         Nid = "IlsmvBtMkak",
@@ -41,6 +51,9 @@ public static class Json2LleExports
         Target = Generation.Gen5,
         LibraryName = "libSceJson2",
         PreferLle = true)]
+    public static int ValueGetObject(CpuContext ctx) =>
+        JsonExports.ValueGetObject(ctx);
+
     // Ghidra entry 0000d220; body addresses 251.
     [SysAbiExport(
         Nid = "OJPTonqdg0I",
@@ -48,6 +61,9 @@ public static class Json2LleExports
         Target = Generation.Gen5,
         LibraryName = "libSceJson2",
         PreferLle = true)]
+    public static int ObjectDefaultConstructor(CpuContext ctx) =>
+        JsonExports.ObjectDefaultConstructor(ctx);
+
     // Ghidra entry 0000d320; body addresses 218.
     [SysAbiExport(
         Nid = "a+W7HHlwpBs",
@@ -55,6 +71,9 @@ public static class Json2LleExports
         Target = Generation.Gen5,
         LibraryName = "libSceJson2",
         PreferLle = true)]
+    public static int ObjectCopyConstructor(CpuContext ctx) =>
+        JsonExports.ObjectCopyConstructor(ctx);
+
     // Ghidra entry 0000af70; body addresses 139.
     [SysAbiExport(
         Nid = "cn9svYGWKDQ",
@@ -62,6 +81,9 @@ public static class Json2LleExports
         Target = Generation.Gen5,
         LibraryName = "libSceJson2",
         PreferLle = true)]
+    public static int StringAssignment(CpuContext ctx) =>
+        JsonExports.StringAssignment(ctx);
+
     // Ghidra entry 0000d6d0; body addresses 13.
     [SysAbiExport(
         Nid = "oH8aBmLU+fc",
@@ -69,6 +91,9 @@ public static class Json2LleExports
         Target = Generation.Gen5,
         LibraryName = "libSceJson2",
         PreferLle = true)]
+    public static int ObjectClear(CpuContext ctx) =>
+        JsonExports.ObjectClear(ctx);
+
     // Ghidra entry 0000c1c0; body addresses 16.
     [SysAbiExport(
         Nid = "rQGJeNjOuUk",
@@ -76,6 +101,9 @@ public static class Json2LleExports
         Target = Generation.Gen5,
         LibraryName = "libSceJson2",
         PreferLle = true)]
+    public static int ArraySize(CpuContext ctx) =>
+        JsonExports.ArraySize(ctx);
+
     // Ghidra entry 0000e400; body addresses 71.
     [SysAbiExport(
         Nid = "urOpESTBZmo",
@@ -83,6 +111,11 @@ public static class Json2LleExports
         Target = Generation.Gen5,
         LibraryName = "libSceJson2",
         PreferLle = true)]
+    public static int ObjectAssignment(CpuContext ctx) =>
+        JsonExports.ObjectAssignment(ctx);
+
+    // Retained without registrations so the provider-catalog fail-closed
+    // invariant can still be tested independently.
     public static int MissingGuestProvider(CpuContext ctx)
     {
         if (string.Equals(Environment.GetEnvironmentVariable("SHARPEMU_LOG_IMPORTS"), "1", StringComparison.Ordinal))

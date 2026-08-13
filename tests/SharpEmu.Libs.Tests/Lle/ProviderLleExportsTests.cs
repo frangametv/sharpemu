@@ -36,7 +36,8 @@ public sealed class ProviderLleExportsTests
         "r98I08t+LOg", "uZW-mqsxkrM", "w1KFAHVqpaU", "ypVBz4uPKcQ",
         "gyTyVn+bXMw", "IADmD4tScBY", "NUeBrN7hzf0", "oBmw4xrmfKs",
         "x01jxu+vxlc", "-NxEk7XLkDY", "ERuf9y0DY84", "R7FDWtcN6f8",
-        "bAM9Qwofus0", "nM5XqdeXFPw", "zQtLRTqceMY",
+        "bAM9Qwofus0", "nM5XqdeXFPw", "zQtLRTqceMY", "JP-PtKMiI1E",
+        "dFCphqnd+a4", "iZeYfOxtMRg",
     ];
 
     private static readonly IReadOnlyDictionary<string, (string ExportName, string LibraryName)> Provider23Expected =

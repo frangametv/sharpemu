@@ -5,6 +5,7 @@ using System.Buffers.Binary;
 using System.Text;
 using SharpEmu.HLE;
 using SharpEmu.Libs.Json;
+using SharpEmu.Libs.Lle;
 using Xunit;
 
 namespace SharpEmu.Libs.Tests.Json;
@@ -43,7 +44,24 @@ public sealed class JsonExportRegistrationTests
         ("w5+VCznos5E", "_ZN3sce4Json5Array8iteratorppEv"),
         ("9yLjn46Ypfs", "_ZN3sce4Json5Array8iteratorD1Ev"),
         ("HJ8GpRT1aiw", "_ZN3sce4Json5ArrayD1Ev"),
+        ("JP-PtKMiI1E", "_ZN3sce4Json5ArrayC1Ev"),
+        ("dFCphqnd+a4", "_ZN3sce4Json5Value3setERKNS0_6ObjectE"),
+        ("iZeYfOxtMRg", "_ZN3sce4Json5ValueC1ERKNS0_5ArrayE"),
     };
+
+    private static readonly string[] Json2ProviderSemanticNids =
+    [
+        "3xUXnmUkXfo",
+        "5JmzZt8twAo",
+        "EUH+EmT-v9E",
+        "IlsmvBtMkak",
+        "OJPTonqdg0I",
+        "a+W7HHlwpBs",
+        "cn9svYGWKDQ",
+        "oH8aBmLU+fc",
+        "rQGJeNjOuUk",
+        "urOpESTBZmo",
+    ];
 
     private static ModuleManager CreateRegisteredManager()
     {
@@ -74,9 +92,103 @@ public sealed class JsonExportRegistrationTests
             Assert.True(manager.TryGetExport(nid, out var export), $"NID {nid} did not register.");
             Assert.Equal(name, export.Name);
             Assert.Equal(
-                nid is "00oCq0RwSAY" or "IXW-z8pggfg" ? "libSceJson2" : "libSceJson",
+                nid is "00oCq0RwSAY" or "IXW-z8pggfg" or
+                    "JP-PtKMiI1E" or "dFCphqnd+a4" or "iZeYfOxtMRg"
+                    ? "libSceJson2"
+                    : "libSceJson",
                 export.LibraryName);
         }
+    }
+
+    [Fact]
+    public void Json2ProviderFallbacks_DispatchSemanticHandlers()
+    {
+        var exports = SharpEmu.Generated.SysAbiExportRegistry.CreateExports(Generation.Gen5);
+
+        foreach (var nid in Json2ProviderSemanticNids)
+        {
+            var export = Assert.Single(exports, candidate => candidate.Nid == nid);
+            Assert.Equal("libSceJson2", export.LibraryName);
+            Assert.True(export.PreferLle);
+            Assert.Equal(typeof(Json2LleExports), export.Function.Method.DeclaringType);
+            Assert.NotEqual(nameof(Json2LleExports.MissingGuestProvider), export.Function.Method.Name);
+        }
+    }
+
+    [Fact]
+    public void Json2ObjectArrayAndStringFallbacks_PreserveValueSemantics()
+    {
+        const ulong memoryBase = 0x1_0000_0000;
+        const ulong parsedValue = memoryBase + 0x100;
+        const ulong objectValue = memoryBase + 0x200;
+        const ulong objectCopy = memoryBase + 0x240;
+        const ulong copiedValue = memoryBase + 0x280;
+        const ulong array = memoryBase + 0x300;
+        const ulong arrayValue = memoryBase + 0x340;
+        const ulong sourceString = memoryBase + 0x400;
+        const ulong destinationString = memoryBase + 0x420;
+        const ulong jsonAddress = memoryBase + 0x1000;
+        const ulong textAddress = memoryBase + 0x1100;
+
+        JsonExports.ResetForTests();
+        JsonObjectHeap.ResetForTests();
+        var memory = new AllocatingTestMemory(memoryBase, 0x20000, allocationOffset: 0x10000);
+        var ctx = new CpuContext(memory, Generation.Gen5);
+        var json = Encoding.UTF8.GetBytes("{\"name\":\"astro\"}");
+        Assert.True(memory.TryWrite(jsonAddress, json));
+        memory.WriteCString(textAddress, "héllo");
+
+        ctx[CpuRegister.Rdi] = parsedValue;
+        ctx[CpuRegister.Rsi] = jsonAddress;
+        ctx[CpuRegister.Rdx] = (ulong)json.Length;
+        Assert.Equal(0, JsonExports.ParserParseBuffer(ctx));
+
+        ctx[CpuRegister.Rdi] = objectValue;
+        ctx[CpuRegister.Rsi] = parsedValue;
+        Assert.Equal(0, JsonExports.ValueGetObject(ctx));
+        Assert.Equal(objectValue, ctx[CpuRegister.Rax]);
+
+        ctx[CpuRegister.Rdi] = objectCopy;
+        ctx[CpuRegister.Rsi] = objectValue;
+        Assert.Equal(0, JsonExports.ObjectCopyConstructor(ctx));
+        ctx[CpuRegister.Rdi] = copiedValue;
+        ctx[CpuRegister.Rsi] = objectCopy;
+        Assert.Equal(0, JsonExports.ValueObjectConstructor(ctx));
+        ctx[CpuRegister.Rdi] = copiedValue;
+        Assert.Equal(0, JsonExports.ValueGetType(ctx));
+        Assert.Equal(7UL, ctx[CpuRegister.Rax]);
+
+        ctx[CpuRegister.Rdi] = objectCopy;
+        Assert.Equal(0, JsonExports.ObjectClear(ctx));
+        ctx[CpuRegister.Rdi] = copiedValue;
+        ctx[CpuRegister.Rsi] = objectCopy;
+        Assert.Equal(0, JsonExports.ValueSetObject(ctx));
+        ctx[CpuRegister.Rdi] = copiedValue;
+        Assert.Equal(0, JsonExports.ValueGetType(ctx));
+        Assert.Equal(7UL, ctx[CpuRegister.Rax]);
+
+        ctx[CpuRegister.Rdi] = array;
+        Assert.Equal(0, JsonExports.ArrayDefaultConstructor(ctx));
+        ctx[CpuRegister.Rdi] = array;
+        Assert.Equal(0, JsonExports.ArraySize(ctx));
+        Assert.Equal(0UL, ctx[CpuRegister.Rax]);
+        ctx[CpuRegister.Rdi] = arrayValue;
+        ctx[CpuRegister.Rsi] = array;
+        Assert.Equal(0, JsonExports.ValueArrayConstructor(ctx));
+        ctx[CpuRegister.Rdi] = arrayValue;
+        Assert.Equal(0, JsonExports.ValueGetType(ctx));
+        Assert.Equal(6UL, ctx[CpuRegister.Rax]);
+
+        ctx[CpuRegister.Rdi] = sourceString;
+        ctx[CpuRegister.Rsi] = textAddress;
+        Assert.Equal(0, JsonValueExports.StringCStringConstructor(ctx));
+        ctx[CpuRegister.Rdi] = destinationString;
+        ctx[CpuRegister.Rsi] = sourceString;
+        Assert.Equal(0, JsonExports.StringAssignment(ctx));
+        Assert.Equal(destinationString, ctx[CpuRegister.Rax]);
+        ctx[CpuRegister.Rdi] = destinationString;
+        Assert.Equal(0, JsonExports.StringLength(ctx));
+        Assert.Equal((ulong)Encoding.UTF8.GetByteCount("héllo"), ctx[CpuRegister.Rax]);
     }
 
     [Fact]

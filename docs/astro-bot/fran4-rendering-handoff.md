@@ -268,6 +268,38 @@ W:\SharpEmuLab\Log\AstroBot-Main-2026-08-11_09-37.log
    back to viewport, depth, pixel exports, blue/striped formats, or final
    composition.
 
+## External-client compatibility follow-up (2026-08-13)
+
+Three follow-up logs in `NUOVI_LOG` separated two independent failures:
+
+- The Steam Deck run no longer reports the earlier
+  `sceKernelMapNamedFlexibleMemory` memory faults, confirming that compat
+  reads/writes for native/libc-backed pointers are active automatically. Its
+  later opening crash was preceded instead by ten Json2 fail-closed calls and
+  three unresolved Json2 imports: `JP-PtKMiI1E`, `dFCphqnd+a4`, and
+  `iZeYfOxtMRg`.
+- Both Radeon RX 7900 XT Windows runs print the automatic no-optimization
+  workaround message, yet still fault inside AMD's compiler during
+  `vkCreateComputePipelines`. No launch argument was missing; the first AMD
+  workaround was active but insufficient.
+
+The current worktree therefore adds stateful Json2 fallback semantics for
+Object, Array, String, and Value operations, including the three exact missing
+NIDs. On AMD/Windows only, native compute subgroup lowering is now disabled by
+default in favor of the existing compatibility lowering; NVIDIA and AMD/Linux
+remain unchanged. `SHARPEMU_VK_AMD_COMPUTE_SUBGROUPS=1` is an explicit opt-out
+for comparison runs.
+
+Every compute module also receives a managed header/instruction/entry-point/
+local-size preflight before it reaches Vulkan. On AMD/Windows, every unique
+pipeline candidate is automatically dumped under
+`shader-dumps/amd-compute`, and the immediately preceding
+`vk.amd_compute_pipeline_candidate` log contains its guest shader address,
+digest, size, and path. This needs a fresh RX 7900 XT run to confirm whether
+compat subgroup lowering removes the native driver crash; if it does not, the
+last automatic dump identifies the exact remaining compiler input without
+requiring command-line switches.
+
 ## Leads already rejected or unsafe
 
 ### Rejected performance experiment (2026-08-11)

@@ -183,6 +183,96 @@ internal static unsafe class VulkanVideoPresenter
         SpirvImageFormat Format,
         StorageImageComponentKind ComponentKind);
 
+    internal static bool TryValidateComputeSpirv(
+        ReadOnlySpan<byte> spirv,
+        uint expectedLocalSizeX,
+        uint expectedLocalSizeY,
+        uint expectedLocalSizeZ,
+        out string error)
+    {
+        error = string.Empty;
+        if (spirv.Length < 5 * sizeof(uint) ||
+            (spirv.Length & (sizeof(uint) - 1)) != 0 ||
+            BinaryPrimitives.ReadUInt32LittleEndian(spirv) != 0x07230203u)
+        {
+            error = "invalid-spirv-header";
+            return false;
+        }
+
+        var bound = BinaryPrimitives.ReadUInt32LittleEndian(spirv[12..]);
+        var schema = BinaryPrimitives.ReadUInt32LittleEndian(spirv[16..]);
+        if (bound == 0 || schema != 0)
+        {
+            error = $"invalid-spirv-bound-or-schema(bound={bound},schema={schema})";
+            return false;
+        }
+
+        uint computeEntryPoint = 0;
+        var sawExpectedLocalSize = false;
+        for (var offset = 5 * sizeof(uint); offset < spirv.Length;)
+        {
+            var instruction = BinaryPrimitives.ReadUInt32LittleEndian(
+                spirv.Slice(offset, sizeof(uint)));
+            var wordCount = checked((int)(instruction >> 16));
+            var byteCount = checked(wordCount * sizeof(uint));
+            if (wordCount == 0 || offset + byteCount > spirv.Length)
+            {
+                error = $"invalid-spirv-instruction-size(offset={offset},words={wordCount})";
+                return false;
+            }
+
+            switch ((SpirvOp)(instruction & 0xFFFFu))
+            {
+                case SpirvOp.EntryPoint when wordCount >= 4 &&
+                    ReadSpirvWord(spirv, offset, 1) == (uint)SpirvExecutionModel.GLCompute:
+                    var entryPointId = ReadSpirvWord(spirv, offset, 2);
+                    var nameBytes = spirv.Slice(
+                        offset + 3 * sizeof(uint),
+                        (wordCount - 3) * sizeof(uint));
+                    var nameEnd = nameBytes.IndexOf((byte)0);
+                    if (entryPointId == 0 || entryPointId >= bound || nameEnd < 0)
+                    {
+                        error = "invalid-compute-entry-point";
+                        return false;
+                    }
+
+                    if (Encoding.UTF8.GetString(nameBytes[..nameEnd]) == "main")
+                    {
+                        computeEntryPoint = entryPointId;
+                    }
+                    break;
+                case SpirvOp.ExecutionMode when wordCount >= 6 &&
+                    ReadSpirvWord(spirv, offset, 1) == computeEntryPoint &&
+                    ReadSpirvWord(spirv, offset, 2) == (uint)SpirvExecutionMode.LocalSize:
+                    if (ReadSpirvWord(spirv, offset, 3) == expectedLocalSizeX &&
+                        ReadSpirvWord(spirv, offset, 4) == expectedLocalSizeY &&
+                        ReadSpirvWord(spirv, offset, 5) == expectedLocalSizeZ)
+                    {
+                        sawExpectedLocalSize = true;
+                    }
+                    break;
+            }
+
+            offset += byteCount;
+        }
+
+        if (computeEntryPoint == 0)
+        {
+            error = "missing-compute-main-entry-point";
+            return false;
+        }
+
+        if (!sawExpectedLocalSize)
+        {
+            error =
+                $"missing-or-mismatched-local-size(expected={expectedLocalSizeX}x" +
+                $"{expectedLocalSizeY}x{expectedLocalSizeZ})";
+            return false;
+        }
+
+        return true;
+    }
+
     internal static bool TryReadSpirvStorageImageContracts(
         ReadOnlySpan<byte> spirv,
         out SpirvStorageImageContract[] contracts,
@@ -414,6 +504,7 @@ internal static unsafe class VulkanVideoPresenter
             : PipelineStageFlags.TopOfPipeBit;
 
     private static uint _supportedSubgroupStages;
+    private static int _disableNativeComputeSubgroups;
     private static int _supportsFragmentShaderBarycentric;
     internal static bool SupportsVertexSubgroupOperations =>
         (System.Threading.Volatile.Read(ref _supportedSubgroupStages) &
@@ -422,6 +513,7 @@ internal static unsafe class VulkanVideoPresenter
         (System.Threading.Volatile.Read(ref _supportedSubgroupStages) &
          (uint)ShaderStageFlags.FragmentBit) != 0;
     internal static bool SupportsComputeSubgroupOperations =>
+        System.Threading.Volatile.Read(ref _disableNativeComputeSubgroups) == 0 &&
         (System.Threading.Volatile.Read(ref _supportedSubgroupStages) &
          (uint)ShaderStageFlags.ComputeBit) != 0;
     internal static bool SupportsFragmentShaderBarycentric =>
@@ -737,6 +829,16 @@ internal static unsafe class VulkanVideoPresenter
         return isWindows &&
             vendorId == AmdVendorId &&
             !string.Equals(configuredValue, "0", StringComparison.Ordinal);
+    }
+
+    internal static bool ShouldDisableAmdNativeComputeSubgroups(
+        uint vendorId,
+        bool isWindows,
+        string? configuredValue)
+    {
+        return isWindows &&
+            vendorId == AmdVendorId &&
+            !string.Equals(configuredValue, "1", StringComparison.Ordinal);
     }
 
     private static bool _splashHidden;
@@ -3557,6 +3659,7 @@ internal static unsafe class VulkanVideoPresenter
         private uint _maxComputeWorkGroupInvocations;
         private ulong _minStorageBufferOffsetAlignment = 1;
         private bool _disableComputePipelineOptimization;
+        private bool _amdWindowsComputeSafety;
         private bool _supportsIndependentBlend;
         private uint _maxColorAttachments;
         private Device _device;
@@ -3781,6 +3884,8 @@ internal static unsafe class VulkanVideoPresenter
         // MoltenVK pipeline compilation every frame, so key the cache by the
         // program content and descriptor-layout shape instead.
         private readonly Dictionary<ComputePipelineKey, Pipeline> _computePipelines = new();
+        private readonly HashSet<string> _dumpedAmdComputeShaders =
+            new(StringComparer.Ordinal);
         private readonly Dictionary<GraphicsPipelineKey, Pipeline> _graphicsPipelines = new();
         private readonly Dictionary<GuestSampler, Sampler> _samplers = new();
         private readonly Dictionary<byte[], string> _shaderDigests =
@@ -4852,6 +4957,16 @@ internal static unsafe class VulkanVideoPresenter
                     selected.VendorID,
                     OperatingSystem.IsWindows(),
                     Environment.GetEnvironmentVariable("SHARPEMU_VK_AMD_COMPUTE_NO_OPT"));
+            var disableNativeComputeSubgroups =
+                ShouldDisableAmdNativeComputeSubgroups(
+                    selected.VendorID,
+                    OperatingSystem.IsWindows(),
+                    Environment.GetEnvironmentVariable("SHARPEMU_VK_AMD_COMPUTE_SUBGROUPS"));
+            System.Threading.Volatile.Write(
+                ref _disableNativeComputeSubgroups,
+                disableNativeComputeSubgroups ? 1 : 0);
+            _amdWindowsComputeSafety =
+                OperatingSystem.IsWindows() && selected.VendorID == AmdVendorId;
             var selectedName = SilkMarshal.PtrToString((nint)selected.DeviceName) ?? "unknown";
             Console.Error.WriteLine(
                 $"[LOADER][INFO] Vulkan device: {selectedName} ({selected.DeviceType})");
@@ -4861,6 +4976,13 @@ internal static unsafe class VulkanVideoPresenter
                     "[LOADER][INFO] Vulkan AMD Windows compute workaround enabled: " +
                     "pipeline optimization disabled " +
                     "(set SHARPEMU_VK_AMD_COMPUTE_NO_OPT=0 to disable).");
+            }
+            if (disableNativeComputeSubgroups)
+            {
+                Console.Error.WriteLine(
+                    "[LOADER][INFO] Vulkan AMD Windows compute subgroup workaround enabled: " +
+                    "translated compute shaders use the compatibility path " +
+                    "(set SHARPEMU_VK_AMD_COMPUTE_SUBGROUPS=1 to restore native subgroups).");
             }
             VideoOutExports.SetSelectedGpuName(selectedName);
             if (_window is not null)
@@ -8277,7 +8399,10 @@ internal static unsafe class VulkanVideoPresenter
                         $"globals={resources.GlobalMemoryBuffers.Length}");
                 }
 
-                CreateComputePipeline(resources, dispatch.ComputeSpirv);
+                CreateComputePipeline(
+                    resources,
+                    dispatch.ComputeSpirv,
+                    dispatch.ShaderAddress);
                 if (traceResources)
                 {
                     TraceVulkanShader("vk.compute_resources pipeline ready");
@@ -8899,10 +9024,12 @@ internal static unsafe class VulkanVideoPresenter
         [MethodImpl(MethodImplOptions.NoInlining)]
         private void CreateComputePipeline(
             TranslatedDrawResources resources,
-            byte[] computeSpirv)
+            byte[] computeSpirv,
+            ulong shaderAddress)
         {
+            var shaderDigest = GetShaderDigest(computeSpirv);
             var pipelineKey = new ComputePipelineKey(
-                GetShaderDigest(computeSpirv),
+                shaderDigest,
                 GetResourceLayoutKey(resources));
             if (_computePipelines.TryGetValue(pipelineKey, out var cachedPipeline))
             {
@@ -8910,6 +9037,11 @@ internal static unsafe class VulkanVideoPresenter
                 resources.PipelineCached = true;
                 return;
             }
+
+            RecordAmdComputePipelineCandidate(
+                shaderAddress,
+                shaderDigest,
+                computeSpirv);
 
             var computeModule = CreateShaderModule(computeSpirv);
             var entryPoint = (byte*)SilkMarshal.StringToPtr("main");
@@ -8956,6 +9088,51 @@ internal static unsafe class VulkanVideoPresenter
                 SilkMarshal.Free((nint)entryPoint);
                 _vk.DestroyShaderModule(_device, computeModule, null);
             }
+        }
+
+        private void RecordAmdComputePipelineCandidate(
+            ulong shaderAddress,
+            string shaderDigest,
+            byte[] computeSpirv)
+        {
+            if (!_amdWindowsComputeSafety ||
+                _dumpedAmdComputeShaders.Count >= 256 ||
+                !_dumpedAmdComputeShaders.Add(shaderDigest))
+            {
+                return;
+            }
+
+            string dumpPath;
+            try
+            {
+                var dumpDirectory = Path.Combine(
+                    AppContext.BaseDirectory,
+                    "shader-dumps",
+                    "amd-compute");
+                Directory.CreateDirectory(dumpDirectory);
+                dumpPath = Path.Combine(
+                    dumpDirectory,
+                    $"cs-{shaderAddress:X16}-{shaderDigest[..16]}.spv");
+                if (!File.Exists(dumpPath))
+                {
+                    File.WriteAllBytes(dumpPath, computeSpirv);
+                }
+            }
+            catch (Exception exception)
+            {
+                dumpPath = $"unavailable({exception.GetType().Name})";
+            }
+
+            // This line is deliberately emitted immediately before the native
+            // pipeline call. If an AMD compiler still faults, the last entry
+            // and its .spv file identify the exact module without command-line
+            // switches or a second reproduction.
+            Console.Error.WriteLine(
+                $"[LOADER][INFO] vk.amd_compute_pipeline_candidate " +
+                $"cs=0x{shaderAddress:X16} digest={shaderDigest[..16]} " +
+                $"bytes={computeSpirv.Length} native_subgroups=" +
+                $"{(SupportsComputeSubgroupOperations ? "enabled" : "disabled")} " +
+                $"dump='{dumpPath}'");
         }
 
         private void PumpHostMovieFrame()
@@ -12832,6 +13009,17 @@ internal static unsafe class VulkanVideoPresenter
             VulkanComputeGuestDispatch work,
             out string error)
         {
+            if (!TryValidateComputeSpirv(
+                    work.ComputeSpirv,
+                    work.LocalSizeX,
+                    work.LocalSizeY,
+                    work.LocalSizeZ,
+                    out error))
+            {
+                error = $"spirv-preflight-failed({error})";
+                return false;
+            }
+
             if (work.LocalSizeX == 0 || work.LocalSizeY == 0 || work.LocalSizeZ == 0)
             {
                 error = "zero-local-size";

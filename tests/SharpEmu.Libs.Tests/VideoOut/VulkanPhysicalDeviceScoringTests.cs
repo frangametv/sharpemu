@@ -111,4 +111,24 @@ public sealed class VulkanPhysicalDeviceScoringTests
                 isWindows,
                 configuredValue));
     }
+
+    [Theory]
+    [InlineData(AmdVendorId, true, null, true)]
+    [InlineData(AmdVendorId, true, "0", true)]
+    [InlineData(AmdVendorId, true, "1", false)]
+    [InlineData(AmdVendorId, false, null, false)]
+    [InlineData(NvidiaVendorId, true, null, false)]
+    public void NativeComputeSubgroupWorkaroundIsScopedToAmdWindows(
+        uint vendorId,
+        bool isWindows,
+        string? configuredValue,
+        bool expected)
+    {
+        Assert.Equal(
+            expected,
+            VulkanVideoPresenter.ShouldDisableAmdNativeComputeSubgroups(
+                vendorId,
+                isWindows,
+                configuredValue));
+    }
 }

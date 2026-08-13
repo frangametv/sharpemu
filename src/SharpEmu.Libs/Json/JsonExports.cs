@@ -59,8 +59,10 @@ public static class JsonExports
 
     private static readonly ConcurrentDictionary<ulong, ulong> _valueStrings = new();
     private static readonly ConcurrentDictionary<ulong, JsonArrayState> _arrays = new();
+    private static readonly ConcurrentDictionary<ulong, JsonElement> _objects = new();
     private static readonly ConcurrentDictionary<ulong, JsonArrayIteratorState> _arrayIterators = new();
     private static readonly JsonElement _emptyArrayElement = CreateEmptyArrayElement();
+    private static readonly JsonElement _emptyObjectElement = CreateEmptyObjectElement();
     private static long _nextArrayIdentity;
 
     [SysAbiExport(
@@ -411,6 +413,7 @@ public static class JsonExports
             _strings.Clear();
             _valueStrings.Clear();
             _arrays.Clear();
+            _objects.Clear();
             _arrayIterators.Clear();
             _valueReferences.Clear();
             Interlocked.Exchange(ref _nextArrayIdentity, 0);
@@ -688,6 +691,148 @@ public static class JsonExports
         return (int)OrbisGen2Result.ORBIS_GEN2_OK;
     }
 
+    public static int ValueObjectConstructor(CpuContext ctx)
+    {
+        var destinationAddress = ctx[CpuRegister.Rdi];
+        StoreValue(ctx, destinationAddress, GetObjectElement(ctx[CpuRegister.Rsi]));
+        ctx[CpuRegister.Rax] = destinationAddress;
+        return 0;
+    }
+
+    [SysAbiExport(
+        Nid = "dFCphqnd+a4",
+        ExportName = "_ZN3sce4Json5Value3setERKNS0_6ObjectE",
+        Target = Generation.Gen5,
+        LibraryName = "libSceJson2")]
+    public static int ValueSetObject(CpuContext ctx) => ValueObjectConstructor(ctx);
+
+    [SysAbiExport(
+        Nid = "iZeYfOxtMRg",
+        ExportName = "_ZN3sce4Json5ValueC1ERKNS0_5ArrayE",
+        Target = Generation.Gen5,
+        LibraryName = "libSceJson2")]
+    public static int ValueArrayConstructor(CpuContext ctx)
+    {
+        var destinationAddress = ctx[CpuRegister.Rdi];
+        StoreValue(ctx, destinationAddress, GetArrayElement(ctx[CpuRegister.Rsi]));
+        ctx[CpuRegister.Rax] = destinationAddress;
+        return 0;
+    }
+
+    public static int ValueGetObject(CpuContext ctx)
+    {
+        // Object is returned by value. Itanium passes hidden result storage in
+        // RDI and the Value `this` pointer in RSI.
+        var destinationAddress = ctx[CpuRegister.Rdi];
+        var value = GetValue(ctx[CpuRegister.Rsi]);
+        if (destinationAddress != 0)
+        {
+            _objects[destinationAddress] = value.ValueKind == System.Text.Json.JsonValueKind.Object
+                ? value.Clone()
+                : _emptyObjectElement;
+        }
+        ctx[CpuRegister.Rax] = destinationAddress;
+        return 0;
+    }
+
+    public static int ObjectDefaultConstructor(CpuContext ctx)
+    {
+        var thisAddress = ctx[CpuRegister.Rdi];
+        if (thisAddress != 0)
+        {
+            _objects[thisAddress] = _emptyObjectElement;
+        }
+
+        ctx[CpuRegister.Rax] = thisAddress;
+        return 0;
+    }
+
+    public static int ObjectCopyConstructor(CpuContext ctx)
+    {
+        var destinationAddress = ctx[CpuRegister.Rdi];
+        if (destinationAddress != 0)
+        {
+            _objects[destinationAddress] = GetObjectElement(ctx[CpuRegister.Rsi]).Clone();
+        }
+
+        ctx[CpuRegister.Rax] = destinationAddress;
+        return 0;
+    }
+
+    public static int ObjectAssignment(CpuContext ctx) => ObjectCopyConstructor(ctx);
+
+    public static int ObjectClear(CpuContext ctx)
+    {
+        var thisAddress = ctx[CpuRegister.Rdi];
+        if (thisAddress != 0)
+        {
+            _objects[thisAddress] = _emptyObjectElement;
+        }
+
+        ctx[CpuRegister.Rax] = 0;
+        return 0;
+    }
+
+    public static int ObjectDestructor(CpuContext ctx)
+    {
+        _objects.TryRemove(ctx[CpuRegister.Rdi], out _);
+        ctx[CpuRegister.Rax] = 0;
+        return 0;
+    }
+
+    [SysAbiExport(
+        Nid = "JP-PtKMiI1E",
+        ExportName = "_ZN3sce4Json5ArrayC1Ev",
+        Target = Generation.Gen5,
+        LibraryName = "libSceJson2")]
+    public static int ArrayDefaultConstructor(CpuContext ctx)
+    {
+        var thisAddress = ctx[CpuRegister.Rdi];
+        if (thisAddress != 0)
+        {
+            _arrays[thisAddress] = CreateArrayState(_emptyArrayElement);
+        }
+
+        ctx[CpuRegister.Rax] = thisAddress;
+        return 0;
+    }
+
+    public static int ArraySize(CpuContext ctx)
+    {
+        ctx[CpuRegister.Rax] = (ulong)GetArrayElement(ctx[CpuRegister.Rdi]).GetArrayLength();
+        return 0;
+    }
+
+    public static int StringLength(CpuContext ctx)
+    {
+        ctx[CpuRegister.Rax] = TryGetStringValue(ctx, ctx[CpuRegister.Rdi], out var value)
+            ? (ulong)Encoding.UTF8.GetByteCount(value)
+            : 0;
+        return 0;
+    }
+
+    public static int StringAssignment(CpuContext ctx)
+    {
+        var destinationAddress = ctx[CpuRegister.Rdi];
+        _ = TryGetStringValue(ctx, ctx[CpuRegister.Rsi], out var value);
+        if (_strings.TryGetValue(destinationAddress, out var existing))
+        {
+            _strings[destinationAddress] = existing with { Value = value };
+        }
+        else if (destinationAddress != 0)
+        {
+            _strings[destinationAddress] = new JsonStringState(value);
+        }
+
+        if (destinationAddress != 0)
+        {
+            JsonObjectHeap.Strings[destinationAddress] = value;
+        }
+
+        ctx[CpuRegister.Rax] = destinationAddress;
+        return 0;
+    }
+
     [SysAbiExport(
         Nid = "-NxEk7XLkDY",
         ExportName = "_ZN3sce4Json5Value11referObjectEv",
@@ -710,8 +855,12 @@ public static class JsonExports
     public static int ObjectIndexString(CpuContext ctx)
     {
         var objectStorage = ctx[CpuRegister.Rdi];
-        ctx[CpuRegister.Rdi] = objectStorage >= 0x10 ? objectStorage - 0x10 : 0;
-        return ReturnNamedValue(ctx, JsonObjectHeap.GetStringOrEmpty(ctx[CpuRegister.Rsi]));
+        _ = TryGetStringValue(ctx, ctx[CpuRegister.Rsi], out var key);
+        return ReturnNamedElement(
+            ctx,
+            objectStorage,
+            GetObjectElement(objectStorage),
+            key);
     }
 
     [SysAbiExport(
@@ -1021,20 +1170,28 @@ public static class JsonExports
     private static int ReturnNamedValue(CpuContext ctx, string key)
     {
         var valueAddress = ctx[CpuRegister.Rdi];
+        return ReturnNamedElement(ctx, valueAddress, GetValue(valueAddress), key);
+    }
+
+    private static int ReturnNamedElement(
+        CpuContext ctx,
+        ulong parentAddress,
+        JsonElement parent,
+        string key)
+    {
         if (!TryAllocateGuestObject(ctx, ValueObjectSize, out var childAddress))
         {
             ctx[CpuRegister.Rax] = 0;
             return (int)OrbisGen2Result.ORBIS_GEN2_OK;
         }
 
-        var parent = GetValue(valueAddress);
         var child = parent.ValueKind == System.Text.Json.JsonValueKind.Object &&
             parent.TryGetProperty(key, out var property)
             ? property.Clone()
             : _nullElement;
         StoreValue(ctx, childAddress, child);
         ctx[CpuRegister.Rax] = childAddress;
-        TraceJsonText("Value.get", valueAddress, key);
+        TraceJsonText("Value.get", parentAddress, key);
         return (int)OrbisGen2Result.ORBIS_GEN2_OK;
     }
 
@@ -1091,6 +1248,50 @@ public static class JsonExports
         }
 
         return CreateArrayState(GetValue(address));
+    }
+
+    private static JsonElement GetArrayElement(ulong address)
+    {
+        if (address != 0 && _arrays.TryGetValue(address, out var state))
+        {
+            return state.Element;
+        }
+
+        if (address >= 0x10)
+        {
+            var value = GetValue(address - 0x10);
+            if (value.ValueKind == System.Text.Json.JsonValueKind.Array)
+            {
+                return value;
+            }
+        }
+
+        var directValue = GetValue(address);
+        return directValue.ValueKind == System.Text.Json.JsonValueKind.Array
+            ? directValue
+            : _emptyArrayElement;
+    }
+
+    private static JsonElement GetObjectElement(ulong address)
+    {
+        if (address != 0 && _objects.TryGetValue(address, out var state))
+        {
+            return state;
+        }
+
+        if (address >= 0x10)
+        {
+            var value = GetValue(address - 0x10);
+            if (value.ValueKind == System.Text.Json.JsonValueKind.Object)
+            {
+                return value;
+            }
+        }
+
+        var directValue = GetValue(address);
+        return directValue.ValueKind == System.Text.Json.JsonValueKind.Object
+            ? directValue
+            : _emptyObjectElement;
     }
 
     private static JsonArrayState CreateArrayState(JsonElement element)
@@ -1173,6 +1374,12 @@ public static class JsonExports
         return document.RootElement.Clone();
     }
 
+    private static JsonElement CreateEmptyObjectElement()
+    {
+        using var document = JsonDocument.Parse("{}");
+        return document.RootElement.Clone();
+    }
+
     private static JsonElement GetValue(ulong address) =>
         address != 0 && _values.TryGetValue(address, out var state)
             ? state.Element
@@ -1188,6 +1395,7 @@ public static class JsonExports
         var clone = element.Clone();
         _values[address] = new JsonValueState(clone);
         _arrays.TryRemove(address, out _);
+        _objects.TryRemove(address, out _);
         _valueStrings.TryRemove(address, out _);
 
         Span<byte> mirror = stackalloc byte[ValueObjectSize];
@@ -1297,6 +1505,7 @@ public static class JsonExports
         _strings.Clear();
         _valueStrings.Clear();
         _arrays.Clear();
+        _objects.Clear();
         _arrayIterators.Clear();
         _valueReferences.Clear();
         Interlocked.Exchange(ref _nextArrayIdentity, 0);
