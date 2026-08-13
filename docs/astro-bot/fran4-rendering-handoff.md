@@ -300,6 +300,48 @@ compat subgroup lowering removes the native driver crash; if it does not, the
 last automatic dump identifies the exact remaining compiler input without
 requiring command-line switches.
 
+## AvPlayer worktree review (2026-08-13, pending live validation)
+
+The xnetcat worktree branch a3204ad2268ce5080 was reviewed as a source of
+ideas only. No commit was imported. The useful PS5 AvPlayer behavior was
+rewritten around Fran's existing allocator fallback and asynchronous
+MediaFramePlayback path:
+
+- Gen5 init reads autoStart from the PS5 offsets (112/168) while Gen4 retains
+  108/164.
+- legacy stream descriptors remain 32 bytes on Gen5 and 40 bytes on Gen4;
+  sceAvPlayerGetStreamInfoEx now writes the actual 104-byte Gen5 descriptor,
+  including frame rate at 0x40 and duration at 0x60.
+- stream types use the Gen5 numbering and video-only media no longer advertises
+  or attempts to decode a nonexistent audio stream.
+- Gen5 extended frame metadata now carries its 256-byte pitch, crop-right value,
+  bit depths and frame rate consistently. A paused Gen5 player can return the
+  last valid frame descriptor without decoding another frame.
+- the host fallback decoder is capped to the configured output resolution
+  instead of decoding a 3840x2160 movie into a 3840x2160 BGRA surface for a
+  smaller window.
+- decoded width and height now travel with the fallback pixel buffer and are
+  validated against its byte length before Vulkan sees it. This is the missing
+  safety condition that caused the reverted 0924a9a experiment to crash.
+- the synchronous NV12-to-BGRA conversion is retained only for the first poster
+  frame. Later presentation uses the bounded background decoder instead of
+  repeating a full 4K CPU conversion on the emulation thread.
+
+The standalone presentation-cadence part of 0924a9a was deliberately not
+restored in the same change. The xnetcat queued-event/pthread-yield mechanism
+was also deferred because it changes guest callback timing independently of
+video throughput.
+
+Release tests pass locally: 38/38 AvPlayer tests and the complete solution
+suite (37 source-generator, 85 shader, 28 Metal shader, and 1647 library
+tests). A real Astro Bot run must now confirm:
+
+1. host_fallback_started reports source=3840x2160 and an output no larger than
+   the configured host resolution.
+2. No 0xC0000005 follows the first scaled frame.
+3. Presentation cadence improves and playback still reaches
+   host_fallback_finished followed by title_controller_ship.
+
 ## Leads already rejected or unsafe
 
 ### Rejected performance experiment (2026-08-11)

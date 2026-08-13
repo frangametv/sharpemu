@@ -166,6 +166,13 @@ public readonly record struct GuestCpuContinuation(
     uint Mxcsr,
     bool RestoreFullFpuState);
 
+public readonly record struct GuestThreadStagedState(
+    bool EntryExit,
+    ulong EntryExitValue,
+    string? EntryExitReason,
+    bool ContextTransfer,
+    GuestCpuContinuation ContextTransferTarget);
+
 public static class GuestThreadExecution
 {
     [ThreadStatic]
@@ -377,6 +384,31 @@ public static class GuestThreadExecution
         _currentImportReturnRip = previous.ReturnRip;
         _currentImportResumeRsp = previous.ResumeRsp;
         _currentImportReturnSlotAddress = previous.ReturnSlotAddress;
+    }
+
+    public static GuestThreadStagedState SaveAndResetStagedState()
+    {
+        var saved = new GuestThreadStagedState(
+            _pendingEntryExit,
+            _pendingEntryExitValue,
+            _pendingEntryExitReason,
+            _pendingContextTransfer,
+            _pendingContextTransferTarget);
+        _pendingEntryExit = false;
+        _pendingEntryExitValue = 0;
+        _pendingEntryExitReason = null;
+        _pendingContextTransfer = false;
+        _pendingContextTransferTarget = default;
+        return saved;
+    }
+
+    public static void RestoreStagedState(GuestThreadStagedState state)
+    {
+        _pendingEntryExit = state.EntryExit;
+        _pendingEntryExitValue = state.EntryExitValue;
+        _pendingEntryExitReason = state.EntryExitReason;
+        _pendingContextTransfer = state.ContextTransfer;
+        _pendingContextTransferTarget = state.ContextTransferTarget;
     }
 
     public static bool TryGetCurrentImportCallFrame(out GuestImportCallFrame frame)

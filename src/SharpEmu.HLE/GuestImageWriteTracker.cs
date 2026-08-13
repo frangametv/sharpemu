@@ -59,6 +59,7 @@ public static unsafe class GuestImageWriteTracker
         public ulong End;
         public int Dirty;
         public int Armed;
+        public int ArmDeferred;
         /// <summary>
         /// When false the range is watch-only: managed writes still dirty it via
         /// <see cref="NotifyManagedWrite"/>, but pages are never write-protected
@@ -87,6 +88,19 @@ public static unsafe class GuestImageWriteTracker
 
     private static readonly object _gate = new();
     private static readonly Dictionary<ulong, TrackedRange> _rangesByAddress = new();
+
+    // Managed memory copies hold the shared side while writing. ArmLocked takes
+    // the exclusive side before changing page protection, so a GPU-thread rearm
+    // can never make a page read-only underneath Buffer.MemoryCopy.
+    private const int LeaseExclusiveHeld = 1 << 30;
+    private const int LeaseExclusiveWaiting = 1 << 29;
+    private const int LeaseSharedMask = LeaseExclusiveWaiting - 1;
+    private static int _writeLease;
+
+    [ThreadStatic]
+    private static int _threadWriteLeases;
+
+    private static int _armDeferredCount;
 
     /// <summary>Immutable snapshot read lock-free from the signal handler and
     /// the managed-write pre-visit; rebuilt on every mutation under the gate
@@ -512,29 +526,50 @@ public static unsafe class GuestImageWriteTracker
     /// </summary>
     public static void NotifyManagedWrite(ulong address, ulong byteCount)
     {
+        if (BeginManagedWrite(address, byteCount))
+        {
+            EndManagedWrite();
+        }
+    }
+
+    public static bool BeginManagedWrite(ulong address, ulong byteCount) =>
+        BeginManagedWrite(address, byteCount, out _);
+
+    public static bool BeginManagedWrite(
+        ulong address,
+        ulong byteCount,
+        out bool pagesWritable)
+    {
+        pagesWritable = true;
         if (!_enabled || address == 0 || byteCount == 0)
         {
-            return;
+            return false;
         }
 
         var end = address > ulong.MaxValue - byteCount
             ? ulong.MaxValue
             : address + byteCount;
 
-        // Fast rejection for the hot path: this runs on every managed guest
-        // write, and almost none of them touch tracked texture pages. The
-        // bounds live inside the snapshot so they are always consistent with
-        // the ranges the per-page visit below would consult.
-        var snapshot = Volatile.Read(ref _rangeSnapshot);
-        if (snapshot.Ranges.Length == 0 || end <= snapshot.Start || address >= snapshot.End)
+        if (!OverlapsTrackedBounds(address, end))
         {
-            return;
+            return false;
+        }
+
+        AcquireWriteLeaseShared();
+        if (!OverlapsTrackedBounds(address, end))
+        {
+            ReleaseWriteLeaseShared();
+            return false;
         }
 
         var candidate = address;
         while (candidate < end)
         {
-            _ = TryHandleWriteFault(candidate);
+            if (VisitWriteFault(candidate, default) == WriteFaultOutcome.UnprotectFailed)
+            {
+                pagesWritable = false;
+            }
+
             var nextPage = (candidate & ~0xFFFUL) + 0x1000UL;
             if (nextPage <= candidate)
             {
@@ -542,7 +577,107 @@ public static unsafe class GuestImageWriteTracker
             }
             candidate = nextPage;
         }
+
+        return true;
     }
+
+    private static bool OverlapsTrackedBounds(ulong address, ulong end)
+    {
+        var snapshot = Volatile.Read(ref _rangeSnapshot);
+        return snapshot.Ranges.Length != 0 &&
+               end > snapshot.Start &&
+               address < snapshot.End;
+    }
+
+    public static void EndManagedWrite()
+    {
+        ReleaseWriteLeaseShared();
+        if (_threadWriteLeases != 0 ||
+            Volatile.Read(ref _armDeferredCount) == 0)
+        {
+            return;
+        }
+
+        lock (_gate)
+        {
+            foreach (var range in _rangesByAddress.Values)
+            {
+                if (Interlocked.Exchange(ref range.ArmDeferred, 0) == 1)
+                {
+                    Interlocked.Decrement(ref _armDeferredCount);
+                    ArmLocked(range, "rearm-deferred");
+                }
+            }
+        }
+    }
+
+    private static void AcquireWriteLeaseShared()
+    {
+        var spin = new SpinWait();
+        while (true)
+        {
+            var observed = Volatile.Read(ref _writeLease);
+            if ((observed & (LeaseExclusiveHeld | LeaseExclusiveWaiting)) == 0 &&
+                Interlocked.CompareExchange(
+                    ref _writeLease,
+                    observed + 1,
+                    observed) == observed)
+            {
+                _threadWriteLeases++;
+                return;
+            }
+
+            spin.SpinOnce(sleep1Threshold: -1);
+        }
+    }
+
+    private static void ReleaseWriteLeaseShared()
+    {
+        _threadWriteLeases--;
+        Interlocked.Decrement(ref _writeLease);
+    }
+
+    private static bool TryAcquireWriteLeaseExclusive()
+    {
+        if (_threadWriteLeases > 0)
+        {
+            return false;
+        }
+
+        var spin = new SpinWait();
+        while (true)
+        {
+            var observed = Volatile.Read(ref _writeLease);
+            if (Interlocked.CompareExchange(
+                    ref _writeLease,
+                    observed | LeaseExclusiveWaiting,
+                    observed) == observed)
+            {
+                break;
+            }
+
+            spin.SpinOnce(sleep1Threshold: -1);
+        }
+
+        spin = new SpinWait();
+        while (true)
+        {
+            var observed = Volatile.Read(ref _writeLease);
+            if ((observed & LeaseSharedMask) == 0 &&
+                Interlocked.CompareExchange(
+                    ref _writeLease,
+                    (observed & ~LeaseExclusiveWaiting) | LeaseExclusiveHeld,
+                    observed) == observed)
+            {
+                return true;
+            }
+
+            spin.SpinOnce();
+        }
+    }
+
+    private static void ReleaseWriteLeaseExclusive() =>
+        Interlocked.Add(ref _writeLease, -LeaseExclusiveHeld);
 
     /// <summary>
     /// Flushes scalar first-write records captured by the POSIX signal handler.
@@ -572,17 +707,30 @@ public static unsafe class GuestImageWriteTracker
     public static bool TryHandleWriteFault(
         ulong faultAddress,
         ulong instructionAddress = 0) =>
-        TryHandleWriteFault(
+        VisitWriteFault(
             faultAddress,
-            new GuestWriteFaultContext(instructionAddress));
+            new GuestWriteFaultContext(instructionAddress)) ==
+        WriteFaultOutcome.Writable;
 
     public static bool TryHandleWriteFault(
+        ulong faultAddress,
+        in GuestWriteFaultContext context) =>
+        VisitWriteFault(faultAddress, context) == WriteFaultOutcome.Writable;
+
+    private enum WriteFaultOutcome
+    {
+        NotTracked,
+        Writable,
+        UnprotectFailed,
+    }
+
+    private static WriteFaultOutcome VisitWriteFault(
         ulong faultAddress,
         in GuestWriteFaultContext context)
     {
         if (!_enabled || faultAddress == 0)
         {
-            return false;
+            return WriteFaultOutcome.NotTracked;
         }
 
         var ranges = Volatile.Read(ref _rangeSnapshot).Ranges;
@@ -602,7 +750,7 @@ public static unsafe class GuestImageWriteTracker
 
         if (writableStart == ulong.MaxValue)
         {
-            return false;
+            return WriteFaultOutcome.NotTracked;
         }
 
         // Ranges are page-aligned and may overlap (font atlases and other
@@ -649,7 +797,7 @@ public static unsafe class GuestImageWriteTracker
         if (needsUnprotect &&
             !TrySetProtection(writableStart, writableEnd - writableStart, writable: true))
         {
-            return false;
+            return WriteFaultOutcome.UnprotectFailed;
         }
 
         for (var index = 0; index < ranges.Length; index++)
@@ -691,23 +839,57 @@ public static unsafe class GuestImageWriteTracker
             }
         }
 
-        return true;
+        return WriteFaultOutcome.Writable;
     }
 
     private static void ArmLocked(TrackedRange range, string operation)
     {
         FlushPendingFirstCpuWrite(range);
-        if (Interlocked.Exchange(ref range.Armed, 1) == 1)
+        if (Volatile.Read(ref range.Armed) == 1)
         {
             return;
         }
 
-        // A new publication/rearm starts a new first-write lifetime.
-        Volatile.Write(ref range.FirstCpuWriteSeen, 0);
-        var failed = !TrySetProtection(range.Start, range.End - range.Start, writable: false);
-        if (failed)
+        if (!TryAcquireWriteLeaseExclusive())
         {
-            Volatile.Write(ref range.Armed, 0);
+            if (Interlocked.Exchange(ref range.ArmDeferred, 1) == 0)
+            {
+                Interlocked.Increment(ref _armDeferredCount);
+            }
+            return;
+        }
+
+        bool failed;
+        try
+        {
+            if (Interlocked.Exchange(ref range.Armed, 1) == 1)
+            {
+                return;
+            }
+
+            Volatile.Write(ref range.FirstCpuWriteSeen, 0);
+            failed = !TrySetProtection(
+                range.Start,
+                range.End - range.Start,
+                writable: false);
+            if (failed)
+            {
+                Volatile.Write(ref range.Armed, 0);
+            }
+            else if (Volatile.Read(ref range.Armed) == 0)
+            {
+                // A native fault handler may have disarmed an overlapping
+                // range while protection was changing. Prefer restoring write
+                // access to leaving hardware and tracker state inconsistent.
+                _ = TrySetProtection(
+                    range.Start,
+                    range.End - range.Start,
+                    writable: true);
+            }
+        }
+        finally
+        {
+            ReleaseWriteLeaseExclusive();
         }
 
         if (range.TraceLifetime)
@@ -721,6 +903,11 @@ public static unsafe class GuestImageWriteTracker
     private static void DisarmLocked(TrackedRange range, string operation)
     {
         FlushPendingFirstCpuWrite(range);
+        if (Interlocked.Exchange(ref range.ArmDeferred, 0) == 1)
+        {
+            Interlocked.Decrement(ref _armDeferredCount);
+        }
+
         var wasArmed = Interlocked.Exchange(ref range.Armed, 0) == 1;
         if (wasArmed)
         {

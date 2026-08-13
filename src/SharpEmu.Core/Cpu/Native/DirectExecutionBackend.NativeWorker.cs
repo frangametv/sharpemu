@@ -54,6 +54,7 @@ public sealed partial class DirectExecutionBackend
 	private readonly SemaphoreSlim _nativeWorkerRunLimiter = new(NativeWorkerMaxConcurrent);
 	private bool _nativeWorkersDisposed;
 	private int _nativeWorkerCreationFailedLogged;
+	private static int _tbbPosixInlineLogged;
 
 	private const uint StackSizeParamIsAReservation = 0x00010000u;
 
@@ -81,6 +82,25 @@ public sealed partial class DirectExecutionBackend
 	// copied back into this thread's statics before returning.
 	private unsafe int RunGuestEntryStub(void* entryStub, ulong hostRspSlot, bool requireNativeWorker = false)
 	{
+		// The raw worker loop is currently a Win32 implementation. Requiring it
+		// unconditionally made every TBB guest thread wait and then get discarded
+		// on Linux/macOS, even though POSIX has always supported the established
+		// inline entry path. Keep the strict no-inline rule where it is needed to
+		// protect the CLR on Windows, while allowing POSIX guest jobs to run.
+		var mustUseNativeWorker = ShouldRequireNativeGuestWorker(
+			requireNativeWorker,
+			OperatingSystem.IsWindows(),
+			NativeGuestWorkersDisabled);
+		if (requireNativeWorker &&
+			!OperatingSystem.IsWindows() &&
+			Interlocked.Exchange(ref _tbbPosixInlineLogged, 1) == 0)
+		{
+			Console.Error.WriteLine(
+				"[LOADER][INFO] TBB POSIX compatibility enabled: " +
+				"guest threads use inline native entry execution.");
+			Console.Error.Flush();
+		}
+
 		// Limit in-flight native Runs before renting so the idle pool is not
 		// drained by threads blocked on the concurrency gate.
 		_nativeWorkerRunLimiter.Wait();
@@ -91,7 +111,7 @@ public sealed partial class DirectExecutionBackend
 			// TerminateThread+respawn. Wait for a native worker — never fall back
 			// to managed inline (FailFast) and never throw (uncaught throw mid-
 			// storm was a silent process die).
-			var maxAttempts = requireNativeWorker ? 500 : 48;
+			var maxAttempts = mustUseNativeWorker ? 500 : 48;
 			for (var attempt = 0; attempt < maxAttempts; attempt++)
 			{
 				worker = RentNativeGuestExecutor();
@@ -100,7 +120,7 @@ public sealed partial class DirectExecutionBackend
 					break;
 				}
 
-				if (!requireNativeWorker)
+				if (!mustUseNativeWorker)
 				{
 					break;
 				}
@@ -110,7 +130,7 @@ public sealed partial class DirectExecutionBackend
 
 			if (worker is null)
 			{
-				if (requireNativeWorker)
+				if (mustUseNativeWorker)
 				{
 					var n = Interlocked.Increment(ref _tbbNativeWorkerRefuseCount);
 					if (n <= 8 || n % 32 == 0)
@@ -172,6 +192,14 @@ public sealed partial class DirectExecutionBackend
 		{
 			_nativeWorkerRunLimiter.Release();
 		}
+	}
+
+	internal static bool ShouldRequireNativeGuestWorker(
+		bool requested,
+		bool isWindows,
+		bool nativeWorkersDisabled)
+	{
+		return requested && isWindows && !nativeWorkersDisabled;
 	}
 
 	private static int _tbbNativeRunEnterCount;

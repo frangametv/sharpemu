@@ -7196,31 +7196,56 @@ public static partial class AgcExports
                 $"compact={(compactLayout ? 1 : 0)}");
         }
 
+        var immediateFill =
+            sourceSelector == 2 &&
+            destinationSelector is 0 or 3 &&
+            destinationAddress >= 0x10000 &&
+            sourceAddress <= uint.MaxValue;
+        var memoryCopy =
+            sourceSelector is 0 or 3 &&
+            destinationSelector is 0 or 3;
+
+        bool ApplyGuestMemory(bool mirrorImage)
+        {
+            InvalidateDcbWindowIfOverlaps(destinationAddress, byteCount);
+            var copied =
+                byteCount != 0 &&
+                byteCount <= 256u * 1024u * 1024u &&
+                destinationAddress != 0 &&
+                (immediateFill
+                    ? TryFillGuestMemory(
+                        ctx,
+                        (uint)sourceAddress,
+                        destinationAddress,
+                        byteCount)
+                    : memoryCopy &&
+                      sourceAddress != 0 &&
+                      TryCopyGuestMemory(
+                          ctx,
+                          sourceAddress,
+                          destinationAddress,
+                          byteCount));
+            if (copied && mirrorImage)
+            {
+                MirrorDmaWriteToGuestImage(
+                    ctx,
+                    destinationAddress,
+                    byteCount,
+                    immediateFill ? (uint)sourceAddress : null,
+                    immediateFill ? 0 : sourceAddress);
+            }
+            return copied;
+        }
+
+        var eagerApplied = false;
         SubmitOrderedGpuSideEffect(
             ctx,
             gpuState,
             state,
             () =>
             {
-                InvalidateDcbWindowIfOverlaps(destinationAddress, byteCount);
-                var immediateFill =
-                    sourceSelector == 2 &&
-                    destinationSelector is 0 or 3 &&
-                    destinationAddress >= 0x10000 &&
-                    sourceAddress <= uint.MaxValue;
-                var memoryCopy =
-                    sourceSelector is 0 or 3 &&
-                    destinationSelector is 0 or 3;
-                var copied =
-                    byteCount != 0 &&
-                    byteCount <= 256u * 1024u * 1024u &&
-                    destinationAddress != 0 &&
-                    (immediateFill
-                        ? TryFillGuestMemory(ctx, (uint)sourceAddress, destinationAddress, byteCount)
-                        : memoryCopy &&
-                          sourceAddress != 0 &&
-                          TryCopyGuestMemory(ctx, sourceAddress, destinationAddress, byteCount));
-                if (copied)
+                var copied = eagerApplied || ApplyGuestMemory(mirrorImage: true);
+                if (eagerApplied)
                 {
                     MirrorDmaWriteToGuestImage(
                         ctx,
@@ -7243,7 +7268,11 @@ public static partial class AgcExports
             packetAddress,
             destinationAddress,
             byteCount,
-            deferLabelCompletion: true);
+            deferLabelCompletion: true,
+            eagerGuestMemoryApply: () =>
+            {
+                eagerApplied = ApplyGuestMemory(mirrorImage: false);
+            });
     }
 
     private static bool PacketRequiresPendingAcquireFlush(
@@ -7273,8 +7302,26 @@ public static partial class AgcExports
         ulong packetAddress,
         ulong producerAddress = 0,
         ulong producerLength = 0,
-        bool deferLabelCompletion = false)
+        bool deferLabelCompletion = false,
+        Action? eagerGuestMemoryApply = null,
+        bool eagerWatchedLabelWrite = false)
     {
+        if (eagerGuestMemoryApply is not null &&
+            _eagerGpuDataWritesEnabled &&
+            producerAddress != 0 &&
+            producerLength is > 0 and <= MaxEagerGpuDataWriteBytes)
+        {
+            var hasActiveWait = GpuWaitRegistry
+                .SnapshotInRange(ctx.Memory, producerAddress, producerLength)
+                .Count != 0;
+            if (ShouldEagerlyApplyGuestWrite(
+                    hasActiveWait,
+                    eagerWatchedLabelWrite))
+            {
+                eagerGuestMemoryApply();
+            }
+        }
+
         var producer = RegisterLabelProducer(
             ctx.Memory,
             state,
@@ -7337,6 +7384,17 @@ public static partial class AgcExports
             ApplyAndQueueCompletion();
         }
     }
+
+    private static readonly bool _eagerGpuDataWritesEnabled = !string.Equals(
+        Environment.GetEnvironmentVariable("SHARPEMU_EAGER_GPU_DATA_WRITES"),
+        "0",
+        StringComparison.Ordinal);
+    private const ulong MaxEagerGpuDataWriteBytes = 16 * 1024 * 1024;
+
+    internal static bool ShouldEagerlyApplyGuestWrite(
+        bool hasActiveWait,
+        bool eagerWatchedLabelWrite) =>
+        !hasActiveWait || eagerWatchedLabelWrite;
 
     private static void RequestResumableDcbDrain(CpuContext ctx, SubmittedGpuState gpuState)
     {
@@ -8068,33 +8126,51 @@ public static partial class AgcExports
                 $"writes_guest={(writesGuestMemory ? 1 : 0)}");
         }
 
+        var eagerApplied = false;
         SubmitOrderedGpuSideEffect(
             ctx,
             gpuState,
             state,
-            () => ApplySubmittedStandardDmaDataSnapshot(
+            () => _ = ApplySubmittedStandardDmaDataSnapshot(
                 ctx,
                 control,
                 sourceLow,
                 sourceHigh,
                 destinationLow,
                 destinationHigh,
-                command),
+                command,
+                writeGuestMemory: !eagerApplied,
+                mirrorImage: true),
             $"dma_data dst=0x{destinationHigh:X8}{destinationLow:X8} bytes={byteCount}",
             packetAddress,
             writesGuestMemory ? destinationAddress : 0,
             writesGuestMemory ? byteCount : 0,
-            deferLabelCompletion: true);
+            deferLabelCompletion: true,
+            eagerGuestMemoryApply: () =>
+            {
+                eagerApplied = ApplySubmittedStandardDmaDataSnapshot(
+                    ctx,
+                    control,
+                    sourceLow,
+                    sourceHigh,
+                    destinationLow,
+                    destinationHigh,
+                    command,
+                    writeGuestMemory: true,
+                    mirrorImage: false);
+            });
     }
 
-    private static void ApplySubmittedStandardDmaDataSnapshot(
+    private static bool ApplySubmittedStandardDmaDataSnapshot(
         CpuContext ctx,
         uint control,
         uint sourceLow,
         uint sourceHigh,
         uint destinationLow,
         uint destinationHigh,
-        uint command)
+        uint command,
+        bool writeGuestMemory,
+        bool mirrorImage)
     {
         var byteCount = command & 0x1F_FFFFu;
         var sourceSelect = (control >> 29) & 0x3u;
@@ -8108,7 +8184,7 @@ public static partial class AgcExports
             destinationSelect is not (0 or 3) ||
             (destinationSelect == 0 && destinationAddressSpace != 0))
         {
-            return;
+            return false;
         }
 
         var destinationAddress =
@@ -8122,26 +8198,27 @@ public static partial class AgcExports
             sourceAddress = sourceLow | ((ulong)sourceHigh << 32);
             if (sourceAddressIncrement != 0)
             {
-                copied =
+                copied = !writeGuestMemory ||
                     TryReadUInt32(ctx, sourceAddress, out var fillValue) &&
                     TryFillGuestMemory(
                         ctx,
                         fillValue,
                         destinationAddress,
                         byteCount);
-                if (copied)
+                if (copied && mirrorImage &&
+                    TryReadUInt32(ctx, sourceAddress, out fillValue))
                 {
                     MirrorDmaWriteToGuestImage(ctx, destinationAddress, byteCount, fillValue);
                 }
             }
             else
             {
-                copied = TryCopyGuestMemory(
+                copied = !writeGuestMemory || TryCopyGuestMemory(
                     ctx,
                     sourceAddress,
                     destinationAddress,
                     byteCount);
-                if (copied)
+                if (copied && mirrorImage)
                 {
                     MirrorDmaWriteToGuestImage(
                         ctx,
@@ -8155,19 +8232,19 @@ public static partial class AgcExports
         else if (sourceSelect == 2)
         {
             sourceAddress = 0;
-            copied = TryFillGuestMemory(
+            copied = !writeGuestMemory || TryFillGuestMemory(
                 ctx,
                 sourceLow,
                 destinationAddress,
                 byteCount);
-            if (copied)
+            if (copied && mirrorImage)
             {
                 MirrorDmaWriteToGuestImage(ctx, destinationAddress, byteCount, sourceLow);
             }
         }
         else
         {
-            return;
+            return false;
         }
 
         if (ShouldTraceHotPath(ref _standardDmaTraceCount))
@@ -8178,6 +8255,8 @@ public static partial class AgcExports
                 $"src_sel={sourceSelect} fill={sourceAddressIncrement != 0 || sourceSelect == 2} " +
                 $"copied={copied}");
         }
+
+        return copied;
     }
 
     private static void ApplySubmittedWriteData(
@@ -8224,22 +8303,27 @@ public static partial class AgcExports
                 $"values={string.Join('/', values.Take(8).Select(value => $"{value:X8}"))}");
         }
 
+        bool ApplyGuestMemory()
+        {
+            InvalidateDcbWindowIfOverlaps(destinationAddress, writeLength);
+            var wroteData = destination is 1 or 2 or 4 or 5;
+            for (uint index = 0; wroteData && index < dwordCount; index++)
+            {
+                var targetAddress = destinationAddress +
+                    (incrementAddress ? (ulong)index * sizeof(uint) : 0);
+                wroteData = TryWriteUInt32(ctx, targetAddress, values[index]);
+            }
+            return wroteData;
+        }
+
+        var eagerApplied = false;
         SubmitOrderedGpuSideEffect(
             ctx,
             gpuState,
             state,
             () =>
             {
-                InvalidateDcbWindowIfOverlaps(
-                    destinationAddress,
-                    incrementAddress ? (ulong)dwordCount * sizeof(uint) : sizeof(uint));
-                var wroteData = destination is 1 or 2 or 4 or 5;
-                for (uint index = 0; wroteData && index < dwordCount; index++)
-                {
-                    var targetAddress = destinationAddress +
-                        (incrementAddress ? (ulong)index * sizeof(uint) : 0);
-                    wroteData = TryWriteUInt32(ctx, targetAddress, values[index]);
-                }
+                var wroteData = eagerApplied || ApplyGuestMemory();
 
                 if (tracePacket)
                 {
@@ -8247,7 +8331,8 @@ public static partial class AgcExports
                         $"agc.dcb.write_data dst={destination} " +
                         $"addr=0x{destinationAddress:X16} count={dwordCount} " +
                         $"increment={incrementAddress} confirm={writeConfirm} " +
-                        $"cache={cachePolicy} standard={standardPacket} wrote={wroteData}");
+                        $"cache={cachePolicy} standard={standardPacket} " +
+                        $"wrote={wroteData} eager={eagerApplied}");
                 }
             },
             $"write_data dst=0x{destinationAddress:X16} count={dwordCount}",
@@ -8255,7 +8340,11 @@ public static partial class AgcExports
             destination is 1 or 2 or 4 or 5 ? destinationAddress : 0,
             destination is 1 or 2 or 4 or 5
                 ? incrementAddress ? (ulong)dwordCount * sizeof(uint) : sizeof(uint)
-                : 0);
+                : 0,
+            eagerGuestMemoryApply: () =>
+            {
+                eagerApplied = ApplyGuestMemory();
+            });
     }
 
     private static (uint Destination, bool IncrementAddress, bool WriteConfirm, uint CachePolicy)

@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 
 using System.Buffers.Binary;
+using SharpEmu.HLE;
 using SharpEmu.Libs.Agc;
 using SharpEmu.ShaderCompiler;
 using SharpEmu.ShaderCompiler.Metal;
@@ -2079,6 +2080,54 @@ internal static partial class MetalVideoPresenter
                     guest.BaseAddress,
                     new ReadOnlySpan<byte>((void*)pointer, guest.Length));
             }
+
+            LatchWaitersOverlappingWriteBack(
+                memory,
+                guest.BaseAddress,
+                guest.Length);
+        }
+    }
+
+    private static void LatchWaitersOverlappingWriteBack(
+        ICpuMemory memory,
+        ulong baseAddress,
+        int length)
+    {
+        if (baseAddress == 0 || length < sizeof(uint))
+        {
+            return;
+        }
+
+        var end = baseAddress > ulong.MaxValue - (ulong)length
+            ? ulong.MaxValue
+            : baseAddress + (ulong)length;
+        Span<byte> bytes = stackalloc byte[sizeof(ulong)];
+        foreach (var waiter in GpuWaitRegistry.SnapshotWaitersInRange(
+                     memory,
+                     baseAddress,
+                     (ulong)length))
+        {
+            var address = waiter.WaitAddress;
+            if (address < baseAddress ||
+                address >= end)
+            {
+                continue;
+            }
+
+            var remaining = end - address;
+            var width = waiter.Is64Bit
+                ? sizeof(ulong)
+                : sizeof(uint);
+            if (remaining < (ulong)width ||
+                !memory.TryRead(address, bytes[..width]))
+            {
+                continue;
+            }
+
+            var value = width == sizeof(ulong)
+                ? BinaryPrimitives.ReadUInt64LittleEndian(bytes)
+                : BinaryPrimitives.ReadUInt32LittleEndian(bytes);
+            _ = GpuWaitRegistry.RecordProduced(memory, address, value);
         }
     }
 

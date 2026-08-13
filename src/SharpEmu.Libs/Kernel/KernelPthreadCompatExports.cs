@@ -1718,7 +1718,14 @@ public static class KernelPthreadCompatExports
         }
     }
 
+    private static readonly bool _adaptiveSelfLockDeadlock = !string.Equals(
+        Environment.GetEnvironmentVariable(
+            "SHARPEMU_PTHREAD_ADAPTIVE_SELF_LOCK_DEADLOCK"),
+        "0",
+        StringComparison.Ordinal);
+
     private static bool IsGuestTrackedSelfLock(CpuContext ctx, ulong mutexAddress, ulong currentThreadId) =>
+        _adaptiveSelfLockDeadlock &&
         KernelMemoryCompatExports.TryReadUInt64Compat(ctx, mutexAddress + 8, out var guestOwner) &&
         guestOwner == currentThreadId;
 

@@ -342,6 +342,46 @@ internal static class GpuWaitRegistry
         return matches;
     }
 
+    public static List<WaitingDcb> SnapshotWaitersInRange(
+        object memory,
+        ulong start,
+        ulong length)
+    {
+        memory = Canonicalize(memory)!;
+        var matches = new List<WaitingDcb>();
+        if (length == 0)
+        {
+            return matches;
+        }
+
+        var end = start > ulong.MaxValue - length
+            ? ulong.MaxValue
+            : start + length;
+        lock (_gate)
+        {
+            foreach (var (address, list) in _waiters)
+            {
+                foreach (var waiter in list)
+                {
+                    var width = waiter.Is64Bit
+                        ? (ulong)sizeof(ulong)
+                        : sizeof(uint);
+                    var waitEnd = address > ulong.MaxValue - width
+                        ? ulong.MaxValue
+                        : address + width;
+                    if (ReferenceEquals(waiter.Memory, memory) &&
+                        start < waitEnd &&
+                        address < end)
+                    {
+                        matches.Add(waiter);
+                    }
+                }
+            }
+        }
+
+        return matches;
+    }
+
     /// <summary>
     /// Records satisfaction for every waiter at <paramref name="address"/> whose
     /// condition is met by <paramref name="value"/> — the value a producer just

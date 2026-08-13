@@ -4529,20 +4529,30 @@ public sealed unsafe partial class DirectExecutionBackend : INativeCpuBackend, I
 					$"rip=0x{interruptedContinuation.Rip:X16}");
 			}
 
-			if (!TryCallGuestFunction(
-					currentContext,
-					pending.Handler,
-					unchecked((ulong)pending.ExceptionType),
-					exceptionContextAddress,
-					pending.ExceptionStackBase + callbackStackOffset,
-					callbackStackSize,
-					$"kernel exception 0x{pending.ExceptionType:X2} safe point",
-					out var callbackError))
+			var interruptedStagedState =
+				GuestThreadExecution.SaveAndResetStagedState();
+			try
 			{
-				Console.Error.WriteLine(
-					$"[LOADER][ERROR] Guest exception safe-point delivery failed: " +
-					$"target=0x{threadHandle:X16} type=0x{pending.ExceptionType:X2} " +
-					$"error={callbackError ?? "unknown"}");
+				if (!TryCallGuestFunction(
+						currentContext,
+						pending.Handler,
+						unchecked((ulong)pending.ExceptionType),
+						exceptionContextAddress,
+						pending.ExceptionStackBase + callbackStackOffset,
+						callbackStackSize,
+						$"kernel exception 0x{pending.ExceptionType:X2} safe point",
+						out var callbackError))
+				{
+					Console.Error.WriteLine(
+						$"[LOADER][ERROR] Guest exception safe-point delivery failed: " +
+						$"target=0x{threadHandle:X16} type=0x{pending.ExceptionType:X2} " +
+						$"error={callbackError ?? "unknown"}");
+				}
+			}
+			finally
+			{
+				GuestThreadExecution.RestoreStagedState(
+					interruptedStagedState);
 			}
 		}
 		finally
@@ -6170,6 +6180,7 @@ public sealed unsafe partial class DirectExecutionBackend : INativeCpuBackend, I
 			}
 			ulong rsp = cpuContext[CpuRegister.Rsp];
 			Console.Error.WriteLine($"[LOADER][ERROR] Stall snapshot: rip=0x{cpuContext.Rip:X16} rsp=0x{rsp:X16} rbp=0x{cpuContext[CpuRegister.Rbp]:X16} rax=0x{cpuContext[CpuRegister.Rax]:X16} rbx=0x{cpuContext[CpuRegister.Rbx]:X16} rcx=0x{cpuContext[CpuRegister.Rcx]:X16} rdx=0x{cpuContext[CpuRegister.Rdx]:X16} rsi=0x{cpuContext[CpuRegister.Rsi]:X16} rdi=0x{cpuContext[CpuRegister.Rdi]:X16}");
+			LogStallGuestCallSites(cpuContext, rsp);
 			ulong num = cpuContext.Rip & 0xFFFFFFFFFFFFFFF0uL;
 			for (int i = 0; i < _importEntries.Length; i++)
 			{
@@ -6261,6 +6272,41 @@ public sealed unsafe partial class DirectExecutionBackend : INativeCpuBackend, I
 		catch
 		{
 		}
+	}
+
+	private static void LogStallGuestCallSites(
+		CpuContext cpuContext,
+		ulong rsp)
+	{
+		if (rsp == 0)
+		{
+			return;
+		}
+
+		var builder = new System.Text.StringBuilder(256);
+		var found = 0;
+		for (var offset = 0UL;
+			 offset < 0x400 && found < 12;
+			 offset += sizeof(ulong))
+		{
+			if (!cpuContext.TryReadUInt64(rsp + offset, out var candidate) ||
+				candidate < GuestImageBase ||
+				candidate >= GuestImageLimit)
+			{
+				continue;
+			}
+
+			if (builder.Length != 0)
+			{
+				builder.Append(',');
+			}
+			builder.Append($"+0x{offset:X}:0x{candidate:X}");
+			found++;
+		}
+
+		Console.Error.WriteLine(
+			$"[LOADER][ERROR] Stall guest call-sites rsp=0x{rsp:X16}: " +
+			$"{(builder.Length == 0 ? "none" : builder.ToString())}");
 	}
 
 	private unsafe static bool TryCaptureHostThreadContext(int hostThreadId, out HostThreadContextSnapshot snapshot)

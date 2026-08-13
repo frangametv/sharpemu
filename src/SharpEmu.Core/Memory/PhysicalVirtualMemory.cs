@@ -1304,9 +1304,32 @@ public sealed unsafe class PhysicalVirtualMemory : IVirtualMemory, IGuestMemoryA
         // there). Pre-visit the span so tracked pages are unprotected and
         // their owners dirtied before the copy; guest addresses are
         // host-identical, matching the tracker's fault addresses.
-        GuestImageWriteTracker.NotifyManagedWrite(virtualAddress, (ulong)source.Length);
+        var leasedManagedWrite = GuestImageWriteTracker.BeginManagedWrite(
+            virtualAddress,
+            (ulong)source.Length,
+            out var trackedPagesWritable);
+        try
+        {
+            return TryWriteLeased(
+                virtualAddress,
+                source,
+                trackedPagesWritable);
+        }
+        finally
+        {
+            if (leasedManagedWrite)
+            {
+                GuestImageWriteTracker.EndManagedWrite();
+            }
+        }
+    }
 
-        var requiresExclusiveAccess = false;
+    private bool TryWriteLeased(
+        ulong virtualAddress,
+        ReadOnlySpan<byte> source,
+        bool trackedPagesWritable)
+    {
+        var requiresExclusiveAccess = !trackedPagesWritable;
         _gate.EnterReadLock();
         try
         {
@@ -1332,7 +1355,8 @@ public sealed unsafe class PhysicalVirtualMemory : IVirtualMemory, IGuestMemoryA
                     }
                 }
 
-                if (!CanWriteWithoutProtectionChange((ulong)destPtr, (ulong)source.Length, region))
+                if (requiresExclusiveAccess ||
+                    !CanWriteWithoutProtectionChange((ulong)destPtr, (ulong)source.Length, region))
                 {
                     requiresExclusiveAccess = true;
                 }
@@ -1388,13 +1412,19 @@ public sealed unsafe class PhysicalVirtualMemory : IVirtualMemory, IGuestMemoryA
             return false;
         }
 
-        // Match TryWrite's managed-write notification before touching an
-        // identity-mapped guest page protected by the image tracker.
-        GuestImageWriteTracker.NotifyManagedWrite(destinationAddress, length);
+        var leasedManagedWrite = GuestImageWriteTracker.BeginManagedWrite(
+            destinationAddress,
+            length,
+            out var trackedPagesWritable);
 
         _gate.EnterReadLock();
         try
         {
+            if (!trackedPagesWritable)
+            {
+                return false;
+            }
+
             var sourceRegion = FindRegion(sourceAddress, length);
             var destinationRegion = FindRegion(destinationAddress, length);
             if (sourceRegion is null || destinationRegion is null ||
@@ -1428,6 +1458,10 @@ public sealed unsafe class PhysicalVirtualMemory : IVirtualMemory, IGuestMemoryA
         finally
         {
             _gate.ExitReadLock();
+            if (leasedManagedWrite)
+            {
+                GuestImageWriteTracker.EndManagedWrite();
+            }
         }
     }
 
