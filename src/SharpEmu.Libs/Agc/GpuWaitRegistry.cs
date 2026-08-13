@@ -49,6 +49,10 @@ internal static class GpuWaitRegistry
         // (Stopwatch ticks) after which the waiter is resumed even if unsatisfied,
         // so a legitimately empty indirect dispatch can never stall forever.
         public long RetryDeadlineTicks;
+        // Set only when CollectDeadlockBroken used the shortened threshold for
+        // a label which had already required one conservative deadlock break.
+        // Diagnostic only; it does not participate in wait matching.
+        public bool UsedLearnedDeadlockRecovery;
     }
 
     private static readonly object _gate = new();
@@ -58,12 +62,23 @@ internal static class GpuWaitRegistry
     // concurrently, so a label written -> reset -> re-waited across queues can
     // cycle forever even though a real producer did signal it. Keyed by (memory,
     // address) so distinct guest processes never alias.
-    private static readonly Dictionary<(object, ulong), ulong> _lastProduced = new();
+    private readonly record struct ProducedLabelState(
+        ulong Value,
+        long Generation,
+        long ConsumedGeneration);
+
+    private static readonly Dictionary<(object, ulong), ProducedLabelState> _lastProduced = new();
+    private static long _producedGeneration;
     // A narrow AGC bookkeeping wait that timed out without any observable
     // producer would otherwise suspend again at every occurrence in the same
     // command stream. Remember those labels until a real producer appears.
     private static readonly HashSet<(object Memory, ulong Address)>
         _recoveredProducerless = new();
+    // The first producer-backed deadlock on a label keeps the conservative
+    // timeout. Once that exact narrow AGC bookkeeping label has demonstrably
+    // hit the serial-parser cycle, later recurrences may use a shorter timeout.
+    private static readonly HashSet<(object Memory, ulong Address)>
+        _learnedProducerBackedDeadlocks = new();
 
     // Unwraps to the shared root: per-thread TrackedCpuMemory decorators
     // over ONE virtual memory are not reference-equal, so a raw-reference
@@ -393,28 +408,36 @@ internal static class GpuWaitRegistry
     public static bool LatchSatisfiedByValue(object memory, ulong address, ulong value)
     {
         memory = Canonicalize(memory)!;
-        var latchedAny = false;
         lock (_gate)
         {
-            if (!_waiters.TryGetValue(address, out var list))
+            return LatchSatisfiedByValueLocked(memory, address, value);
+        }
+    }
+
+    private static bool LatchSatisfiedByValueLocked(
+        object memory,
+        ulong address,
+        ulong value)
+    {
+        var latchedAny = false;
+        if (!_waiters.TryGetValue(address, out var list))
+        {
+            return false;
+        }
+
+        for (var i = 0; i < list.Count; i++)
+        {
+            var waiter = list[i];
+            if (waiter.Latched ||
+                !ReferenceEquals(waiter.Memory, memory) ||
+                !Compare(waiter, value))
             {
-                return false;
+                continue;
             }
 
-            for (var i = 0; i < list.Count; i++)
-            {
-                var waiter = list[i];
-                if (waiter.Latched ||
-                    !ReferenceEquals(waiter.Memory, memory) ||
-                    !Compare(waiter, value))
-                {
-                    continue;
-                }
-
-                waiter.Latched = true;
-                list[i] = waiter;
-                latchedAny = true;
-            }
+            waiter.Latched = true;
+            list[i] = waiter;
+            latchedAny = true;
         }
 
         return latchedAny;
@@ -725,11 +748,66 @@ internal static class GpuWaitRegistry
                 PruneUnwatchedProducedLocked();
             }
 
-            _lastProduced[(memory, address)] = value;
+            var key = (memory, address);
+            var generation = ++_producedGeneration;
+            var previousConsumed = _lastProduced.TryGetValue(key, out var previous)
+                ? previous.ConsumedGeneration
+                : 0;
+            var produced = new ProducedLabelState(
+                value,
+                generation,
+                previousConsumed);
+            _lastProduced[key] = produced;
             _recoveredProducerless.Remove((memory, address));
+
+            // A write that finds a live waiter has already spent this edge: the
+            // waiter is latched now and CollectSatisfied will resume it. When no
+            // waiter exists, retain one credit for the narrow AGC bookkeeping
+            // case where the serial parser observes the label reset before it
+            // gets to the corresponding wait.
+            var latched = LatchSatisfiedByValueLocked(memory, address, value);
+            if (latched)
+            {
+                _lastProduced[key] = produced with
+                {
+                    ConsumedGeneration = generation,
+                };
+            }
+
+            return latched;
+        }
+    }
+
+    /// <summary>
+    /// Consumes one previously unobserved real producer edge when its value
+    /// satisfies <paramref name="waiter"/>. This is deliberately one-shot: a
+    /// stale historical value cannot release every future reuse of the label.
+    /// AgcExports uses it only for the recovered Gen5 AGC bookkeeping shape.
+    /// </summary>
+    public static bool TryConsumeProducedSatisfaction(in WaitingDcb waiter)
+    {
+        var memory = Canonicalize(waiter.Memory);
+        if (memory is null)
+        {
+            return false;
         }
 
-        return LatchSatisfiedByValue(memory, address, value);
+        lock (_gate)
+        {
+            var key = (memory, waiter.WaitAddress);
+            if (!_lastProduced.TryGetValue(key, out var produced) ||
+                produced.Generation == produced.ConsumedGeneration ||
+                !Compare(waiter, produced.Value))
+            {
+                return false;
+            }
+
+            _lastProduced[key] = produced with
+            {
+                ConsumedGeneration = produced.Generation,
+            };
+            return true;
+        }
     }
 
     /// <summary>
@@ -743,7 +821,8 @@ internal static class GpuWaitRegistry
     public static List<WaitingDcb>? CollectDeadlockBroken(
         object memory,
         long nowTicks,
-        long minAgeTicks)
+        long minAgeTicks,
+        long learnedMinAgeTicks = long.MaxValue)
     {
         memory = Canonicalize(memory)!;
         List<WaitingDcb>? broken = null;
@@ -755,14 +834,26 @@ internal static class GpuWaitRegistry
                 for (var i = list.Count - 1; i >= 0; i--)
                 {
                     var waiter = list[i];
+                    var key = (memory, address);
+                    var learned = IsLearnableAgcBookkeepingWait(waiter) &&
+                                  _learnedProducerBackedDeadlocks.Contains(key);
+                    var requiredAgeTicks = learned
+                        ? Math.Min(minAgeTicks, learnedMinAgeTicks)
+                        : minAgeTicks;
                     if (!ReferenceEquals(waiter.Memory, memory) ||
-                        nowTicks - waiter.RegisteredTicks < minAgeTicks ||
-                        !_lastProduced.TryGetValue((memory, address), out var produced) ||
-                        !Compare(waiter, produced))
+                        nowTicks - waiter.RegisteredTicks < requiredAgeTicks ||
+                        !_lastProduced.TryGetValue(key, out var produced) ||
+                        !Compare(waiter, produced.Value))
                     {
                         continue;
                     }
 
+                    if (IsLearnableAgcBookkeepingWait(waiter))
+                    {
+                        _learnedProducerBackedDeadlocks.Add(key);
+                    }
+
+                    waiter.UsedLearnedDeadlockRecovery = learned;
                     broken ??= new List<WaitingDcb>();
                     broken.Add(waiter);
                     list.RemoveAt(i);
@@ -786,6 +877,13 @@ internal static class GpuWaitRegistry
 
         return broken;
     }
+
+    private static bool IsLearnableAgcBookkeepingWait(in WaitingDcb waiter) =>
+        !waiter.IsStandard &&
+        waiter.Is64Bit &&
+        waiter.CompareFunction == 3 &&
+        waiter.Mask == uint.MaxValue &&
+        (waiter.ReferenceValue & waiter.Mask) == 1;
 
     // Under orphan force-submit, producers can run ahead of waiter
     // registration and pass an equal-compare value before it's ever seen.
@@ -828,6 +926,8 @@ internal static class GpuWaitRegistry
             _waiters.Clear();
             _lastProduced.Clear();
             _recoveredProducerless.Clear();
+            _learnedProducerBackedDeadlocks.Clear();
+            _producedGeneration = 0;
         }
     }
 }

@@ -90,6 +90,10 @@ internal sealed record VulkanOrderedGuestAction(
     Action Action,
     string DebugName);
 
+internal sealed record VulkanGuestCompletionAction(
+    Action Action,
+    string DebugName);
+
 internal sealed record VulkanOrderedGuestFlip(
     long Version,
     int VideoOutHandle,
@@ -624,6 +628,8 @@ internal static unsafe class VulkanVideoPresenter
     private static readonly HashSet<string> _tracedFenceTimeouts = new();
     private static long _guestQueueBackpressureTraceCount;
     private static long _orderedActionFenceWaitTraceCount;
+    private static long _guestCompletionAttachedTraceCount;
+    private static long _guestCompletionImmediateTraceCount;
     private static long _guestQueueStarvationTraceCount;
     private static long _guestQueueStarvationLastQueued = -1;
     // Zero-payload sync (ordered actions / flip markers) may exceed the
@@ -1934,6 +1940,49 @@ internal static unsafe class VulkanVideoPresenter
     }
 
     /// <summary>
+    /// Queues a completion-only callback at the current logical queue position.
+    /// The presenter attaches it to the preceding Vulkan submission's fence and
+    /// keeps draining later GPU work instead of polling that fence synchronously.
+    /// </summary>
+    public static bool SubmitGuestCompletionAction(Action action, string debugName)
+    {
+        ArgumentNullException.ThrowIfNull(action);
+        lock (_gate)
+        {
+            if (_closed || _thread is null)
+            {
+                return false;
+            }
+
+            return EnqueueGuestWorkLocked(
+                new VulkanGuestCompletionAction(action, debugName)) != 0;
+        }
+    }
+
+    internal static void ExecuteGuestCompletionActions(
+        IReadOnlyList<VulkanGuestCompletionAction> actions)
+    {
+        foreach (var completion in actions)
+        {
+            try
+            {
+                completion.Action();
+                RenderPhaseProfile.RecordOrderedAction(
+                    $"async:{completion.DebugName}",
+                    completed: true);
+            }
+            catch (Exception exception)
+            {
+                // One malformed guest callback must not prevent later label
+                // and event completions on the same fence from being published.
+                Console.Error.WriteLine(
+                    $"[LOADER][ERROR] vk.guest_completion_action_failed " +
+                    $"name='{completion.DebugName}': {exception}");
+            }
+        }
+    }
+
+    /// <summary>
     /// Sequence currently being executed by the single guest-work consumer.
     /// Intended only for address-filtered lifetime diagnostics emitted from a
     /// guest-work callback before <see cref="CompleteGuestWork"/> advances it.
@@ -3020,9 +3069,13 @@ internal static unsafe class VulkanVideoPresenter
                 $"required={requiredSequence} queue={queue.Name} " +
                 $"immediate={_enqueueAsImmediateQueueFollowup} " +
                 $"work={work.GetType().Name}" +
-                (work is VulkanOrderedGuestAction ordered
-                    ? $" name='{ordered.DebugName}'"
-                    : string.Empty));
+                (work switch
+                {
+                    VulkanOrderedGuestAction ordered => $" name='{ordered.DebugName}'",
+                    VulkanGuestCompletionAction completion =>
+                        $" name='{completion.DebugName}'",
+                    _ => string.Empty,
+                }));
         }
         if (_enqueueAsImmediateQueueFollowup &&
             _immediateFollowupTail is { List: not null } tail &&
@@ -3063,6 +3116,7 @@ internal static unsafe class VulkanVideoPresenter
 
     private static bool IsPrioritySyncGuestWork(object work) => work is
         VulkanOrderedGuestAction or
+        VulkanGuestCompletionAction or
         VulkanOrderedGuestFlip or
         VulkanOrderedGuestFlipWait;
 
@@ -3080,6 +3134,11 @@ internal static unsafe class VulkanVideoPresenter
                 if (work is VulkanOrderedGuestAction ordered)
                 {
                     var prefix = GetOrderedActionDebugPrefix(ordered.DebugName);
+                    orderedNameCounts[prefix] = orderedNameCounts.GetValueOrDefault(prefix) + 1;
+                }
+                else if (work is VulkanGuestCompletionAction completion)
+                {
+                    var prefix = GetOrderedActionDebugPrefix(completion.DebugName);
                     orderedNameCounts[prefix] = orderedNameCounts.GetValueOrDefault(prefix) + 1;
                 }
             }
@@ -4193,7 +4252,13 @@ internal static unsafe class VulkanVideoPresenter
             string DebugName,
             VulkanGuestQueueIdentity Queue,
             long WorkSequence,
-            long SubmittedTicks);
+            long SubmittedTicks)
+        {
+            // Completion-only PM4 effects are attached to the exact preceding
+            // submission. Vulkan queue order then provides hardware-like
+            // completion semantics without a CPU fence round-trip per packet.
+            public List<VulkanGuestCompletionAction> CompletionActions { get; } = [];
+        }
 
         private sealed record InlineRefreshReadbackTrace(
             GuestImageResource Image,
@@ -6413,6 +6478,8 @@ internal static unsafe class VulkanVideoPresenter
                 _completedTimeline = submission.Timeline;
             }
 
+            VulkanVideoPresenter.ExecuteGuestCompletionActions(submission.CompletionActions);
+
             if (!_deviceLost)
             {
                 foreach (var image in submission.TraceImages)
@@ -6636,6 +6703,62 @@ internal static unsafe class VulkanVideoPresenter
             }
 
             return true;
+        }
+
+        private void ScheduleGuestCompletionAction(VulkanGuestCompletionAction work)
+        {
+            FlushBatchedGuestCommands();
+            if (!_lastSubmittedTimelineByGuestQueue.TryGetValue(
+                    _activeGuestQueue.Name,
+                    out var targetTimeline) ||
+                targetTimeline <= _completedTimeline)
+            {
+                VulkanVideoPresenter.ExecuteGuestCompletionActions([work]);
+                TraceGuestCompletionScheduling(
+                    "immediate",
+                    ref _guestCompletionImmediateTraceCount,
+                    work,
+                    targetTimeline);
+                return;
+            }
+
+            foreach (var submission in _pendingGuestSubmissions)
+            {
+                if (submission.Timeline != targetTimeline)
+                {
+                    continue;
+                }
+
+                submission.CompletionActions.Add(work);
+                TraceGuestCompletionScheduling(
+                    "attached",
+                    ref _guestCompletionAttachedTraceCount,
+                    work,
+                    targetTimeline);
+                return;
+            }
+
+            throw new InvalidOperationException(
+                $"Guest completion queue '{_activeGuestQueue.Name}' lost pending timeline " +
+                $"{targetTimeline} (completed={_completedTimeline}).");
+        }
+
+        private void TraceGuestCompletionScheduling(
+            string mode,
+            ref long counter,
+            VulkanGuestCompletionAction work,
+            ulong targetTimeline)
+        {
+            var count = Interlocked.Increment(ref counter);
+            if (count > 8 && (count & (count - 1)) != 0)
+            {
+                return;
+            }
+
+            Console.Error.WriteLine(
+                $"[LOADER][TRACE] vk.guest_completion_{mode} count={count} " +
+                $"queue={_activeGuestQueue.Name} timeline={targetTimeline} " +
+                $"completed={_completedTimeline} name='{work.DebugName}'");
         }
 
         private void ExecuteOrderedGuestFlip(VulkanOrderedGuestFlip work)
@@ -17160,6 +17283,13 @@ internal static unsafe class VulkanVideoPresenter
                             }
 
                             break;
+                        case VulkanGuestCompletionAction completionAction:
+                            using (RenderPhaseProfile.Measure(RenderPhaseProfile.Phase.OrderedAction))
+                            {
+                                ScheduleGuestCompletionAction(completionAction);
+                            }
+
+                            break;
                         case VulkanOrderedGuestFlip orderedFlip:
                             using (RenderPhaseProfile.Measure(RenderPhaseProfile.Phase.Flip))
                             {
@@ -17194,18 +17324,13 @@ internal static unsafe class VulkanVideoPresenter
 
                 if (deferGuestWork)
                 {
-                    // macOS uses a non-blocking defer so sibling queues may
-                    // progress. Windows/Linux have already waited on fences;
-                    // end this drain and retry the retained head next tick.
-                    if (OperatingSystem.IsMacOS())
-                    {
-                        deferredOrderedQueues ??= new HashSet<string>(StringComparer.Ordinal);
-                        deferredOrderedQueues.Add(pendingGuestWork.Queue.Name);
-                    }
-                    else
-                    {
-                        break;
-                    }
+                    // Preserve FIFO within the blocked logical queue, but do
+                    // not stall independent graphics/compute queues behind it.
+                    // The old Windows/Linux path stopped the entire drain after
+                    // each 2 ms fence probe, multiplying one genuine dependency
+                    // into a presenter-wide serialization point.
+                    deferredOrderedQueues ??= new HashSet<string>(StringComparer.Ordinal);
+                    deferredOrderedQueues.Add(pendingGuestWork.Queue.Name);
                 }
 
                 if (workStart != 0)
@@ -21338,6 +21463,8 @@ internal static unsafe class VulkanVideoPresenter
                     $"image_write addr=0x{imageWrite.Address:X16} {queuePart}",
                 VulkanOrderedGuestAction action =>
                     $"ordered_action name={action.DebugName} {queuePart}",
+                VulkanGuestCompletionAction completion =>
+                    $"completion_action name={completion.DebugName} {queuePart}",
                 VulkanOrderedGuestFlip flip =>
                     $"ordered_flip version={flip.Version} " +
                     $"buf={flip.DisplayBufferIndex} addr=0x{flip.Address:X16} {queuePart}",

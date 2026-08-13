@@ -59,6 +59,87 @@ public sealed class GpuWaitRegistryProducedRetentionTests
         GpuWaitRegistry.Clear();
     }
 
+    [Fact]
+    public void ProducedEdgeCanSatisfyExactlyOneLaterWait()
+    {
+        GpuWaitRegistry.Clear();
+        var memory = new object();
+        var waiter = NewWaiter(memory, WatchedLabel);
+
+        Assert.False(GpuWaitRegistry.RecordProduced(memory, WatchedLabel, 1));
+        Assert.True(GpuWaitRegistry.TryConsumeProducedSatisfaction(waiter));
+        Assert.False(GpuWaitRegistry.TryConsumeProducedSatisfaction(waiter));
+
+        // A new real write creates a fresh one-shot edge.
+        Assert.False(GpuWaitRegistry.RecordProduced(memory, WatchedLabel, 1));
+        Assert.True(GpuWaitRegistry.TryConsumeProducedSatisfaction(waiter));
+        GpuWaitRegistry.Clear();
+    }
+
+    [Fact]
+    public void ProducerThatLatchedLiveWaitHasNoFutureCredit()
+    {
+        GpuWaitRegistry.Clear();
+        var memory = new object();
+        var waiter = NewWaiter(memory, WatchedLabel);
+        GpuWaitRegistry.Register(WatchedLabel, waiter);
+
+        Assert.True(GpuWaitRegistry.RecordProduced(memory, WatchedLabel, 1));
+        Assert.False(GpuWaitRegistry.TryConsumeProducedSatisfaction(waiter));
+        GpuWaitRegistry.Clear();
+    }
+
+    [Fact]
+    public void RecurrentAgcDeadlockUsesShortThresholdOnlyAfterFirstBreak()
+    {
+        GpuWaitRegistry.Clear();
+        var memory = new object();
+        var waiter = NewWaiter(memory, WatchedLabel);
+        waiter.Is64Bit = true;
+
+        GpuWaitRegistry.RecordProduced(memory, WatchedLabel, 1);
+        GpuWaitRegistry.Register(WatchedLabel, waiter);
+
+        // The first encounter cannot use the learned 10-tick threshold.
+        Assert.Null(GpuWaitRegistry.CollectDeadlockBroken(
+            memory, nowTicks: 50, minAgeTicks: 100, learnedMinAgeTicks: 10));
+
+        var first = GpuWaitRegistry.CollectDeadlockBroken(
+            memory, nowTicks: 100, minAgeTicks: 100, learnedMinAgeTicks: 10);
+        Assert.NotNull(first);
+        Assert.False(Assert.Single(first!).UsedLearnedDeadlockRecovery);
+
+        waiter.RegisteredTicks = 100;
+        GpuWaitRegistry.Register(WatchedLabel, waiter);
+        var recurrent = GpuWaitRegistry.CollectDeadlockBroken(
+            memory, nowTicks: 110, minAgeTicks: 100, learnedMinAgeTicks: 10);
+
+        Assert.NotNull(recurrent);
+        Assert.True(Assert.Single(recurrent!).UsedLearnedDeadlockRecovery);
+        GpuWaitRegistry.Clear();
+    }
+
+    [Fact]
+    public void StandardWaitNeverLearnsShortDeadlockThreshold()
+    {
+        GpuWaitRegistry.Clear();
+        var memory = new object();
+        var waiter = NewWaiter(memory, WatchedLabel);
+        waiter.Is64Bit = true;
+        waiter.IsStandard = true;
+
+        GpuWaitRegistry.RecordProduced(memory, WatchedLabel, 1);
+        GpuWaitRegistry.Register(WatchedLabel, waiter);
+        Assert.NotNull(GpuWaitRegistry.CollectDeadlockBroken(
+            memory, nowTicks: 100, minAgeTicks: 100, learnedMinAgeTicks: 10));
+
+        waiter.RegisteredTicks = 100;
+        GpuWaitRegistry.Register(WatchedLabel, waiter);
+        Assert.Null(GpuWaitRegistry.CollectDeadlockBroken(
+            memory, nowTicks: 110, minAgeTicks: 100, learnedMinAgeTicks: 10));
+        GpuWaitRegistry.Clear();
+    }
+
     private static GpuWaitRegistry.WaitingDcb NewWaiter(object memory, ulong address) => new()
     {
         WaitAddress = address,

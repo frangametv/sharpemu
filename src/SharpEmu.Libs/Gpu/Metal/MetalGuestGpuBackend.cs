@@ -415,6 +415,12 @@ internal sealed class MetalGuestGpuBackend : IGuestGpuBackend
     public long SubmitOrderedGuestAction(Action action, string debugName) =>
         MetalVideoPresenter.SubmitOrderedGuestAction(action, debugName);
 
+    // Metal keeps the established strict path for now. Vulkan owns the
+    // non-blocking fence callback implementation; retaining strict ordering here
+    // avoids changing the macOS backend without a Metal completion-handler test.
+    public bool SubmitGuestCompletionAction(Action action, string debugName) =>
+        MetalVideoPresenter.SubmitOrderedGuestAction(action, debugName) != 0;
+
     public long SubmitOrderedGuestFlipWait(int videoOutHandle, int displayBufferIndex) =>
         MetalVideoPresenter.SubmitOrderedGuestFlipWait(videoOutHandle, displayBufferIndex);
 

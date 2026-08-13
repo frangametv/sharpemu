@@ -231,6 +231,16 @@ internal interface IGuestGpuBackend
     /// returns its work sequence, or 0 when nothing could be enqueued.</summary>
     long SubmitOrderedGuestAction(Action action, string debugName);
 
+    /// <summary>
+    /// Enqueues a CPU callback that becomes eligible when all GPU work preceding it
+    /// in the current logical queue has completed. Unlike an ordered action, this
+    /// callback does not block later GPU command recording while the fence is in
+    /// flight. Use only for completion notifications and known-value guest-memory
+    /// writes that cannot enqueue backend work or affect later commands in the same
+    /// queue.
+    /// </summary>
+    bool SubmitGuestCompletionAction(Action action, string debugName);
+
     /// <summary>Preserves sceAgcDcbWaitUntilSafeForRendering in queue order.</summary>
     long SubmitOrderedGuestFlipWait(int videoOutHandle, int displayBufferIndex);
 

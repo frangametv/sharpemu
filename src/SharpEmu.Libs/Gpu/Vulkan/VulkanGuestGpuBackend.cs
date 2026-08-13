@@ -425,6 +425,9 @@ internal sealed class VulkanGuestGpuBackend : IGuestGpuBackend
     public long SubmitOrderedGuestAction(Action action, string debugName) =>
         VulkanVideoPresenter.SubmitOrderedGuestAction(action, debugName);
 
+    public bool SubmitGuestCompletionAction(Action action, string debugName) =>
+        VulkanVideoPresenter.SubmitGuestCompletionAction(action, debugName);
+
     public long SubmitOrderedGuestFlipWait(int videoOutHandle, int displayBufferIndex) =>
         VulkanVideoPresenter.SubmitOrderedGuestFlipWait(videoOutHandle, displayBufferIndex);
 

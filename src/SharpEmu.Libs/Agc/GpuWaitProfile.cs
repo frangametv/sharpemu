@@ -35,6 +35,9 @@ internal static class GpuWaitProfile
     private static long _suspensions;
     private static long _resumes;
     private static long _producerless;
+    private static long _producedCredits;
+    private static long _deadlockBreaks;
+    private static long _learnedDeadlockBreaks;
     private static long _monitorPolls;
     private static long _monitorEmptyPolls;
     private static double _totalWaitMilliseconds;
@@ -79,6 +82,33 @@ internal static class GpuWaitProfile
                 var existing = _byLabel.TryGetValue(label, out var entry) ? entry : default;
                 _byLabel[label] = (existing.Count + 1, existing.Milliseconds + waitedMilliseconds);
             }
+        }
+    }
+
+    public static void RecordProducedCredit()
+    {
+        if (!Enabled)
+        {
+            return;
+        }
+
+        lock (_gate)
+        {
+            _producedCredits++;
+        }
+    }
+
+    public static void RecordDeadlockBreak(bool learned)
+    {
+        if (!Enabled)
+        {
+            return;
+        }
+
+        lock (_gate)
+        {
+            _deadlockBreaks++;
+            _learnedDeadlockBreaks += learned ? 1 : 0;
         }
     }
 
@@ -138,6 +168,9 @@ internal static class GpuWaitProfile
             line =
                 $"[PERF][GPUWAIT] {seconds:F1}s suspend/s={_suspensions / seconds:F0} " +
                 $"resume/s={_resumes / seconds:F0} producerless/s={_producerless / seconds:F0} " +
+                $"produced_credit/s={_producedCredits / seconds:F0} " +
+                $"deadlock/s={_deadlockBreaks / seconds:F0} " +
+                $"learned/s={_learnedDeadlockBreaks / seconds:F0} " +
                 $"blocked_ms/s={_totalWaitMilliseconds / seconds:F0} " +
                 $"avg_ms={(_resumes > 0 ? _totalWaitMilliseconds / _resumes : 0):F2} " +
                 $"max_ms={_maxWaitMilliseconds:F1} " +
@@ -148,6 +181,9 @@ internal static class GpuWaitProfile
             _suspensions = 0;
             _resumes = 0;
             _producerless = 0;
+            _producedCredits = 0;
+            _deadlockBreaks = 0;
+            _learnedDeadlockBreaks = 0;
             _monitorPolls = 0;
             _monitorEmptyPolls = 0;
             _totalWaitMilliseconds = 0;

@@ -6242,9 +6242,9 @@ public static partial class AgcExports
         // ThreadPool hop, either of which can only make the interrupt late and
         // reorder it against registration changes (and can wake Unity while its
         // upload data is still stale).
-        if (GuestGpu.Current.SubmitOrderedGuestAction(
+        if (!GuestGpu.Current.SubmitGuestCompletionAction(
                 TriggerCompletionEvents,
-                $"agc submit completion {submissionId}") == 0)
+                $"agc submit completion {submissionId}"))
         {
             TriggerCompletionEvents();
         }
@@ -7304,7 +7304,8 @@ public static partial class AgcExports
         ulong producerLength = 0,
         bool deferLabelCompletion = false,
         Action? eagerGuestMemoryApply = null,
-        bool eagerWatchedLabelWrite = false)
+        bool eagerWatchedLabelWrite = false,
+        bool nonBlockingCompletion = false)
     {
         if (eagerGuestMemoryApply is not null &&
             _eagerGpuDataWritesEnabled &&
@@ -7375,9 +7376,10 @@ public static partial class AgcExports
             }
         }
 
-        if (GuestGpu.Current.SubmitOrderedGuestAction(
-                ApplyAndQueueCompletion,
-                debugName) == 0)
+        var submitted = nonBlockingCompletion
+            ? GuestGpu.Current.SubmitGuestCompletionAction(ApplyAndQueueCompletion, debugName)
+            : GuestGpu.Current.SubmitOrderedGuestAction(ApplyAndQueueCompletion, debugName) != 0;
+        if (!submitted)
         {
             // Headless/startup submissions have no Vulkan queue to order
             // against, so retaining the previous immediate behavior is exact.
@@ -8344,7 +8346,8 @@ public static partial class AgcExports
             eagerGuestMemoryApply: () =>
             {
                 eagerApplied = ApplyGuestMemory();
-            });
+            },
+            nonBlockingCompletion: true);
     }
 
     private static (uint Destination, bool IncrementAddress, bool WriteConfirm, uint CachePolicy)
@@ -8545,6 +8548,17 @@ public static partial class AgcExports
              out var deadlockMs) && deadlockMs > 0
             ? deadlockMs
             : 500L) * System.Diagnostics.Stopwatch.Frequency / 1000L;
+
+    // A label must first hit the conservative breaker above before it becomes
+    // eligible for this shorter recurrent timeout. This removes the repeated
+    // half-second freeze from Astro Bot's recycled AGC bookkeeping labels while
+    // leaving the first occurrence and every other WAIT_REG_MEM shape unchanged.
+    private static readonly long _gpuRecurrentDeadlockBreakTicks =
+        (long.TryParse(
+             Environment.GetEnvironmentVariable("SHARPEMU_GPU_RECURRENT_DEADLOCK_BREAK_MS"),
+             out var recurrentDeadlockMs) && recurrentDeadlockMs > 0
+            ? recurrentDeadlockMs
+            : 8L) * System.Diagnostics.Stopwatch.Frequency / 1000L;
 
     // Astro Bot uses a small set of AGC-NOP 64-bit bookkeeping waits whose
     // corresponding producer packet is not present in any command stream the
@@ -8915,6 +8929,13 @@ public static partial class AgcExports
 
         if (hasCurrent && GpuWaitRegistry.Compare(waiter, currentValue))
         {
+            if (IsProducedCreditEligible(waiter))
+            {
+                // Mark the matching producer edge observed while the label is
+                // still live, so it cannot be replayed after a later reset.
+                GpuWaitRegistry.TryConsumeProducedSatisfaction(waiter);
+            }
+
             return false; // already satisfied — keep parsing
         }
 
@@ -8931,6 +8952,27 @@ public static partial class AgcExports
         if (!hasCurrent)
         {
             return false; // cannot evaluate the label — do not stall the DCB
+        }
+
+        // The Gen5 AGC queue bookkeeping labels are written 0 -> 1 and then
+        // quickly recycled to 0. With concurrently running hardware queues the
+        // wait observes that edge; our serial command-stream parser can reach the
+        // reset after the real producer completed but before it reaches the wait.
+        // Consume that real edge once instead of paying the 500ms deadlock-break
+        // delay every frame. One-shot consumption prevents an ancient producer
+        // from satisfying future label generations.
+        if (IsProducedCreditEligible(waiter) &&
+            GpuWaitRegistry.TryConsumeProducedSatisfaction(waiter))
+        {
+            GpuWaitProfile.RecordProducedCredit();
+            if (tracePacket)
+            {
+                TraceAgc(
+                    $"agc.produced_credit_consumed label=0x{waitAddress:X16} " +
+                    $"queue={state.QueueName} submission={state.ActiveSubmissionId}");
+            }
+
+            return false;
         }
 
         // Once this exact AGC bookkeeping shape has timed out without any
@@ -8970,6 +9012,14 @@ public static partial class AgcExports
 
         return true;
     }
+
+    private static bool IsProducedCreditEligible(
+        in GpuWaitRegistry.WaitingDcb waiter) =>
+        !waiter.IsStandard &&
+        waiter.Is64Bit &&
+        waiter.CompareFunction == 3 &&
+        waiter.Mask == uint.MaxValue &&
+        (waiter.ReferenceValue & waiter.Mask) == 1;
 
     /// <summary>
     /// Direct guest CPU stores can satisfy a GPU wait without crossing another
@@ -9289,11 +9339,15 @@ public static partial class AgcExports
             // fires for genuinely wedged waits, so fast-resolving ones on working
             // titles are untouched.
             var deadlockBroken = GpuWaitRegistry.CollectDeadlockBroken(
-                ctx.Memory, System.Diagnostics.Stopwatch.GetTimestamp(), _gpuDeadlockBreakTicks);
+                ctx.Memory,
+                System.Diagnostics.Stopwatch.GetTimestamp(),
+                _gpuDeadlockBreakTicks,
+                _gpuRecurrentDeadlockBreakTicks);
             if (deadlockBroken is not null)
             {
                 foreach (var waiter in deadlockBroken)
                 {
+                    GpuWaitProfile.RecordDeadlockBreak(waiter.UsedLearnedDeadlockRecovery);
                     if (tracePackets)
                     {
                         TraceAgc(
@@ -9572,7 +9626,8 @@ public static partial class AgcExports
             $"release_mem_standard dst=0x{destinationAddress:X16} data=0x{data:X16}",
             packetAddress,
             writesGuestMemory ? destinationAddress : 0,
-            writesGuestMemory ? writeLength : 0);
+            writesGuestMemory ? writeLength : 0,
+            nonBlockingCompletion: true);
     }
 
     private static void TraceSubmittedCopyData(
@@ -9702,7 +9757,8 @@ public static partial class AgcExports
             $"release_mem dst=0x{destinationAddress:X16} data=0x{data:X16}",
             packetAddress,
             dataSelection is 1 or 2 or 3 ? destinationAddress : 0,
-            writeLength);
+            writeLength,
+            nonBlockingCompletion: true);
     }
 
     private static void ReportLabelWriteFailure(

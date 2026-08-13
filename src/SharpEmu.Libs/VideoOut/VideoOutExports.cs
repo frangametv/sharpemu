@@ -1509,9 +1509,9 @@ public static class VideoOutExports
         {
             TriggerFlipEvents();
         }
-        else if (GuestGpu.Current.SubmitOrderedGuestAction(
+        else if (!GuestGpu.Current.SubmitGuestCompletionAction(
                      TriggerFlipEvents,
-                     $"videoout flip complete handle={handle} index={bufferIndex}") == 0)
+                     $"videoout flip complete handle={handle} index={bufferIndex}"))
         {
             // Headless startup has no render queue to order against.
             TriggerFlipEvents();
