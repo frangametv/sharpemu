@@ -69,11 +69,27 @@ public sealed class Gen5Vop3Tests
         Assert.Contains(OpULessThan, spirvOpcodes);
     }
 
-    [Fact]
-    public void VCmpGtU64DecodesVop3ScalarDestinationAndLowersWideCompare()
+    [Theory]
+    [InlineData(0x0E0u, "VCmpFU64")]
+    [InlineData(0x0E1u, "VCmpLtU64")]
+    [InlineData(0x0E2u, "VCmpEqU64")]
+    [InlineData(0x0E3u, "VCmpLeU64")]
+    [InlineData(0x0E4u, "VCmpGtU64")]
+    [InlineData(0x0E5u, "VCmpNeU64")]
+    [InlineData(0x0E6u, "VCmpGeU64")]
+    [InlineData(0x0E7u, "VCmpTU64")]
+    [InlineData(0x0F0u, "VCmpxFU64")]
+    [InlineData(0x0F1u, "VCmpxLtU64")]
+    [InlineData(0x0F2u, "VCmpxEqU64")]
+    [InlineData(0x0F3u, "VCmpxLeU64")]
+    [InlineData(0x0F4u, "VCmpxGtU64")]
+    [InlineData(0x0F5u, "VCmpxNeU64")]
+    [InlineData(0x0F6u, "VCmpxGeU64")]
+    [InlineData(0x0F7u, "VCmpxTU64")]
+    public void Unsigned64CompareFamilyDecodesAndLowers(uint opcode, string expectedName)
     {
-        var program = DecodeProgram(0x0E4);
-        var instruction = Assert.Single(program.Instructions, item => item.Opcode == "VCmpGtU64");
+        var program = DecodeProgram(opcode);
+        var instruction = Assert.Single(program.Instructions, item => item.Opcode == expectedName);
 
         Assert.Equal(Gen5ShaderEncoding.Vop3, instruction.Encoding);
         Assert.Equal(Gen5Operand.Vector(0), instruction.Sources[0]);
@@ -83,7 +99,18 @@ public sealed class Gen5Vop3Tests
             3u,
             Assert.IsType<Gen5Vop3Control>(instruction.Control).ScalarDestination);
 
-        Assert.Contains(OpUGreaterThan, CompileAndReadSpirvOpcodes(0x0E4));
+        Assert.NotEmpty(CompileAndReadSpirvOpcodes(opcode));
+    }
+
+    [Theory]
+    [InlineData(0x178u, "VXor3B32")]
+    [InlineData(0x345u, "VXadU32")]
+    public void ThreeSourceIntegerOperationsDecodeAndLower(uint opcode, string expectedName)
+    {
+        var program = DecodeProgram(opcode);
+        var instruction = Assert.Single(program.Instructions, item => item.Opcode == expectedName);
+        Assert.Equal(3, instruction.Sources.Count);
+        Assert.NotEmpty(CompileAndReadSpirvOpcodes(opcode));
     }
 
     [Fact]

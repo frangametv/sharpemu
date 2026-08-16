@@ -362,7 +362,8 @@ public static partial class Gen5MslTranslator
                 DeclareImageKinds();
                 foreach (var instruction in _state.Program.Instructions)
                 {
-                    _usesLds |= instruction.Control is Gen5DataShareControl { Gds: false };
+                    _usesLds |= instruction.Control is Gen5DataShareControl { Gds: false } &&
+                        instruction.Opcode is not ("DsPermuteB32" or "DsSwizzleB32");
                     _usesFormatLoads |= IsFormatBufferLoad(instruction.Opcode);
                     if (instruction.Control is Gen5InterpolationControl interpolationControl)
                     {
@@ -1518,6 +1519,67 @@ public static partial class Gen5MslTranslator
 
             switch (instruction.Opcode)
             {
+                case "DsPermuteB32":
+                {
+                    if (instruction.Destinations.Count < 1 || instruction.Sources.Count < 2)
+                    {
+                        error = "missing DS permute operand";
+                        return false;
+                    }
+
+                    var address = Temp("uint", RawSource(instruction, 0));
+                    var data = Temp("uint", RawSource(instruction, 1));
+                    var targetLane = Temp(
+                        "uint",
+                        $"((({address}) + {EffectiveDsSingleOffsetBytes(control)}u) >> 2) & 31u");
+                    var active = Temp("uint", "exec ? 1u : 0u");
+                    var result = Temp("uint", "0u");
+                    for (var sourceLane = 0u; sourceLane < 32; sourceLane++)
+                    {
+                        var shuffledTarget = Temp("uint", ShuffleLane(targetLane, $"{sourceLane}u"));
+                        var shuffledData = Temp("uint", ShuffleLane(data, $"{sourceLane}u"));
+                        var shuffledActive = Temp("uint", ShuffleLane(active, $"{sourceLane}u"));
+                        Line($"{result} = ({shuffledActive} != 0u && {shuffledTarget} == (sharpemu_lane & 31u)) ? {shuffledData} : {result};");
+                    }
+
+                    StoreVector(instruction.Destinations[0].Value, result);
+                    return true;
+                }
+                case "DsSwizzleB32":
+                {
+                    if (instruction.Destinations.Count < 1 || instruction.Sources.Count < 1)
+                    {
+                        error = "missing DS swizzle operand";
+                        return false;
+                    }
+
+                    var pattern = control.Offset0 | (control.Offset1 << 8);
+                    string targetExpression;
+                    if ((pattern & 0xFF00) == 0x8000)
+                    {
+                        targetExpression =
+                            $"(sharpemu_lane & 0xFFFFFFFCu) + (({pattern}u >> ((sharpemu_lane & 3u) * 2u)) & 3u)";
+                    }
+                    else if ((pattern & 0x8000) == 0)
+                    {
+                        var andMask = pattern & 0x1F;
+                        var orMask = (pattern >> 5) & 0x1F;
+                        var xorMask = (pattern >> 10) & 0x1F;
+                        targetExpression =
+                            $"(((sharpemu_lane & {andMask}u) | {orMask}u) ^ {xorMask}u)";
+                    }
+                    else
+                    {
+                        error = $"unsupported ds_swizzle pattern 0x{pattern:X4} (rotate/fft mode not implemented)";
+                        return false;
+                    }
+
+                    var targetLane = Temp("uint", $"({targetExpression}) & 31u");
+                    StoreVector(
+                        instruction.Destinations[0].Value,
+                        Temp("uint", ShuffleLane(RawSource(instruction, 0), targetLane)));
+                    return true;
+                }
                 case "DsAddU32":
                 {
                     var address = Temp("uint", RawSource(instruction, 0));
@@ -1546,10 +1608,26 @@ public static partial class Gen5MslTranslator
 
                     var address = Temp(
                         "uint",
-                        $"{ScalarExpression(124)} + (sharpemu_lane * {sizeof(uint)}u)");
+                        $"({ScalarExpression(124)} & 0xFFFFu) + (sharpemu_lane * {sizeof(uint)}u)");
                     StoreLds(
                         LdsIndex(address, EffectiveDsSingleOffsetBytes(control)),
                         RawSource(instruction, 0));
+                    return true;
+                }
+                case "DsReadAddtidB32":
+                {
+                    if (instruction.Destinations.Count < 1)
+                    {
+                        error = "missing LDS add-thread-id read destination";
+                        return false;
+                    }
+
+                    var address = Temp(
+                        "uint",
+                        $"({ScalarExpression(124)} & 0xFFFFu) + (sharpemu_lane * {sizeof(uint)}u)");
+                    StoreVector(
+                        instruction.Destinations[0].Value,
+                        $"sharpemu_lds[{LdsIndex(address, EffectiveDsSingleOffsetBytes(control))}]");
                     return true;
                 }
                 case "DsWriteB64":
@@ -1649,6 +1727,29 @@ public static partial class Gen5MslTranslator
                     StoreVector(
                         instruction.Destinations[1].Value,
                         $"sharpemu_lds[{LdsIndex(address, EffectiveDsPairOffsetBytes(control.Offset1, st64))}]");
+                    return true;
+                }
+                case "DsRead2B64":
+                {
+                    if (instruction.Destinations.Count < 4)
+                    {
+                        error = "missing LDS read2-64 operand";
+                        return false;
+                    }
+
+                    var address = Temp("uint", RawSource(instruction, 0));
+                    var firstBase = control.Offset0 * 2u * sizeof(uint);
+                    var secondBase = control.Offset1 * 2u * sizeof(uint);
+                    for (var dword = 0; dword < 2; dword++)
+                    {
+                        StoreVector(
+                            instruction.Destinations[dword].Value,
+                            $"sharpemu_lds[{LdsIndex(address, firstBase + (uint)(dword * sizeof(uint)))}]");
+                        StoreVector(
+                            instruction.Destinations[dword + 2].Value,
+                            $"sharpemu_lds[{LdsIndex(address, secondBase + (uint)(dword * sizeof(uint)))}]");
+                    }
+
                     return true;
                 }
                 default:

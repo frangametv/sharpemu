@@ -447,6 +447,7 @@ public sealed class KernelMemoryCompatExportsTests
         AssertExport(manager, "1Pk0qZQGeWo", "sscanf");
         AssertExport(manager, "pXvbDfchu6k", "strncasecmp");
         AssertExport(manager, "g7zzzLDYGw0", "strdup");
+        AssertExport(manager, "iF1iQHzxBJU", "sceLibcMspaceMemalign");
         AssertExport(manager, "YQ0navp+YIc", "puts");
         AssertExport(manager, "8vE6Z6VEYyk", "access");
     }
@@ -982,6 +983,30 @@ public sealed class KernelMemoryCompatExportsTests
             }
 
             context[CpuRegister.Rdi] = mappedAddressInOut;
+            Assert.Equal(0, KernelMemoryCompatExports.Free(context));
+        }
+    }
+
+    [Fact]
+    public void LibcMspaceMemalign_UsesAlignmentAndSizeArguments()
+    {
+        var context = new CpuContext(new FakeCpuMemory(0x1_0000_0000, 0x1000), Generation.Gen5);
+        context[CpuRegister.Rdi] = 0x1234;
+        context[CpuRegister.Rsi] = 0x4000;
+        context[CpuRegister.Rdx] = 0x204000;
+
+        Assert.Equal(0, KernelMemoryCompatExports.LibcMspaceMemalign(context));
+        var allocation = context[CpuRegister.Rax];
+        Assert.NotEqual(0UL, allocation);
+        Assert.Equal(0UL, allocation & 0x3FFFUL);
+        try
+        {
+            Marshal.WriteInt32(unchecked((nint)allocation), 0x12345678);
+            Assert.Equal(0x12345678, Marshal.ReadInt32(unchecked((nint)allocation)));
+        }
+        finally
+        {
+            context[CpuRegister.Rdi] = allocation;
             Assert.Equal(0, KernelMemoryCompatExports.Free(context));
         }
     }

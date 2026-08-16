@@ -46,6 +46,36 @@ public sealed class KernelStrtokCompatExportsTests
         Assert.Equal(InputAddress + 10, endCursor);
     }
 
+    [Fact]
+    public void StrtokMaintainsCursorAndRegistersKnownNid()
+    {
+        var memory = new FakeCpuMemory(MemoryBase, 0x400);
+        memory.WriteCString(InputAddress, "alpha,beta");
+        memory.WriteCString(DelimiterAddress, ",");
+        var context = new CpuContext(memory, Generation.Gen5);
+
+        context[CpuRegister.Rdi] = InputAddress;
+        context[CpuRegister.Rsi] = DelimiterAddress;
+        Assert.Equal(0, KernelRuntimeCompatExports.LibcStrtok(context));
+        Assert.Equal(InputAddress, context[CpuRegister.Rax]);
+        Assert.Equal("alpha", ReadCString(memory, InputAddress, 16));
+
+        context[CpuRegister.Rdi] = 0;
+        Assert.Equal(0, KernelRuntimeCompatExports.LibcStrtok(context));
+        Assert.Equal(InputAddress + 6, context[CpuRegister.Rax]);
+        Assert.Equal("beta", ReadCString(memory, InputAddress + 6, 8));
+
+        context[CpuRegister.Rdi] = 0;
+        Assert.Equal(0, KernelRuntimeCompatExports.LibcStrtok(context));
+        Assert.Equal(0UL, context[CpuRegister.Rax]);
+
+        var manager = new ModuleManager();
+        manager.RegisterExports(
+            SharpEmu.Generated.SysAbiExportRegistry.CreateExports(Generation.Gen5));
+        Assert.True(manager.TryGetExport("oVkZ8W8-Q8A", out var export));
+        Assert.Equal("strtok", export.Name);
+    }
+
     private static string ReadCString(ICpuMemory memory, ulong address, int maxBytes)
     {
         Span<byte> bytes = stackalloc byte[maxBytes];

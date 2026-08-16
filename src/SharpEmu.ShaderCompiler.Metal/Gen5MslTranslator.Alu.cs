@@ -251,6 +251,8 @@ public static partial class Gen5MslTranslator
                     $"(((({RawSource(instruction, 0)}) & 0xFFFFu) * (({RawSource(instruction, 1)}) & 0xFFFFu)) + ({RawSource(instruction, 2)}))",
                 "VAdd3U32" =>
                     $"(({RawSource(instruction, 0)}) + ({RawSource(instruction, 1)}) + ({RawSource(instruction, 2)}))",
+                "VXadU32" =>
+                    $"((({RawSource(instruction, 0)}) + ({RawSource(instruction, 1)})) ^ ({RawSource(instruction, 2)}))",
                 "VAddLshlU32" =>
                     $"((({RawSource(instruction, 0)}) + ({RawSource(instruction, 1)})) << (({RawSource(instruction, 2)}) & 31u))",
                 "VLshlAddU32" =>
@@ -278,6 +280,8 @@ public static partial class Gen5MslTranslator
                 "VAndB32" => $"(({RawSource(instruction, 0)}) & ({RawSource(instruction, 1)}))",
                 "VOrB32" => $"(({RawSource(instruction, 0)}) | ({RawSource(instruction, 1)}))",
                 "VXorB32" => $"(({RawSource(instruction, 0)}) ^ ({RawSource(instruction, 1)}))",
+                "VXor3B32" =>
+                    $"(({RawSource(instruction, 0)}) ^ ({RawSource(instruction, 1)}) ^ ({RawSource(instruction, 2)}))",
                 "VXnorB32" => $"~(({RawSource(instruction, 0)}) ^ ({RawSource(instruction, 1)}))",
                 "VNotB32" => $"~({RawSource(instruction, 0)})",
                 "VAndOrB32" =>
@@ -602,11 +606,15 @@ public static partial class Gen5MslTranslator
             {
                 condition = EmitCompareClass(instruction);
             }
-            else if (opcode is "VCmpTruF32" or "VCmpxTruF32" or "VCmpTI32" or "VCmpTU32")
+            else if (opcode is
+                     "VCmpTruF32" or "VCmpxTruF32" or "VCmpTI32" or "VCmpTU32" or
+                     "VCmpTU64" or "VCmpxTU64")
             {
                 condition = "true";
             }
-            else if (opcode is "VCmpFF32" or "VCmpxFF32" or "VCmpFI32" or "VCmpFU32")
+            else if (opcode is
+                     "VCmpFF32" or "VCmpxFF32" or "VCmpFI32" or "VCmpFU32" or
+                     "VCmpFU64" or "VCmpxFU64")
             {
                 condition = "false";
             }
@@ -651,7 +659,12 @@ public static partial class Gen5MslTranslator
             {
                 var op = TrimCompare(opcode) switch
                 {
+                    "Eq" => "==",
+                    "Ne" => "!=",
+                    "Lt" => "<",
+                    "Le" => "<=",
                     "Gt" => ">",
+                    "Ge" => ">=",
                     _ => string.Empty,
                 };
                 if (op.Length == 0)
@@ -1088,6 +1101,15 @@ public static partial class Gen5MslTranslator
                     var result = Temp(
                         "uint",
                         $"{left} == 0u ? 0xFFFFFFFFu : (uint)ctz({left})");
+                    StoreScalar(destination, result);
+                    Line($"scc = {result} != 0u;");
+                    return true;
+                }
+                case "SFlbitI32B32":
+                {
+                    var result = Temp(
+                        "uint",
+                        $"{left} == 0u ? 0xFFFFFFFFu : (uint)clz({left})");
                     StoreScalar(destination, result);
                     Line($"scc = {result} != 0u;");
                     return true;

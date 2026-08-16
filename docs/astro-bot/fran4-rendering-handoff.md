@@ -6,7 +6,7 @@ SPDX-License-Identifier: GPL-2.0-or-later
 
 # ASTRO BOT Fran4 rendering handoff
 
-Last updated: 2026-08-11
+Last updated: 2026-08-16
 
 ## Purpose
 
@@ -33,6 +33,66 @@ The longer inherited Acelogic journal remains in
 Do not discard the Acelogic history or replace `main` with upstream. Future
 upstream updates should be merges with explicit conflict review, followed by an
 ASTRO title run and the complete test suite.
+
+## Foufouadi compatibility review (2026-08-16)
+
+The local `sharpemu-foufouadi` checkout was fast-forward checked before the
+review. It was already current at `1090098`; its last code-bearing revision is
+`87689f9`, seven documentation/media commits behind the branch tip. Changes
+were inspected commit by commit and rewritten against the newer Fran codebase;
+the fork was not merged or copied wholesale.
+
+Integrated compatibility work:
+
+- safe page-by-page host-memory probing before diagnostic reads;
+- `sceLibcMspaceMemalign`, `asctime`, and thread-scoped `strtok` compatibility;
+- `sceVideoOutDeleteFlipEvent` and `sceVideoOutGetEventCount`;
+- APR wait-all (`sceKernelAprWaitCommandBuffer(UINT32_MAX)`) and AJM
+  initialization with real Gen5 configuration flags;
+- TLS patch scanning that includes the main PS4/PS5 image even when execution
+  starts in a bootstrap allocation, plus rescanning of lazily committed
+  executable pages;
+- complete unsigned 64-bit VOP3 compare decoding/emission;
+- `DS_READ_ADDTID_B32`, including the hardware M0 low-16-bit address rule;
+- `DS_READ2_B64`, `DS_SWIZZLE_B32`, `S_FLBIT_I32_B32`, `V_XOR3_B32`, and
+  `V_XAD_U32`, plus the previously missing Metal path for `DS_PERMUTE_B32`;
+- the complete Gen5 `libSceVideodec2` query/lifecycle/decode surface and an
+  asynchronous, bounded, real-time-paced H.264 pipeline. The fork's
+  Vulkan-only presenter call was replaced with Fran's backend-neutral GPU
+  seam so the path is also valid for Metal;
+- equivalent emission paths for Vulkan and Metal where applicable, plus
+  focused regression tests.
+
+The review deliberately excluded null/poison-pointer scratch redirection,
+automatic recovery of writes through invalid imports, and the fork''s 512 MiB
+fallback allocation arena. Those changes can hide the real producer failure,
+silently corrupt guest state, or solve allocator pressure that has not been
+observed in Fran. The fork''s EQ-event reinterpretation was also excluded
+because the current provider-derived ABI is newer and better evidenced.
+Title-specific HiZ/page-guard probes and poison-recovery-only disassembly tools
+were not carried over: they do not change compatibility with their environment
+variables disabled, depend on an intentionally excluded recovery path, and the
+current tree already has newer address-filtered shader, buffer and live
+disassembly diagnostics.
+
+Several apparently new changes were already present in Fran/upstream, including
+the vectorized guest-buffer writeback scan, fragmented-page fast path, AGC
+arena/fence work, GuestDataPool lease fix, the AvPlayer/Bink host decode
+pipeline, and most libc exports. The distinct `libSceVideodec2` path was not
+present and is now implemented separately. VOP3P dot-product and
+`V_PK_FMAC_F16` additions remain intentionally
+deferred: the reviewed implementation only covered SPIR-V and did not preserve
+the complete packed selector/modifier semantics required for a safe
+cross-backend implementation.
+
+These additions remove concrete unsupported shader and import paths that may
+block the ASTRO menu. They do not by themselves prove that the missing first
+half of geometry record 24736 is fixed; the focused live trace below remains
+the required acceptance test.
+
+Post-audit validation is green: 37 source-generator, 110 Vulkan/general shader,
+33 Metal shader, and 1,680 library tests (1,860 total), with no failed or
+skipped tests and no compiler warnings. No commit was created.
 
 ## What currently works
 

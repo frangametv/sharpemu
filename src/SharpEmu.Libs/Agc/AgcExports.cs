@@ -3242,6 +3242,7 @@ public static partial class AgcExports
     // populates the first 3 pairs; zero the rest of the scanned window so
     // every unpopulated slot is a harmless failed probe instead of
     // guest-stack garbage.
+    #pragma warning disable SHEM006
     [SysAbiExport(
         Nid = "dbOlWdppb4o",
         ExportName = "sceAgcAddPrimStateRegisters",
@@ -3268,6 +3269,7 @@ public static partial class AgcExports
         ctx[CpuRegister.Rax] = 0;
         return (int)OrbisGen2Result.ORBIS_GEN2_OK;
     }
+    #pragma warning restore SHEM006
 
     // NID captured from shipped titles; the friendly name collides with a real catalog symbol of a different NID. Rename pending AGC API confirmation.
     #pragma warning disable SHEM004

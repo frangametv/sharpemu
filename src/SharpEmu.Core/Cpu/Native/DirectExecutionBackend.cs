@@ -1822,6 +1822,7 @@ public sealed unsafe partial class DirectExecutionBackend : INativeCpuBackend, I
 			"sceLibcMspaceCreate" or
 			"sceLibcMspaceDestroy" or
 			"sceLibcMspaceMalloc" or
+			"sceLibcMspaceMemalign" or
 			"sceLibcMspaceMallocStatsFast" or
 			"qsort" or
 			"memcpy" or
@@ -3265,11 +3266,45 @@ public sealed unsafe partial class DirectExecutionBackend : INativeCpuBackend, I
 
 	private unsafe void PatchTlsPatterns()
 	{
-        // Large Gen5 executables can keep valid code well past the first 32 MiB.
-        // Astro Bot, for example, has an FS:[0] TLS load near +0x70A0000.
-        const ulong MaxScanBytes = 134217728uL;
-		ulong num = _entryPoint;
-		ulong num2 = num + MaxScanBytes;
+		// Large Gen5 executables can keep valid code well past the first 32 MiB.
+		// Astro Bot, for example, has an FS:[0] TLS load near +0x70A0000.
+		const ulong MaxScanBytes = 134217728uL;
+		ulong allocationBase = 0;
+		if (VirtualQuery((void*)_entryPoint, out var entryRegion, (nuint)sizeof(MEMORY_BASIC_INFORMATION64)) != 0)
+		{
+			allocationBase = entryRegion.AllocationBase;
+		}
+
+		var scanStart = SelectTlsScanStart(_entryPoint, allocationBase);
+		var scanEnd = scanStart > ulong.MaxValue - MaxScanBytes
+			? ulong.MaxValue
+			: scanStart + MaxScanBytes;
+		PatchTlsPatternsInRange(scanStart, scanEnd, announce: true);
+	}
+
+	internal static ulong SelectTlsScanStart(ulong entryPoint, ulong allocationBase)
+	{
+		const ulong Ps5MainImageBase = 0x0000000800000000UL;
+		const ulong Ps4MainImageBase = 0x0000000000400000UL;
+
+		var scanStart = allocationBase != 0 && allocationBase <= entryPoint
+			? allocationBase
+			: entryPoint;
+		var mainImageBase = entryPoint >= Ps5MainImageBase
+			? Ps5MainImageBase
+			: Ps4MainImageBase;
+		return Math.Min(scanStart, mainImageBase);
+	}
+
+	private unsafe void PatchTlsPatternsInRange(ulong rangeStart, ulong rangeEnd, bool announce)
+	{
+		if (rangeEnd <= rangeStart)
+		{
+			return;
+		}
+
+		ulong num = rangeStart;
+		ulong num2 = rangeEnd;
 		int num3 = 0;
 		int num4 = 0;
 		int num9 = 0;
@@ -3282,7 +3317,9 @@ public sealed unsafe partial class DirectExecutionBackend : INativeCpuBackend, I
 				continue;
 			}
 			ulong num5 = Math.Max(num, lpBuffer.BaseAddress);
-			ulong num6 = lpBuffer.BaseAddress + lpBuffer.RegionSize;
+			ulong num6 = lpBuffer.BaseAddress > ulong.MaxValue - lpBuffer.RegionSize
+				? ulong.MaxValue
+				: lpBuffer.BaseAddress + lpBuffer.RegionSize;
 			if (num6 > num2)
 			{
 				num6 = num2;
@@ -3318,7 +3355,12 @@ public sealed unsafe partial class DirectExecutionBackend : INativeCpuBackend, I
 			}
 			num = num6 > num ? num6 : num + 4096uL;
 		}
-		Console.Error.WriteLine($"[LOADER][INFO] Patched {num3} TLS loads, {num9} TLS stores, {num4} stack-canary accesses, {sse4aPatchCount} SSE4a EXTRQ blends");
+		if (announce || num3 + num4 + num9 + sse4aPatchCount > 0)
+		{
+			Console.Error.WriteLine(
+				$"[LOADER][INFO] Patched {num3} TLS loads, {num9} TLS stores, {num4} stack-canary accesses, {sse4aPatchCount} SSE4a EXTRQ blends" +
+				(announce ? string.Empty : $" (lazy-commit rescan 0x{rangeStart:X16}-0x{rangeEnd:X16})"));
+		}
 	}
 
 	private unsafe bool TryPatchSse4aExtrqBlend(nint address, byte* source)

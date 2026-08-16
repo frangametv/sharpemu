@@ -80,6 +80,16 @@ public static class KernelAprCompatExports
         var waitArg1 = ctx[CpuRegister.Rsi];
         var waitArg2 = ctx[CpuRegister.Rdx];
 
+        // UINT32_MAX is the APR ABI's "wait for every submitted command"
+        // sentinel. Submissions complete synchronously in this HLE, so waiting
+        // for all only has to retire the completed bookkeeping entries.
+        if (submissionId == uint.MaxValue)
+        {
+            _submittedCommandBuffers.Clear();
+            TraceApr(ctx, "wait_all", submissionId, commandBuffer: 0, waitArg1, waitArg2);
+            return (int)OrbisGen2Result.ORBIS_GEN2_OK;
+        }
+
         if (!_submittedCommandBuffers.TryRemove(submissionId, out var submission))
         {
             TraceAprWaitFailure(ctx, "wait_missing", submissionId, commandBuffer: 0, waitArg1, waitArg2);

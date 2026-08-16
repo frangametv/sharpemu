@@ -1522,6 +1522,36 @@ public static partial class KernelMemoryCompatExports
     }
 
     [SysAbiExport(
+        Nid = "iF1iQHzxBJU",
+        ExportName = "sceLibcMspaceMemalign",
+        Target = Generation.Gen5,
+        LibraryName = "libSceLibcInternal")]
+    public static int LibcMspaceMemalign(CpuContext ctx)
+    {
+        // dlmalloc mspace_memalign ABI: (mspace, alignment, size). Keep the
+        // allocation on the same tracked compatibility heap as mspace malloc;
+        // the opaque mspace handle is deliberately not dereferenced by HLE.
+        var alignment = ctx[CpuRegister.Rsi];
+        var requestedSize = ctx[CpuRegister.Rdx];
+        ctx[CpuRegister.Rax] =
+            TryAllocateAlignedLibcHeap(
+                alignment,
+                requestedSize,
+                requireSizeMultiple: false,
+                out var address)
+                ? address
+                : 0;
+        TraceLibcAllocation(
+            ctx,
+            "sceLibcMspaceMemalign",
+            size: requestedSize,
+            alignment: alignment,
+            existingAddress: ctx[CpuRegister.Rdi],
+            resultAddress: ctx[CpuRegister.Rax]);
+        return (int)OrbisGen2Result.ORBIS_GEN2_OK;
+    }
+
+    [SysAbiExport(
         Nid = "-hn1tcVHq5Q",
         ExportName = "sceLibcMspaceCreate",
         Target = Generation.Gen5,

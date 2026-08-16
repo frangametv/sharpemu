@@ -108,9 +108,11 @@ public static class AjmExports
 
     public static int AjmInitialize(CpuContext ctx)
     {
-        var reserved = ctx[CpuRegister.Rdi];
+        var flags = ctx[CpuRegister.Rdi];
         var outputAddress = ctx[CpuRegister.Rsi];
-        if (reserved != 0 || outputAddress == 0)
+        // The first argument is a flags/configuration word, not a reserved
+        // zero. Real Gen5 titles pass values such as 0x300000000 here.
+        if (outputAddress == 0)
         {
             return unchecked((int)0x806A0001);
         }
@@ -127,7 +129,7 @@ public static class AjmExports
         if (string.Equals(Environment.GetEnvironmentVariable("SHARPEMU_LOG_AJM"), "1", StringComparison.Ordinal))
         {
             Console.Error.WriteLine(
-                $"[LOADER][TRACE] ajm.initialize reserved={reserved} out=0x{outputAddress:X16} context={contextId}");
+                $"[LOADER][TRACE] ajm.initialize flags=0x{flags:X16} out=0x{outputAddress:X16} context={contextId}");
         }
 
         ctx[CpuRegister.Rax] = 0;

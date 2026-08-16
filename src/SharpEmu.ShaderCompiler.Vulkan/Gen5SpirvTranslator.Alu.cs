@@ -432,6 +432,17 @@ public static partial class Gen5SpirvTranslator
                 case "VXorB32":
                     result = EmitIntegerBinary(instruction, SpirvOp.BitwiseXor);
                     break;
+                case "VXor3B32":
+                    result = _module.AddInstruction(
+                        SpirvOp.BitwiseXor,
+                        _uintType,
+                        _module.AddInstruction(
+                            SpirvOp.BitwiseXor,
+                            _uintType,
+                            GetRawSource(instruction, 0),
+                            GetRawSource(instruction, 1)),
+                        GetRawSource(instruction, 2));
+                    break;
                 case "VXnorB32":
                 {
                     var xor = EmitIntegerBinary(instruction, SpirvOp.BitwiseXor);
@@ -727,6 +738,15 @@ public static partial class Gen5SpirvTranslator
                 }
                 case "VAdd3U32":
                     result = IAdd(
+                        IAdd(
+                            GetRawSource(instruction, 0),
+                            GetRawSource(instruction, 1)),
+                        GetRawSource(instruction, 2));
+                    break;
+                case "VXadU32":
+                    result = _module.AddInstruction(
+                        SpirvOp.BitwiseXor,
+                        _uintType,
                         IAdd(
                             GetRawSource(instruction, 0),
                             GetRawSource(instruction, 1)),
@@ -1565,11 +1585,15 @@ public static partial class Gen5SpirvTranslator
                     condition,
                     SignedClass(0x020, 0x040, zero));
             }
-            else if (opcode is "VCmpFF32" or "VCmpxFF32" or "VCmpFI32" or "VCmpFU32")
+            else if (opcode is
+                     "VCmpFF32" or "VCmpxFF32" or "VCmpFI32" or "VCmpFU32" or
+                     "VCmpFU64" or "VCmpxFU64")
             {
                 condition = _module.ConstantBool(false);
             }
-            else if (opcode is "VCmpTruF32" or "VCmpxTruF32" or "VCmpTI32" or "VCmpTU32")
+            else if (opcode is
+                     "VCmpTruF32" or "VCmpxTruF32" or "VCmpTI32" or "VCmpTU32" or
+                     "VCmpTU64" or "VCmpxTU64")
             {
                 condition = _module.ConstantBool(true);
             }
@@ -1623,7 +1647,12 @@ public static partial class Gen5SpirvTranslator
                 var right = GetRawSource64(instruction, 1);
                 var operation = opcode switch
                 {
+                    "VCmpEqU64" or "VCmpxEqU64" => SpirvOp.IEqual,
+                    "VCmpNeU64" or "VCmpxNeU64" => SpirvOp.INotEqual,
+                    "VCmpLtU64" or "VCmpxLtU64" => SpirvOp.ULessThan,
+                    "VCmpLeU64" or "VCmpxLeU64" => SpirvOp.ULessThanEqual,
                     "VCmpGtU64" or "VCmpxGtU64" => SpirvOp.UGreaterThan,
+                    "VCmpGeU64" or "VCmpxGeU64" => SpirvOp.UGreaterThanEqual,
                     _ => SpirvOp.Nop,
                 };
                 if (operation == SpirvOp.Nop)
@@ -1969,6 +1998,18 @@ public static partial class Gen5SpirvTranslator
                     return true;
                 case "SFF1I32B32":
                     result = Ext(73, _uintType, left);
+                    StoreS(destination, result);
+                    Store(_scc, IsNotZero(result));
+                    return true;
+                case "SFlbitI32B32":
+                    result = SelectU(
+                        IsNotZero(left),
+                        _module.AddInstruction(
+                            SpirvOp.ISub,
+                            _uintType,
+                            UInt(31),
+                            Ext(75, _uintType, left)),
+                        UInt(uint.MaxValue));
                     StoreS(destination, result);
                     Store(_scc, IsNotZero(result));
                     return true;

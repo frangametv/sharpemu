@@ -94,6 +94,26 @@ public sealed class Gen5DataShareTests
         Assert.Equal(Gen5Operand.Vector(7), Assert.Single(instruction.Destinations));
     }
 
+    [Theory]
+    [InlineData(0x80E4)] // QUAD_PERM identity
+    [InlineData(0x041F)] // BITMASK_PERM lane xor 1
+    public void DsSwizzleB32DecodesAndLowersToSubgroupShuffle(uint pattern)
+    {
+        var program = DecodeProgram(0x35, offset: pattern);
+        var instruction = Assert.Single(
+            program.Instructions,
+            item => item.Opcode == "DsSwizzleB32");
+
+        Assert.Equal([Gen5Operand.Vector(3)], instruction.Sources);
+        Assert.Equal(Gen5Operand.Vector(7), Assert.Single(instruction.Destinations));
+        var control = Assert.IsType<Gen5DataShareControl>(instruction.Control);
+        Assert.Equal(pattern & 0xFF, control.Offset0);
+        Assert.Equal(pattern >> 8, control.Offset1);
+
+        var opcodes = CompileAndReadSpirvOpcodes(0x35, offset: pattern);
+        Assert.Contains((ushort)SpirvOp.GroupNonUniformShuffle, opcodes);
+    }
+
     [Fact]
     public void DsWriteAddtidB32DecodesRealTitleShaderWord()
     {
@@ -111,6 +131,49 @@ public sealed class Gen5DataShareTests
         var opcodes = CompileAndReadSpirvOpcodes(0xB0, offset: 0x700);
         Assert.Contains((ushort)SpirvOp.IMul, opcodes);
         Assert.Contains(OpStore, opcodes);
+    }
+
+    [Fact]
+    public void DsReadAddtidB32DecodesAndLowersWithoutAddressVgpr()
+    {
+        var program = DecodeProgram(0xB1, offset: 0x234);
+
+        var instruction = Assert.Single(
+            program.Instructions,
+            item => item.Opcode == "DsReadAddtidB32");
+        Assert.Empty(instruction.Sources);
+        Assert.Equal(Gen5Operand.Vector(7), Assert.Single(instruction.Destinations));
+        var control = Assert.IsType<Gen5DataShareControl>(instruction.Control);
+        Assert.Equal(0x34U, control.Offset0);
+        Assert.Equal(0x02U, control.Offset1);
+
+        var opcodes = CompileAndReadSpirvOpcodes(0xB1, offset: 0x234);
+        Assert.Contains((ushort)SpirvOp.BitwiseAnd, opcodes);
+        Assert.Contains((ushort)SpirvOp.IMul, opcodes);
+        Assert.Contains((ushort)SpirvOp.Load, opcodes);
+        Assert.Contains(OpStore, opcodes);
+    }
+
+    [Fact]
+    public void DsRead2B64DecodesFourDestinationsAndLowersFourLoads()
+    {
+        var program = DecodeProgram(0x77, offset: 0x0201);
+        var instruction = Assert.Single(
+            program.Instructions,
+            item => item.Opcode == "DsRead2B64");
+
+        Assert.Equal([Gen5Operand.Vector(2)], instruction.Sources);
+        Assert.Equal(
+            [
+                Gen5Operand.Vector(7),
+                Gen5Operand.Vector(8),
+                Gen5Operand.Vector(9),
+                Gen5Operand.Vector(10),
+            ],
+            instruction.Destinations);
+
+        var opcodes = CompileAndReadSpirvOpcodes(0x77, offset: 0x0201);
+        Assert.True(opcodes.Count(opcode => opcode == (ushort)SpirvOp.Load) >= 4);
     }
 
     [Fact]

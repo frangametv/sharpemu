@@ -46,6 +46,16 @@ public sealed class AjmExportsTests : IDisposable
     }
 
     [Fact]
+    public void Initialize_AcceptsGen5ConfigurationFlags()
+    {
+        _ctx[CpuRegister.Rdi] = 0x3_0000_0000;
+        _ctx[CpuRegister.Rsi] = ContextAddress;
+
+        Assert.Equal(0, AjmExports.AjmInitialize(_ctx));
+        Assert.NotEqual(0U, ReadUInt32(ContextAddress));
+    }
+
+    [Fact]
     public void InstanceLifecycle_RegisteredCodecCreatesAndDestroysInstance()
     {
         var contextId = Initialize();

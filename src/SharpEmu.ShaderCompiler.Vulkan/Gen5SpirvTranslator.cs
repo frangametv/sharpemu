@@ -2285,7 +2285,7 @@ public static partial class Gen5SpirvTranslator
                 return false;
             }
 
-            if (instruction.Opcode != "DsPermuteB32" &&
+            if (instruction.Opcode is not ("DsPermuteB32" or "DsSwizzleB32") &&
                 (_lds == 0 || _ldsElementPointer == 0))
             {
                 error = "invalid LDS instruction";
@@ -2361,6 +2361,68 @@ public static partial class Gen5SpirvTranslator
                     StoreV(instruction.Destinations[0].Value, result);
                     return true;
                 }
+                case "DsSwizzleB32":
+                {
+                    if (instruction.Destinations.Count < 1 ||
+                        instruction.Sources.Count < 1 ||
+                        _subgroupInvocationIdInput == 0)
+                    {
+                        error = "DS_SWIZZLE_B32 requires subgroup shuffle support";
+                        return false;
+                    }
+
+                    // OFFSET0:OFFSET1 is a 16-bit lane mapping, not an LDS
+                    // address. Implement the two documented GCN forms and
+                    // reject rotate/FFT encodings until their exact semantics
+                    // are available.
+                    var pattern = control.Offset0 | (control.Offset1 << 8);
+                    var lane = BitwiseAnd(GuestWaveLane(), UInt(31));
+                    uint targetLane;
+                    if ((pattern & 0xFF00) == 0x8000)
+                    {
+                        var laneInQuad = BitwiseAnd(lane, UInt(3));
+                        var quadBase = BitwiseAnd(lane, UInt(0xFFFF_FFFC));
+                        var selector = UInt(pattern & 0x3);
+                        for (var index = 1u; index < 4; index++)
+                        {
+                            selector = _module.AddInstruction(
+                                SpirvOp.Select,
+                                _uintType,
+                                _module.AddInstruction(
+                                    SpirvOp.IEqual,
+                                    _boolType,
+                                    laneInQuad,
+                                    UInt(index)),
+                                UInt((pattern >> checked((int)(index * 2))) & 0x3),
+                                selector);
+                        }
+
+                        targetLane = IAdd(quadBase, selector);
+                    }
+                    else if ((pattern & 0x8000) == 0)
+                    {
+                        var andMask = UInt(pattern & 0x1F);
+                        var orMask = UInt((pattern >> 5) & 0x1F);
+                        var xorMask = UInt((pattern >> 10) & 0x1F);
+                        targetLane = BitwiseXor(
+                            BitwiseOr(BitwiseAnd(lane, andMask), orMask),
+                            xorMask);
+                    }
+                    else
+                    {
+                        error = $"unsupported ds_swizzle pattern 0x{pattern:X4} (rotate/fft mode not implemented)";
+                        return false;
+                    }
+
+                    var shuffled = _module.AddInstruction(
+                        SpirvOp.GroupNonUniformShuffle,
+                        _uintType,
+                        UInt(3),
+                        GetRawSource(instruction, 0),
+                        BitwiseAnd(targetLane, UInt(31)));
+                    StoreV(instruction.Destinations[0].Value, shuffled);
+                    return true;
+                }
                 case "DsWriteB32":
                 {
                     if (instruction.Sources.Count < 2)
@@ -2390,12 +2452,38 @@ public static partial class Gen5SpirvTranslator
                         _uintType,
                         GuestWaveLane(),
                         UInt(sizeof(uint)));
-                    var address = IAdd(LoadS(124), laneOffset);
+                    var address = IAdd(
+                        BitwiseAnd(LoadS(124), UInt(0xFFFF)),
+                        laneOffset);
                     StoreLds(
                         LdsPointer(
                             address,
                             EffectiveDsSingleOffsetBytes(control)),
                         GetRawSource(instruction, 0));
+                    return true;
+                }
+                case "DsReadAddtidB32":
+                {
+                    if (instruction.Destinations.Count < 1)
+                    {
+                        error = "missing LDS add-thread-id read destination";
+                        return false;
+                    }
+
+                    var laneOffset = _module.AddInstruction(
+                        SpirvOp.IMul,
+                        _uintType,
+                        GuestWaveLane(),
+                        UInt(sizeof(uint)));
+                    var address = IAdd(
+                        BitwiseAnd(LoadS(124), UInt(0xFFFF)),
+                        laneOffset);
+                    var value = Load(
+                        _uintType,
+                        LdsPointer(
+                            address,
+                            EffectiveDsSingleOffsetBytes(control)));
+                    StoreV(instruction.Destinations[0].Value, value);
                     return true;
                 }
                 case "DsWriteB64":
@@ -2546,6 +2634,34 @@ public static partial class Gen5SpirvTranslator
                             EffectiveDsPairOffsetBytes(control.Offset1, st64)));
                     StoreV(instruction.Destinations[0].Value, first);
                     StoreV(instruction.Destinations[1].Value, second);
+                    return true;
+                }
+                case "DsRead2B64":
+                {
+                    if (instruction.Destinations.Count < 4 ||
+                        instruction.Sources.Count < 1)
+                    {
+                        error = "missing LDS read2-64 operand";
+                        return false;
+                    }
+
+                    var address = GetRawSource(instruction, 0);
+                    var firstBase = control.Offset0 * 2u * sizeof(uint);
+                    var secondBase = control.Offset1 * 2u * sizeof(uint);
+                    for (var dword = 0; dword < 2; dword++)
+                    {
+                        StoreV(
+                            instruction.Destinations[dword].Value,
+                            Load(
+                                _uintType,
+                                LdsPointer(address, firstBase + (uint)(dword * sizeof(uint)))));
+                        StoreV(
+                            instruction.Destinations[dword + 2].Value,
+                            Load(
+                                _uintType,
+                                LdsPointer(address, secondBase + (uint)(dword * sizeof(uint)))));
+                    }
+
                     return true;
                 }
                 default:
@@ -7079,7 +7195,7 @@ public static partial class Gen5SpirvTranslator
         private bool UsesLds() =>
             _state.Program.Instructions.Any(instruction =>
                 instruction.Control is Gen5DataShareControl { Gds: false } &&
-                instruction.Opcode != "DsPermuteB32");
+                instruction.Opcode is not ("DsPermuteB32" or "DsSwizzleB32"));
 
         private bool UsesSubgroupShuffle() =>
             _state.Program.Instructions.Any(instruction =>
@@ -7088,7 +7204,8 @@ public static partial class Gen5SpirvTranslator
                     "VPermlane16B32" or
                     "VPermlanex16B32" or
                     "VReadlaneB32" or
-                    "DsPermuteB32");
+                    "DsPermuteB32" or
+                    "DsSwizzleB32");
 
         private bool UsesSubgroupBroadcast() =>
             _state.Program.Instructions.Any(instruction =>

@@ -87,6 +87,7 @@ public static class KernelRuntimeCompatExports
     private static int _localtimeTraceCount;
     private static int _difftimeTraceCount;
     private static long _strtokReentrantTraceCount;
+    private static readonly Dictionary<ulong, ulong> _strtokCursors = new();
 
     [ThreadStatic]
     private static int _shortUsleepCount;
@@ -96,6 +97,9 @@ public static class KernelRuntimeCompatExports
 
     [ThreadStatic]
     private static nint _localtimeStorage;
+
+    [ThreadStatic]
+    private static nint _asctimeStorage;
 
     private static readonly bool _stopwatchTicksAreNanoseconds =
         Stopwatch.Frequency == 1_000_000_000L;
@@ -484,6 +488,31 @@ public static class KernelRuntimeCompatExports
                 $"{tm.Hour:D2}:{tm.Minute:D2}:{tm.Second:D2} isdst={tm.IsDaylightSavingTime} " +
                 $"gmtoff={tm.GmtOffsetSeconds}");
         }
+        return (int)OrbisGen2Result.ORBIS_GEN2_OK;
+    }
+
+    [SysAbiExport(
+        Nid = "jT3xiGpA3B4",
+        ExportName = "asctime",
+        Target = Generation.Gen5,
+        LibraryName = "libc")]
+    public static int LibcAsctime(CpuContext ctx)
+    {
+        if (!TryReadPosixTm(ctx, ctx[CpuRegister.Rdi], out var tm))
+        {
+            ctx[CpuRegister.Rax] = 0;
+            return (int)OrbisGen2Result.ORBIS_GEN2_OK;
+        }
+
+        var rendered = FormatPosixTime("%a %b %e %H:%M:%S %Y\n", tm);
+        var bytes = Encoding.ASCII.GetBytes(rendered + "\0");
+        if (_asctimeStorage == 0)
+        {
+            _asctimeStorage = Marshal.AllocHGlobal(32);
+        }
+
+        Marshal.Copy(bytes, 0, _asctimeStorage, bytes.Length);
+        ctx[CpuRegister.Rax] = unchecked((ulong)_asctimeStorage);
         return (int)OrbisGen2Result.ORBIS_GEN2_OK;
     }
 
@@ -2431,6 +2460,110 @@ public static class KernelRuntimeCompatExports
 
         ctx[CpuRegister.Rax] = 0;
         return (int)OrbisGen2Result.ORBIS_GEN2_OK;
+    }
+
+    [SysAbiExport(
+        Nid = "oVkZ8W8-Q8A",
+        ExportName = "strtok",
+        Target = Generation.Gen5,
+        LibraryName = "libc")]
+    public static int LibcStrtok(CpuContext ctx)
+    {
+        var inputAddress = ctx[CpuRegister.Rdi];
+        var delimiterAddress = ctx[CpuRegister.Rsi];
+        if (delimiterAddress == 0 ||
+            !TryReadUtf8CString(
+                ctx,
+                delimiterAddress,
+                64,
+                out var delimiters,
+                minimumPrintableCharacters: 1))
+        {
+            ctx[CpuRegister.Rax] = 0;
+            return (int)OrbisGen2Result.ORBIS_GEN2_OK;
+        }
+
+        var threadHandle = GuestThreadExecution.CurrentGuestThreadHandle;
+        ulong currentAddress;
+        lock (_stateGate)
+        {
+            currentAddress = inputAddress != 0
+                ? inputAddress
+                : _strtokCursors.GetValueOrDefault(threadHandle);
+        }
+
+        Span<byte> value = stackalloc byte[1];
+        var examined = 0;
+        while (currentAddress != 0 && examined++ < 4096)
+        {
+            if (!ctx.Memory.TryRead(currentAddress, value) || value[0] == 0)
+            {
+                SetStrtokCursor(threadHandle, 0);
+                ctx[CpuRegister.Rax] = 0;
+                return (int)OrbisGen2Result.ORBIS_GEN2_OK;
+            }
+
+            if (delimiters.IndexOf((char)value[0]) < 0)
+            {
+                break;
+            }
+
+            currentAddress++;
+        }
+
+        var tokenAddress = currentAddress;
+        while (currentAddress != 0 && examined++ < 4096)
+        {
+            if (!ctx.Memory.TryRead(currentAddress, value))
+            {
+                SetStrtokCursor(threadHandle, 0);
+                ctx[CpuRegister.Rax] = 0;
+                return (int)OrbisGen2Result.ORBIS_GEN2_OK;
+            }
+
+            if (value[0] == 0)
+            {
+                SetStrtokCursor(threadHandle, 0);
+                ctx[CpuRegister.Rax] = tokenAddress;
+                return (int)OrbisGen2Result.ORBIS_GEN2_OK;
+            }
+
+            if (delimiters.IndexOf((char)value[0]) >= 0)
+            {
+                value[0] = 0;
+                if (!ctx.Memory.TryWrite(currentAddress, value))
+                {
+                    SetStrtokCursor(threadHandle, 0);
+                    ctx[CpuRegister.Rax] = 0;
+                    return (int)OrbisGen2Result.ORBIS_GEN2_OK;
+                }
+
+                SetStrtokCursor(threadHandle, currentAddress + 1);
+                ctx[CpuRegister.Rax] = tokenAddress;
+                return (int)OrbisGen2Result.ORBIS_GEN2_OK;
+            }
+
+            currentAddress++;
+        }
+
+        SetStrtokCursor(threadHandle, 0);
+        ctx[CpuRegister.Rax] = 0;
+        return (int)OrbisGen2Result.ORBIS_GEN2_OK;
+    }
+
+    private static void SetStrtokCursor(ulong threadHandle, ulong cursor)
+    {
+        lock (_stateGate)
+        {
+            if (cursor == 0)
+            {
+                _strtokCursors.Remove(threadHandle);
+            }
+            else
+            {
+                _strtokCursors[threadHandle] = cursor;
+            }
+        }
     }
 
     private static void TraceStrtokReentrant(

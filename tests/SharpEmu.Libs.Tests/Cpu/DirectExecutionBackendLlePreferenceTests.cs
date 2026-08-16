@@ -80,6 +80,7 @@ public sealed class DirectExecutionBackendLlePreferenceTests
     [InlineData("sceLibcMspaceCreate")]
     [InlineData("sceLibcMspaceDestroy")]
     [InlineData("sceLibcMspaceMalloc")]
+    [InlineData("sceLibcMspaceMemalign")]
     [InlineData("sceLibcMspaceMallocStatsFast")]
     [InlineData("qsort")]
     public void FirmwareOwnedLibcStateAndCallbacks_PreferMappedLle(string exportName)

@@ -214,4 +214,32 @@ public sealed class KernelTimeConversionCompatExportsTests
         Assert.StartsWith(expectedPrefix, text, StringComparison.Ordinal);
         Assert.EndsWith("]", text, StringComparison.Ordinal);
     }
+
+    [Fact]
+    public void AsctimeRegistersAndFormatsStandardPosixText()
+    {
+        var memory = new FakeCpuMemory(MemoryBase, 0x1000);
+        Span<byte> tm = stackalloc byte[36];
+        BinaryPrimitives.WriteInt32LittleEndian(tm[0..], 6);
+        BinaryPrimitives.WriteInt32LittleEndian(tm[4..], 5);
+        BinaryPrimitives.WriteInt32LittleEndian(tm[8..], 4);
+        BinaryPrimitives.WriteInt32LittleEndian(tm[12..], 7);
+        BinaryPrimitives.WriteInt32LittleEndian(tm[16..], 7);
+        BinaryPrimitives.WriteInt32LittleEndian(tm[20..], 126);
+        BinaryPrimitives.WriteInt32LittleEndian(tm[24..], 5);
+        Assert.True(memory.TryWrite(TmAddress, tm));
+
+        var context = new CpuContext(memory, Generation.Gen5);
+        context[CpuRegister.Rdi] = TmAddress;
+        Assert.Equal(0, KernelRuntimeCompatExports.LibcAsctime(context));
+        var result = unchecked((nint)context[CpuRegister.Rax]);
+        Assert.NotEqual(0, result);
+        Assert.Equal("Fri Aug  7 04:05:06 2026\n", Marshal.PtrToStringAnsi(result));
+
+        var manager = new ModuleManager();
+        manager.RegisterExports(
+            SharpEmu.Generated.SysAbiExportRegistry.CreateExports(Generation.Gen5));
+        Assert.True(manager.TryGetExport("jT3xiGpA3B4", out var export));
+        Assert.Equal("asctime", export.Name);
+    }
 }

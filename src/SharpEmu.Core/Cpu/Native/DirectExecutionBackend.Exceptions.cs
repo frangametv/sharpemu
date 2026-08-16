@@ -1462,18 +1462,26 @@ public sealed partial class DirectExecutionBackend
 			return false;
 		}
 
-		if (!OperatingSystem.IsWindows())
+		// A hardware access violation is not reliably catchable on modern
+		// .NET. Probe every touched page on Windows too, so diagnostics for a
+		// wild guest RIP cannot crash while trying to read the bad address.
+		ulong end;
+		try
 		{
-			// See TryReadHostQword: probe every touched page before reading.
-			ulong end = address + (ulong)buffer.Length;
-			for (ulong page = address & 0xFFFFFFFFFFFFF000uL; page < end; page += 4096)
+			end = checked(address + (ulong)buffer.Length);
+		}
+		catch (OverflowException)
+		{
+			return false;
+		}
+
+		for (ulong page = address & 0xFFFFFFFFFFFFF000uL; page < end; page += 4096)
+		{
+			if (VirtualQuery((void*)page, out var mbi, (nuint)sizeof(MEMORY_BASIC_INFORMATION64)) == 0 ||
+				mbi.State != MEM_COMMIT ||
+				!IsReadableProtection(mbi.Protect))
 			{
-				if (VirtualQuery((void*)page, out var mbi, (nuint)sizeof(MEMORY_BASIC_INFORMATION64)) == 0 ||
-					mbi.State != MEM_COMMIT ||
-					!IsReadableProtection(mbi.Protect))
-				{
-					return false;
-				}
+				return false;
 			}
 		}
 
@@ -1666,6 +1674,7 @@ public sealed partial class DirectExecutionBackend
 			}
 
 			TryCommitRange(pageBase + 4096, 4096uL, commitProtect);
+			RescanTlsPatternsIfExecutable(committedBase, committedSize, commitProtect);
 			if (traceLazyCommit)
 			{
 				Console.Error.WriteLine($"[LOADER][TRACE] lazy-reserve-commit#{traceIndex}: addr=0x{committedBase:X16} size=0x{committedSize:X16} access={accessType} protect=0x{commitProtect:X8}");
@@ -1725,6 +1734,7 @@ public sealed partial class DirectExecutionBackend
 		}
 
 		TryCommitRange(pageBase + 4096, 4096uL, commitProtect);
+		RescanTlsPatternsIfExecutable(committedBase, committedSize, commitProtect);
 		if (traceLazyCommit)
 		{
 			Console.Error.WriteLine($"[LOADER][TRACE] lazy-commit#{traceIndex}: addr=0x{committedBase:X16} size=0x{committedSize:X16} access={accessType} protect=0x{commitProtect:X8}");
@@ -1824,6 +1834,29 @@ public sealed partial class DirectExecutionBackend
 				_ => false
 			};
 		}
+	}
+
+	private unsafe void RescanTlsPatternsIfExecutable(
+		ulong committedBase,
+		ulong committedSize,
+		uint commitProtect)
+	{
+		const uint ExecutableProtectionMask =
+			PAGE_EXECUTE | PAGE_EXECUTE_READ | PAGE_EXECUTE_READWRITE | PAGE_EXECUTE_WRITECOPY;
+		if ((commitProtect & ExecutableProtectionMask) == 0 || committedSize == 0)
+		{
+			return;
+		}
+
+		// The lazy path also attempts to commit the following page so a TLS
+		// instruction crossing the original boundary can be decoded safely.
+		var scanSize = committedSize > ulong.MaxValue - 4096uL
+			? ulong.MaxValue
+			: committedSize + 4096uL;
+		var scanEnd = committedBase > ulong.MaxValue - scanSize
+			? ulong.MaxValue
+			: committedBase + scanSize;
+		PatchTlsPatternsInRange(committedBase, scanEnd, announce: false);
 	}
 
 	private static bool ShouldTraceLazyCommit(int traceIndex)

@@ -1118,6 +1118,7 @@ public static class Gen5ShaderTranslator
             0x10 => "SBcnt1I32B64",
             0x13 => "SFF1I32B32",
             0x14 => "SFF1I32B64",
+            0x15 => "SFlbitI32B32",
             0x1D => "SBitset1B32",
             0x1F => "SGetpcB64",
             0x20 => "SSetpcB64",
@@ -1537,7 +1538,22 @@ public static class Gen5ShaderTranslator
             }
             : opcode switch
         {
+            0x0E0 => "VCmpFU64",
+            0x0E1 => "VCmpLtU64",
+            0x0E2 => "VCmpEqU64",
+            0x0E3 => "VCmpLeU64",
             0x0E4 => "VCmpGtU64",
+            0x0E5 => "VCmpNeU64",
+            0x0E6 => "VCmpGeU64",
+            0x0E7 => "VCmpTU64",
+            0x0F0 => "VCmpxFU64",
+            0x0F1 => "VCmpxLtU64",
+            0x0F2 => "VCmpxEqU64",
+            0x0F3 => "VCmpxLeU64",
+            0x0F4 => "VCmpxGtU64",
+            0x0F5 => "VCmpxNeU64",
+            0x0F6 => "VCmpxGeU64",
+            0x0F7 => "VCmpxTU64",
             0x101 => "VCndmaskB32",
             0x103 => "VAddF32",
             0x104 => "VSubF32",
@@ -1586,8 +1602,10 @@ public static class Gen5ShaderTranslator
             0x369 => "VCvtPknormU16F32",
             0x36A => "VCvtPkU16U32",
             0x373 => "VMadU32U16",
+            0x345 => "VXadU32",
             0x346 => "VLshlAddU32",
             0x347 => "VAddLshlU32",
+            0x178 => "VXor3B32",
             0x36D => "VAdd3U32",
             0x36F => "VLshlOrU32",
             0x371 => "VAndOrB32",
@@ -1700,7 +1718,9 @@ public static class Gen5ShaderTranslator
             0x3E => "DsAppend",
             0x4D => "DsWriteB64",
             0x76 => "DsReadB64",
+            0x77 => "DsRead2B64",
             0xB0 => "DsWriteAddtidB32",
+            0xB1 => "DsReadAddtidB32",
             0xB2 => "DsPermuteB32",
             0xDE => "DsWriteB96",
             0xDF => "DsWriteB128",
@@ -2597,6 +2617,7 @@ public static class Gen5ShaderTranslator
                         Gen5Operand.Vector(vectorData0),
                         Gen5Operand.Vector(vectorData1),
                     ],
+                    "DsReadAddtidB32" => [],
                     "DsSwizzleB32" => [Gen5Operand.Vector(vectorData0)],
                     "DsConsume" or "DsAppend" => [],
                     "DsPermuteB32" => [
@@ -2624,7 +2645,7 @@ public static class Gen5ShaderTranslator
                     "DsConsume" or "DsAppend" => [
                         Gen5Operand.Vector(vectorDestination),
                     ],
-                    "DsReadB32" or "DsSwizzleB32" or "DsPermuteB32" => [
+                    "DsReadB32" or "DsReadAddtidB32" or "DsSwizzleB32" or "DsPermuteB32" => [
                         Gen5Operand.Vector(vectorDestination),
                     ],
                     "DsReadB64" => [
@@ -2634,6 +2655,12 @@ public static class Gen5ShaderTranslator
                     "DsRead2B32" or "DsRead2St64B32" => [
                         Gen5Operand.Vector(vectorDestination),
                         Gen5Operand.Vector(vectorDestination + 1),
+                    ],
+                    "DsRead2B64" => [
+                        Gen5Operand.Vector(vectorDestination),
+                        Gen5Operand.Vector(vectorDestination + 1),
+                        Gen5Operand.Vector(vectorDestination + 2),
+                        Gen5Operand.Vector(vectorDestination + 3),
                     ],
                     "DsReadB96" => [
                         Gen5Operand.Vector(vectorDestination),

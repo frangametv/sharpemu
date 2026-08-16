@@ -38,6 +38,78 @@ public sealed class MslTranslationTests
     }
 
     [Fact]
+    public void DsReadAddtidUsesMaskedM0AndLaneAddressing()
+    {
+        var fixture = new Gen5ComputeFixture(
+            "ds-read-addtid",
+            [
+                0xDAC40234, 0x07000302, // ds_read_addtid_b32 v7 offset:0x234
+                0xBF810000,
+            ],
+            StoreScalarResourceBase: 0,
+            StoreBackingBytes: 0);
+
+        var shader = Gen5ComputeFixtures.CompileOrThrow(fixture);
+        Assert.Contains("s[124] & 0xFFFFu", shader.Source, StringComparison.Ordinal);
+        Assert.Contains("sharpemu_lane * 4u", shader.Source, StringComparison.Ordinal);
+        Assert.Contains("v[7] = sharpemu_lds[", shader.Source, StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData(0x80E4u, "sharpemu_lane & 3u")]
+    [InlineData(0x041Fu, "sharpemu_lane & 31u")]
+    public void DsSwizzleUsesMetalSimdShuffle(uint pattern, string expectedMapping)
+    {
+        var fixture = new Gen5ComputeFixture(
+            "ds-swizzle",
+            [
+                0xD8D40000u | pattern, 0x07000302,
+                0xBF810000,
+            ],
+            StoreScalarResourceBase: 0,
+            StoreBackingBytes: 0);
+
+        var shader = Gen5ComputeFixtures.CompileOrThrow(fixture);
+        Assert.Contains("simd_shuffle", shader.Source, StringComparison.Ordinal);
+        Assert.Contains(expectedMapping, shader.Source, StringComparison.Ordinal);
+        Assert.DoesNotContain("sharpemu_lds", shader.Source, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void DsPermuteUsesMetalSimdShuffleWithoutLdsAllocation()
+    {
+        var fixture = new Gen5ComputeFixture(
+            "ds-permute",
+            [
+                0xDAC80000, 0x07000302,
+                0xBF810000,
+            ],
+            StoreScalarResourceBase: 0,
+            StoreBackingBytes: 0);
+
+        var shader = Gen5ComputeFixtures.CompileOrThrow(fixture);
+        Assert.Contains("simd_shuffle", shader.Source, StringComparison.Ordinal);
+        Assert.DoesNotContain("sharpemu_lds", shader.Source, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Unsigned64CompareLowersToWideMetalExpression()
+    {
+        var fixture = new Gen5ComputeFixture(
+            "v-cmp-eq-u64",
+            [
+                0xD0E20003, 0x00040100,
+                0xBF810000,
+            ],
+            StoreScalarResourceBase: 0,
+            StoreBackingBytes: 0);
+
+        var shader = Gen5ComputeFixtures.CompileOrThrow(fixture);
+        Assert.Contains("ulong", shader.Source, StringComparison.Ordinal);
+        Assert.Contains("==", shader.Source, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void LoopFixtureProducesMultipleDispatcherBlocks()
     {
         var shader = Gen5ComputeFixtures.CompileOrThrow(Gen5ComputeFixtures.Loop);
