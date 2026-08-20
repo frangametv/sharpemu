@@ -131,4 +131,34 @@ public sealed class VulkanPhysicalDeviceScoringTests
                 isWindows,
                 configuredValue));
     }
+
+    [Theory]
+    [InlineData(AmdVendorId, true, null, true)]
+    [InlineData(AmdVendorId, true, "1", true)]
+    [InlineData(AmdVendorId, true, "0", false)]
+    [InlineData(AmdVendorId, false, null, false)]
+    [InlineData(NvidiaVendorId, true, null, false)]
+    public void FaultingComputeShaderQuarantineIsScopedToAmdWindows(
+        uint vendorId,
+        bool isWindows,
+        string? configuredValue,
+        bool expected)
+    {
+        const string faultingDigest =
+            "1A5205C396F8192DF173E537C480766DBE03024C9D0CE4502E39FE42B13464D8";
+
+        Assert.Equal(
+            expected,
+            VulkanVideoPresenter.ShouldQuarantineAmdWindowsComputeShader(
+                vendorId,
+                isWindows,
+                faultingDigest,
+                configuredValue));
+        Assert.False(
+            VulkanVideoPresenter.ShouldQuarantineAmdWindowsComputeShader(
+                vendorId,
+                isWindows,
+                "2A5205C396F8192DF173E537C480766DBE03024C9D0CE4502E39FE42B13464D8",
+                configuredValue));
+    }
 }

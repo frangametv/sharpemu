@@ -850,6 +850,28 @@ internal static unsafe class VulkanVideoPresenter
             !string.Equals(configuredValue, "1", StringComparison.Ordinal);
     }
 
+    // This module was captured immediately before AMD's Windows driver raised
+    // an access violation inside vkCreateComputePipelines on an RX 7900 XT.
+    // Keep the full translated-SPIR-V digest: shader addresses are allocations
+    // and therefore are not stable identities across games or builds.
+    private const string AmdWindowsFaultingComputeDigest =
+        "1A5205C396F8192DF173E537C480766DBE03024C9D0CE4502E39FE42B13464D8";
+
+    internal static bool ShouldQuarantineAmdWindowsComputeShader(
+        uint vendorId,
+        bool isWindows,
+        string shaderDigest,
+        string? configuredValue)
+    {
+        return isWindows &&
+            vendorId == AmdVendorId &&
+            !string.Equals(configuredValue, "0", StringComparison.Ordinal) &&
+            string.Equals(
+                shaderDigest,
+                AmdWindowsFaultingComputeDigest,
+                StringComparison.OrdinalIgnoreCase);
+    }
+
     private static bool _splashHidden;
     private static long _enqueuedGuestWorkSequence;
     // Largest contiguous completed sequence, retained for compact diagnostics.
@@ -13009,6 +13031,30 @@ internal static unsafe class VulkanVideoPresenter
             if (!TryValidateStorageImageBindings(work, out validationError))
             {
                 LogRejectedComputeDispatch(work, validationError);
+                return;
+            }
+
+            var computeDigest = GetShaderDigest(work.ComputeSpirv);
+            if (ShouldQuarantineAmdWindowsComputeShader(
+                    _amdWindowsComputeSafety ? AmdVendorId : 0,
+                    OperatingSystem.IsWindows(),
+                    computeDigest,
+                    Environment.GetEnvironmentVariable(
+                        "SHARPEMU_VK_AMD_COMPUTE_QUARANTINE")))
+            {
+                // Preserve the exact module for diagnostics, then turn only
+                // this known driver-crashing dispatch into a no-op. Calling the
+                // native compiler cannot be guarded with a managed exception:
+                // the Radeon driver terminates the process with 0xC0000005.
+                RecordAmdComputePipelineCandidate(
+                    work.ShaderAddress,
+                    computeDigest,
+                    work.ComputeSpirv);
+                Console.Error.WriteLine(
+                    $"[LOADER][WARN] vk.amd_compute_pipeline_quarantined " +
+                    $"cs=0x{work.ShaderAddress:X16} digest={computeDigest[..16]} " +
+                    $"bytes={work.ComputeSpirv.Length} action=skip " +
+                    $"override=SHARPEMU_VK_AMD_COMPUTE_QUARANTINE=0");
                 return;
             }
 
