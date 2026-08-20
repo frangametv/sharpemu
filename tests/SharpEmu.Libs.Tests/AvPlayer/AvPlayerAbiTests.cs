@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 
 using System.Buffers.Binary;
+using System.Diagnostics;
 using SharpEmu.HLE;
 using SharpEmu.Libs.AvPlayer;
 using Xunit;
@@ -106,15 +107,41 @@ public sealed class AvPlayerAbiTests
     [InlineData(false, true, false)]
     [InlineData(true, false, false)]
     [InlineData(true, true, true)]
-    public void CompletedFallbackIsReleasedOnlyAtGuestEndOfStream(
+    public void CompletedFallbackIsReleasedAtGuestEndOfStream(
         bool fallbackCompleted,
         bool guestEndOfStream,
         bool expected)
     {
+        var completedTicks = Stopwatch.GetTimestamp();
         Assert.Equal(
             expected,
             AvPlayerExports.ShouldReleaseCompletedFallback(
                 fallbackCompleted,
-                guestEndOfStream));
+                guestEndOfStream,
+                completedTicks,
+                completedTicks));
+    }
+
+    /// <summary>
+    /// A title that pauses its player after the poster frame never reaches end
+    /// of stream, so the hold must expire on its own; otherwise the last movie
+    /// image stays pinned over everything the game renders next.
+    /// </summary>
+    [Fact]
+    public void CompletedFallbackHoldExpiresWithoutGuestEndOfStream()
+    {
+        var completedTicks = Stopwatch.GetTimestamp();
+        Assert.False(
+            AvPlayerExports.ShouldReleaseCompletedFallback(
+                fallbackPlaybackCompleted: true,
+                guestEndOfStream: false,
+                completedTicks,
+                completedTicks + (Stopwatch.Frequency / 10)));
+        Assert.True(
+            AvPlayerExports.ShouldReleaseCompletedFallback(
+                fallbackPlaybackCompleted: true,
+                guestEndOfStream: false,
+                completedTicks,
+                completedTicks + (Stopwatch.Frequency * 2)));
     }
 }

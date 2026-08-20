@@ -82,6 +82,7 @@ public static class AvPlayerExports
                         playback.Dispose();
                         player.FallbackPlayback = null;
                         player.FallbackPlaybackCompleted = true;
+                        player.FallbackPlaybackCompletedTicks = Stopwatch.GetTimestamp();
                         Trace(
                             $"host_fallback_finished handle=0x{player.Handle:X16} " +
                             "holding_last_frame=true");
@@ -92,10 +93,15 @@ public static class AvPlayerExports
                 // guest AvPlayer reaches EOF.  Keep its final image over the
                 // stale guest texture until the guest has actually consumed
                 // the stream; otherwise frame zero becomes visible again and
-                // the intro appears to start a second time.
+                // the intro appears to start a second time.  The hold is
+                // bounded: a title that pauses its player after the poster
+                // frame never reaches EOF, and an unbounded hold would pin the
+                // final movie image over everything the game renders next.
                 if (ShouldReleaseCompletedFallback(
                         player.FallbackPlaybackCompleted,
-                        player.EndOfStream))
+                        player.EndOfStream,
+                        player.FallbackPlaybackCompletedTicks,
+                        Stopwatch.GetTimestamp()))
                 {
                     ClearFallbackPresentation(player);
                 }
@@ -142,10 +148,21 @@ public static class AvPlayerExports
         return advanced || !hasPresentation;
     }
 
+    /// <summary>
+    /// How long a finished host playback keeps its final image on screen while
+    /// waiting for the guest player to reach end of stream.  Titles that pause
+    /// their AvPlayer after the first frame never do, so the hold expires.
+    /// </summary>
+    private static readonly long FallbackHoldGraceTicks = Stopwatch.Frequency;
+
     internal static bool ShouldReleaseCompletedFallback(
         bool fallbackPlaybackCompleted,
-        bool guestEndOfStream) =>
-        fallbackPlaybackCompleted && guestEndOfStream;
+        bool guestEndOfStream,
+        long completedTicks,
+        long nowTicks) =>
+        fallbackPlaybackCompleted &&
+        (guestEndOfStream ||
+         completedTicks != 0 && nowTicks - completedTicks >= FallbackHoldGraceTicks);
 
     private static void ClearFallbackPresentation(PlayerState player)
     {
@@ -154,8 +171,11 @@ public static class AvPlayerExports
         player.FallbackPresentationHeight = 0;
         player.FallbackPresentationSerial = 0;
         player.FallbackPlaybackCompleted = false;
+        player.FallbackPlaybackCompletedTicks = 0;
         player.SkipFirstFallbackPlaybackFrame = false;
-        Trace($"host_fallback_released handle=0x{player.Handle:X16} guest_eof=true");
+        Trace(
+            $"host_fallback_released handle=0x{player.Handle:X16} " +
+            $"guest_eof={player.EndOfStream}");
     }
 
     internal static bool ShouldTraceVideoBufferAddress(ulong address)
@@ -256,6 +276,7 @@ public static class AvPlayerExports
         public MediaFramePlayback? FallbackPlayback { get; set; }
         public bool FallbackPlaybackAttempted { get; set; }
         public bool FallbackPlaybackCompleted { get; set; }
+        public long FallbackPlaybackCompletedTicks { get; set; }
         public bool SkipFirstFallbackPlaybackFrame { get; set; }
 
         public void Dispose()
@@ -284,6 +305,7 @@ public static class AvPlayerExports
             FallbackPresentationSerial = 0;
             FallbackPlaybackAttempted = false;
             FallbackPlaybackCompleted = false;
+            FallbackPlaybackCompletedTicks = 0;
             SkipFirstFallbackPlaybackFrame = false;
         }
     }

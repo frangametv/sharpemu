@@ -101,29 +101,18 @@ public static partial class Gen5SpirvTranslator
                 return false;
             }
 
+            if (instruction.Opcode is "VMovrelsB32" or "VMovreldB32" or
+                "VMovrelsdB32" or "VMovrelsd2B32")
+            {
+                return TryEmitMoveRelative(instruction, destination, out error);
+            }
+
             uint result;
             switch (instruction.Opcode)
             {
                 case "VMovB32":
                     result = GetRawSource(instruction, 0);
                     break;
-                case "VMovrelsB32":
-                {
-                    if (instruction.Sources.Count == 0 ||
-                        instruction.Sources[0].Kind != Gen5OperandKind.VectorRegister)
-                    {
-                        error = "VMovrelsB32 expects a VGPR source";
-                        return false;
-                    }
-
-                    var relativeIndex = BitwiseAnd(
-                        IAdd(
-                            UInt(instruction.Sources[0].Value),
-                            LoadS(124)),
-                        UInt(VectorRegisterCount - 1));
-                    result = Load(_uintType, VectorPointerDynamic(relativeIndex));
-                    break;
-                }
                 case "VWritelaneB32":
                 {
                     // vdst[lane(src1)] = src0
@@ -1062,6 +1051,76 @@ public static partial class Gen5SpirvTranslator
             }
 
             StoreV(destination, result);
+            return true;
+        }
+
+        // V_MOVREL*_B32: register-relative moves. M0 is added at run time to the
+        // source and/or destination register number encoded in the instruction,
+        // which is how shader compilers implement a dynamically indexed array
+        // that stayed in registers instead of being spilled to memory. Astro Bot
+        // ships pixel shaders that index a small register-resident table this
+        // way; without this the whole shader fails to translate.
+        //
+        //   V_MOVRELS_B32     vdst              = vgpr[src0 + M0]
+        //   V_MOVRELD_B32     vgpr[vdst + M0]   = src0
+        //   V_MOVRELSD_B32    vgpr[vdst + M0]   = vgpr[src0 + M0]
+        //   V_MOVRELSD_2_B32  vgpr[vdst + M0[25:16]] = vgpr[src0 + M0[9:0]]
+        //
+        // The relative forms address the VGPR file relative to the wave's own
+        // allocation base, which is exactly what the private register array
+        // models, so the encoded number and M0 simply add.
+        private bool TryEmitMoveRelative(
+            Gen5ShaderInstruction instruction,
+            uint destination,
+            out string error)
+        {
+            error = string.Empty;
+            if (instruction.Sources.Count == 0)
+            {
+                error = $"missing source for {instruction.Opcode}";
+                return false;
+            }
+
+            var m0 = LoadS(M0ScalarRegister);
+            uint sourceOffset;
+            uint destinationOffset;
+            if (instruction.Opcode == "VMovrelsd2B32")
+            {
+                sourceOffset = BitwiseAnd(m0, UInt(0x3FF));
+                destinationOffset = BitwiseAnd(ShiftRightLogical(m0, UInt(16)), UInt(0x3FF));
+            }
+            else
+            {
+                sourceOffset = m0;
+                destinationOffset = m0;
+            }
+
+            uint value;
+            if (instruction.Opcode == "VMovreldB32")
+            {
+                // Only the destination is relative here; src0 is an ordinary
+                // operand and may be an SGPR or an inline/literal constant.
+                value = GetRawSource(instruction, 0);
+            }
+            else
+            {
+                var source = instruction.Sources[0];
+                if (source.Kind != Gen5OperandKind.VectorRegister)
+                {
+                    error = $"{instruction.Opcode} source must be a vector register";
+                    return false;
+                }
+
+                value = LoadVDynamic(IAdd(UInt(source.Value), sourceOffset));
+            }
+
+            if (instruction.Opcode == "VMovrelsB32")
+            {
+                StoreV(destination, value);
+                return true;
+            }
+
+            StoreVDynamic(IAdd(UInt(destination), destinationOffset), value);
             return true;
         }
 

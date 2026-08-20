@@ -1352,6 +1352,7 @@ public static class Gen5ShaderTranslator
             0x42 => "VMovreldB32",
             0x43 => "VMovrelsB32",
             0x44 => "VMovrelsdB32",
+            0x48 => "VMovrelsd2B32",
             _ => string.Empty,
         };
 
