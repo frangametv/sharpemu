@@ -8316,6 +8316,24 @@ public static partial class AgcExports
                 var targetAddress = destinationAddress +
                     (incrementAddress ? (ulong)index * sizeof(uint) : 0);
                 wroteData = TryWriteUInt32(ctx, targetAddress, values[index]);
+                if (wroteData)
+                {
+                    // A WAIT_REG_MEM may observe the label only transiently:
+                    // titles commonly recycle it back to zero before the next
+                    // queue poll. Preserve the producer edge just like
+                    // RELEASE_MEM does so a suspended DCB can resume.
+                    GpuWaitRegistry.RecordProduced(
+                        ctx.Memory, targetAddress, values[index]);
+                }
+            }
+
+            // A 64-bit wait watches the two incrementing dwords as one label.
+            // Record that combined view in addition to the individual stores.
+            if (wroteData && dwordCount >= 2 && incrementAddress)
+            {
+                var combined = ((ulong)values[1] << 32) | values[0];
+                GpuWaitRegistry.RecordProduced(
+                    ctx.Memory, destinationAddress, combined);
             }
             return wroteData;
         }

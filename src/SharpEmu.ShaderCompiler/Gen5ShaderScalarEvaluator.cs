@@ -128,7 +128,8 @@ public static class Gen5ShaderScalarEvaluator
         Gen5ShaderState state,
         Gen5ShaderInstruction instruction,
         uint scalarBase,
-        ulong baseAddress)
+        ulong baseAddress,
+        bool readableRuntimePath)
     {
         lock (_scalarFallbackTraceGate)
         {
@@ -142,13 +143,18 @@ public static class Gen5ShaderScalarEvaluator
             $"[LOADER][WARN] agc.descriptor_divergent " +
             $"shader=0x{state.Program.Address:X16} pc=0x{instruction.Pc:X} " +
             $"op={instruction.Opcode} base=s{scalarBase} " +
-            $"linear_base_addr=0x{baseAddress:X16} (unbound instead of dereferenced)");
+            $"linear_base_addr=0x{baseAddress:X16} action=" +
+            (readableRuntimePath
+                ? "use-readable-selected-path"
+                : "unbound-unreadable-path"));
     }
     // Shaders whose empty SRT/EUD caused a null-base scalar pointer load.
     // Host submit of those translations has lost the Vulkan device; Agc skips
     // them before QueueSubmit.
     private static readonly ConcurrentDictionary<ulong, byte> _emptySrtScalarPointerFallbacks =
         new();
+    private static readonly ConcurrentDictionary<(ulong Shader, uint Pc), byte>
+        _neutralStaticImageFallbacks = new();
 
     public static bool WasEmptySrtScalarPointerFallback(ulong shaderAddress) =>
         _emptySrtScalarPointerFallbacks.ContainsKey(shaderAddress);
@@ -187,6 +193,7 @@ public static class Gen5ShaderScalarEvaluator
     private const int ScalarRegisterCount = 256;
     private const int ImageDescriptorDwords = 8;
     private const int SamplerDescriptorDwords = 4;
+    private const int MaxNeutralStaticImageBindings = 8;
     private const int MaxGlobalMemoryBindingBytes = 16 * 1024 * 1024;
     public static long GlobalMemoryReadCount;
     public static long GlobalMemoryReadBytes;
@@ -305,6 +312,7 @@ public static class Gen5ShaderScalarEvaluator
         var finalScalarRegisters = (uint[])scalarRegisters.Clone();
         var pendingPaths = new Stack<ScalarPathState>();
         var visitedPaths = new HashSet<ScalarPathKey>();
+        var supplementalPathStarts = new HashSet<uint>();
 
         void QueuePath(
             uint pc,
@@ -313,6 +321,16 @@ public static class Gen5ShaderScalarEvaluator
             bool pathScc,
             bool supplemental)
         {
+            // Resource discovery only needs one representative scalar state
+            // per static block.  Keying supplemental paths by their complete
+            // register state makes nested EXEC/VCC material branches grow
+            // exponentially while still producing at most one Vulkan binding
+            // per instruction PC.
+            if (supplemental && !supplementalPathStarts.Add(pc))
+            {
+                return;
+            }
+
             var key = new ScalarPathKey(
                 pc,
                 ComputeScalarStateHash(registers, pathExecMask, pathScc));
@@ -362,8 +380,47 @@ public static class Gen5ShaderScalarEvaluator
                     break;
                 }
 
+                if (TryGetSoppBranchTargetPc(instruction, out var targetPc) &&
+                    TryEvaluateKnownScalarBranch(
+                        instruction.Opcode,
+                        scalarConditionCode,
+                        out var takeConditionalBranch))
+                {
+                    // SCC is a uniform scalar value and is reproduced by the
+                    // evaluator.  Following its branch is essential for
+                    // descriptor setup: walking both mutually-exclusive arms
+                    // linearly leaves the SGPR pair holding a hybrid pointer
+                    // (Astro Bot's scene compute shaders commonly ended up at
+                    // 0x200/0 here).  EXEC/VCC branches remain deliberately
+                    // unresolved because their value depends on vector work.
+                    if (targetPc > instruction.Pc &&
+                        _cfgResourceDiscovery &&
+                        !path.Supplemental)
+                    {
+                        var fallthroughPc = instruction.Pc +
+                            (uint)(instruction.Words.Count * sizeof(uint));
+                        QueuePath(
+                            takeConditionalBranch ? fallthroughPc : targetPc,
+                            (uint[])scalarRegisters.Clone(),
+                            execMask,
+                            scalarConditionCode,
+                            supplemental: true);
+                    }
+
+                    if (takeConditionalBranch && targetPc > instruction.Pc)
+                    {
+                        skipUntilPc = targetPc;
+                    }
+                    else if (takeConditionalBranch && path.Supplemental)
+                    {
+                        break;
+                    }
+
+                    continue;
+                }
+
                 if (instruction.Opcode == "SBranch" &&
-                    TryGetSoppBranchTargetPc(instruction, out var targetPc))
+                    TryGetSoppBranchTargetPc(instruction, out targetPc))
                 {
                     if (targetPc > instruction.Pc)
                     {
@@ -401,6 +458,25 @@ public static class Gen5ShaderScalarEvaluator
                     {
                         break;
                     }
+                }
+
+                if (_cfgResourceDiscovery &&
+                    instruction.Opcode.StartsWith(
+                        "SCbranch",
+                        StringComparison.Ordinal) &&
+                    TryGetSoppBranchTargetPc(instruction, out targetPc) &&
+                    targetPc > instruction.Pc)
+                {
+                    // EXEC/VCC branches cannot be selected by this scalar
+                    // evaluator, but both arms remain in the translated CFG.
+                    // Continue through the fall-through arm and discover the
+                    // forward target once as a bounded supplemental path.
+                    QueuePath(
+                        targetPc,
+                        (uint[])scalarRegisters.Clone(),
+                        execMask,
+                        scalarConditionCode,
+                        supplemental: true);
                 }
 
                 if (instruction.Encoding == Gen5ShaderEncoding.Sopc)
@@ -882,6 +958,62 @@ public static class Gen5ShaderScalarEvaluator
             vertexInputBindings = capturedVertexInputs;
         }
 
+        // Indirect scalar control flow (S_SETPC/S_SWAPPC) and a few EXEC/VCC
+        // dispatcher shapes cannot be executed by this snapshot evaluator.
+        // Their image instructions still exist in the emitted SPIR-V; omitting
+        // the descriptor makes Vulkan reject the whole shader, including every
+        // otherwise-valid block.  Supply a PC-local neutral sampled/storage
+        // image for only those statically present instructions we could not
+        // reach. The AGC binding layer already maps an invalid/zero descriptor
+        // to its bounded 1x1 fallback, so this cannot read or write guest memory.
+        var missingStaticImages = state.Program.Instructions
+            .Where(instruction =>
+                instruction.Control is Gen5ImageControl &&
+                !resolvedImageByPc.ContainsKey(instruction.Pc))
+            .ToArray();
+        if (state.ComputeSystemRegisters is null &&
+            missingStaticImages.Length <= MaxNeutralStaticImageBindings)
+        {
+            foreach (var instruction in missingStaticImages)
+            {
+                var image = (Gen5ImageControl)instruction.Control!;
+
+                var neutralBinding = new Gen5ImageBinding(
+                    instruction.Pc,
+                    instruction.Opcode,
+                    image,
+                    new uint[ImageDescriptorDwords],
+                    UsesSampler(instruction.Opcode)
+                        ? new uint[SamplerDescriptorDwords]
+                        : [],
+                    null);
+                resolvedImageByPc.Add(instruction.Pc, resolved.Count);
+                resolved.Add(neutralBinding);
+                if (_neutralStaticImageFallbacks.TryAdd(
+                        (state.Program.Address, instruction.Pc),
+                        0))
+                {
+                    Console.Error.WriteLine(
+                        "[LOADER][WARN] agc.image_static_fallback " +
+                        $"shader=0x{state.Program.Address:X16} pc=0x{instruction.Pc:X} " +
+                        $"op={instruction.Opcode} action=bind-neutral-1x1");
+                }
+            }
+        }
+        else if (missingStaticImages.Length != 0 &&
+                 _neutralStaticImageFallbacks.TryAdd(
+                     (state.Program.Address, uint.MaxValue),
+                     0))
+        {
+            Console.Error.WriteLine(
+                "[LOADER][WARN] agc.image_static_fallback " +
+                $"shader=0x{state.Program.Address:X16} missing={missingStaticImages.Length} " +
+                $"limit={MaxNeutralStaticImageBindings} action=" +
+                (state.ComputeSystemRegisters is not null
+                    ? "skip-compute"
+                    : "skip-program-limit"));
+        }
+
         evaluation = new Gen5ShaderEvaluation(
             initialScalarRegisters,
             finalScalarRegisters,
@@ -1134,6 +1266,25 @@ public static class Gen5ShaderScalarEvaluator
 
         targetPc = (uint)target;
         return true;
+    }
+
+    private static bool TryEvaluateKnownScalarBranch(
+        string opcode,
+        bool scalarConditionCode,
+        out bool takeBranch)
+    {
+        switch (opcode)
+        {
+            case "SCbranchScc0":
+                takeBranch = !scalarConditionCode;
+                return true;
+            case "SCbranchScc1":
+                takeBranch = scalarConditionCode;
+                return true;
+            default:
+                takeBranch = false;
+                return false;
+        }
     }
 
     private static bool TryResolveVectorConstantBefore(
@@ -2180,9 +2331,21 @@ public static class Gen5ShaderScalarEvaluator
             scalarBase.Value,
             isBufferLoad ? 4u : 2u) ||
             IsOffsetFromUnmodelledWriter(state, instruction, control);
+        var readableDivergentScalarPointer =
+            descriptorDiverged &&
+            !isBufferLoad &&
+            CanReadScalarLoadRange(
+                ctx,
+                address,
+                instruction.Destinations.Count);
         if (descriptorDiverged)
         {
-            TraceDivergentDescriptor(state, instruction, scalarBase.Value, baseAddress);
+            TraceDivergentDescriptor(
+                state,
+                instruction,
+                scalarBase.Value,
+                baseAddress,
+                readableDivergentScalarPointer);
         }
 
         var bufferUnbound =
@@ -2195,7 +2358,10 @@ public static class Gen5ShaderScalarEvaluator
               scalarBase.Value + 3 < ScalarRegisterCount &&
               scalarRegisters[scalarBase.Value + 2] == 0 &&
               scalarRegisters[scalarBase.Value + 3] == 0));
-        var scalarPointerUnbound = descriptorDiverged && !isBufferLoad ||
+        var scalarPointerUnbound =
+            descriptorDiverged &&
+            !isBufferLoad &&
+            !readableDivergentScalarPointer ||
             ShouldTreatScalarPointerAsUnbound(
                 isBufferLoad,
                 address,
@@ -2679,5 +2845,25 @@ public static class Gen5ShaderScalarEvaluator
 
         value = BinaryPrimitives.ReadUInt32LittleEndian(bytes);
         return true;
+    }
+
+    private static bool CanReadScalarLoadRange(
+        CpuContext ctx,
+        ulong address,
+        int dwordCount)
+    {
+        if (address == 0 || dwordCount <= 0)
+        {
+            return false;
+        }
+
+        var lastOffset = checked((ulong)(dwordCount - 1) * sizeof(uint));
+        if (ulong.MaxValue - address < lastOffset)
+        {
+            return false;
+        }
+
+        return TryReadUInt32(ctx, address, out _) &&
+            (lastOffset == 0 || TryReadUInt32(ctx, address + lastOffset, out _));
     }
 }

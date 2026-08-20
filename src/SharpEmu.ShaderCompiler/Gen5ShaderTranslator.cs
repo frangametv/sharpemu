@@ -654,7 +654,11 @@ public static class Gen5ShaderTranslator
             ctx,
             address,
             shaderSizeBytes,
-            acceptSetProgramCounter: false,
+            // S_SETPC_B64 is an unconditional indirect transfer. For a
+            // standalone shader it ends the decodable program; for a known
+            // fused pair TryDecodeCombinedProgram replaces it with the
+            // registered continuation below.
+            acceptSetProgramCounter: true,
             out program,
             out _,
             out error);

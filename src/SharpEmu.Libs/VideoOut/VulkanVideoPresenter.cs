@@ -3013,7 +3013,40 @@ internal static unsafe class VulkanVideoPresenter
 
     private static long _tracedAvPlayerFallbackPresentationSerial;
     private static long _avPlayerFallbackPresentationCount;
+    private static long _observedAvPlayerFallbackReleaseSerial;
     private static readonly HashSet<long> _tracedGuestImagePresentRejections = new();
+
+    private static bool TryTakeGuestPresentationAfterHostMovieRelease(
+        out Presentation presentation)
+    {
+        var releaseSerial = AvPlayerExports.FallbackPresentationReleaseSerial;
+        if (releaseSerial == Volatile.Read(
+                ref _observedAvPlayerFallbackReleaseSerial))
+        {
+            presentation = default;
+            return false;
+        }
+
+        lock (_gate)
+        {
+            if (_latestPresentation is not { IsSplash: false } latest ||
+                !IsGuestWorkCompletedLocked(latest.RequiredGuestWorkSequence))
+            {
+                presentation = default;
+                return false;
+            }
+
+            Volatile.Write(
+                ref _observedAvPlayerFallbackReleaseSerial,
+                releaseSerial);
+            presentation = latest;
+        }
+
+        Console.Error.WriteLine(
+            "[VIDEOOUT][INFO] AvPlayer host fallback released; " +
+            $"restoring latest guest presentation seq={presentation.Sequence}.");
+        return true;
+    }
 
 	private static bool HasPendingGuestPresentation(long presentedSequence)
 	{
@@ -17861,6 +17894,12 @@ internal static unsafe class VulkanVideoPresenter
 
             if (!tookPresentation &&
                 TryTakeHostMovieOnlyPresentation(_presentedSequence, out presentation))
+            {
+                tookPresentation = true;
+            }
+
+            if (!tookPresentation &&
+                TryTakeGuestPresentationAfterHostMovieRelease(out presentation))
             {
                 tookPresentation = true;
             }

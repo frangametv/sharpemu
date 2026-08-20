@@ -1081,7 +1081,7 @@ public static partial class Gen5MslTranslator
             {
                 var instruction = instructions[index];
                 var isTerminator = index == block.EndIndex - 1;
-                if (instruction.Opcode == "SEndpgm")
+                if (IsProgramTerminator(instruction.Opcode))
                 {
                     Line("active = false;");
                     return true;
@@ -2116,7 +2116,7 @@ public static partial class Gen5MslTranslator
                     leaders.Add(targetPc);
                 }
 
-                if ((IsBranch(instruction.Opcode) || instruction.Opcode == "SEndpgm") &&
+                if ((IsBranch(instruction.Opcode) || IsProgramTerminator(instruction.Opcode)) &&
                     index + 1 < instructions.Count)
                 {
                     leaders.Add(instructions[index + 1].Pc);
@@ -2151,6 +2151,12 @@ public static partial class Gen5MslTranslator
         private static bool IsBranch(string opcode) =>
             opcode == "SBranch" ||
             opcode.StartsWith("SCbranch", StringComparison.Ordinal);
+
+        // S_SETPC_B64 transfers control to a runtime address outside the
+        // standalone program known to this translator. Continuing linearly
+        // would treat a different function or trailing data as instructions.
+        private static bool IsProgramTerminator(string opcode) =>
+            opcode is "SEndpgm" or "SSetpcB64";
 
         private static bool TryGetBranchTargetPc(
             Gen5ShaderInstruction instruction,
@@ -2236,7 +2242,7 @@ public static partial class Gen5MslTranslator
                 var block = blocks[blockIndex];
                 var terminator = instructions[block.EndIndex - 1];
                 var hasFallthrough = blockIndex + 1 < blocks.Count;
-                if (terminator.Opcode == "SEndpgm")
+                if (IsProgramTerminator(terminator.Opcode))
                 {
                     continue;
                 }

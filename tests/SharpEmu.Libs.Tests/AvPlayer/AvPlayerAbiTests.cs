@@ -103,6 +103,52 @@ public sealed class AvPlayerAbiTests
     }
 
     [Theory]
+    [InlineData(false, false, false, false, 1_000L, 2_000L, false)]
+    [InlineData(true, true, true, false, 1_000L, 2_000L, false)]
+    [InlineData(true, false, true, false, 1_000L, 2_000L, false)]
+    [InlineData(true, false, true, true, 1_000L, 1_001L, true)]
+    public void FallbackPresentationRespectsGuestLifecycle(
+        bool started,
+        bool paused,
+        bool pausedSinceCreation,
+        bool resumedAfterPause,
+        long createdTicks,
+        long nowTicks,
+        bool expected)
+    {
+        Assert.Equal(
+            expected,
+            AvPlayerExports.ShouldPresentFallback(
+                started,
+                paused,
+                pausedSinceCreation,
+                resumedAfterPause,
+                createdTicks,
+                nowTicks));
+    }
+
+    [Fact]
+    public void UnpausedFallbackStartsAfterInitialPauseDetectionGrace()
+    {
+        var createdTicks = Stopwatch.GetTimestamp();
+
+        Assert.False(AvPlayerExports.ShouldPresentFallback(
+            started: true,
+            paused: false,
+            pausedSinceCreation: false,
+            resumedAfterPause: false,
+            createdTicks,
+            createdTicks));
+        Assert.True(AvPlayerExports.ShouldPresentFallback(
+            started: true,
+            paused: false,
+            pausedSinceCreation: false,
+            resumedAfterPause: false,
+            createdTicks,
+            createdTicks + Stopwatch.Frequency));
+    }
+
+    [Theory]
     [InlineData(false, false, false)]
     [InlineData(false, true, false)]
     [InlineData(true, false, false)]

@@ -42,6 +42,10 @@ public static class AvPlayerExports
     private static int _traceCount;
     private static int _videoPayloadTraceCount;
     private static long _fallbackPresentationSerial;
+    private static long _fallbackPresentationReleaseSerial;
+
+    internal static long FallbackPresentationReleaseSerial =>
+        Interlocked.Read(ref _fallbackPresentationReleaseSerial);
 
     internal static bool TryGetFallbackPresentationFrame(
         out byte[] pixels,
@@ -54,7 +58,14 @@ public static class AvPlayerExports
             PlayerState? latest = null;
             foreach (var player in Players.Values)
             {
-                if (player.FallbackPlayback is { } playback)
+                var presentationActive = ShouldPresentFallback(
+                    player.Started,
+                    player.Paused,
+                    player.FallbackPausedSinceCreation,
+                    player.FallbackResumedAfterPause,
+                    player.FallbackPlaybackCreatedTicks,
+                    Stopwatch.GetTimestamp());
+                if (presentationActive && player.FallbackPlayback is { } playback)
                 {
                     if (playback.TryGetFrame(
                             advanceClock: true,
@@ -83,7 +94,8 @@ public static class AvPlayerExports
                         player.FallbackPlayback = null;
                         player.FallbackPlaybackCompleted = true;
                         player.FallbackPlaybackCompletedTicks = Stopwatch.GetTimestamp();
-                        Trace(
+                        Console.Error.WriteLine(
+                            "[AVPLAYER][INFO] " +
                             $"host_fallback_finished handle=0x{player.Handle:X16} " +
                             "holding_last_frame=true");
                     }
@@ -107,6 +119,7 @@ public static class AvPlayerExports
                 }
 
                 if (player.FallbackPresentationPixels is null ||
+                    !presentationActive ||
                     player.FallbackPresentationSerial <= 0 ||
                     latest is not null &&
                     player.FallbackPresentationSerial <= latest.FallbackPresentationSerial)
@@ -148,6 +161,23 @@ public static class AvPlayerExports
         return advanced || !hasPresentation;
     }
 
+    private static readonly long FallbackInitialPauseGraceTicks =
+        Stopwatch.Frequency / 2;
+
+    internal static bool ShouldPresentFallback(
+        bool started,
+        bool paused,
+        bool pausedSinceCreation,
+        bool resumedAfterPause,
+        long createdTicks,
+        long nowTicks) =>
+        started &&
+        !paused &&
+        (pausedSinceCreation
+            ? resumedAfterPause
+            : createdTicks != 0 &&
+              nowTicks - createdTicks >= FallbackInitialPauseGraceTicks);
+
     /// <summary>
     /// How long a finished host playback keeps its final image on screen while
     /// waiting for the guest player to reach end of stream.  Titles that pause
@@ -173,7 +203,9 @@ public static class AvPlayerExports
         player.FallbackPlaybackCompleted = false;
         player.FallbackPlaybackCompletedTicks = 0;
         player.SkipFirstFallbackPlaybackFrame = false;
-        Trace(
+        Interlocked.Increment(ref _fallbackPresentationReleaseSerial);
+        Console.Error.WriteLine(
+            "[AVPLAYER][INFO] " +
             $"host_fallback_released handle=0x{player.Handle:X16} " +
             $"guest_eof={player.EndOfStream}");
     }
@@ -278,6 +310,9 @@ public static class AvPlayerExports
         public bool FallbackPlaybackCompleted { get; set; }
         public long FallbackPlaybackCompletedTicks { get; set; }
         public bool SkipFirstFallbackPlaybackFrame { get; set; }
+        public long FallbackPlaybackCreatedTicks { get; set; }
+        public bool FallbackPausedSinceCreation { get; set; }
+        public bool FallbackResumedAfterPause { get; set; }
 
         public void Dispose()
         {
@@ -307,6 +342,9 @@ public static class AvPlayerExports
             FallbackPlaybackCompleted = false;
             FallbackPlaybackCompletedTicks = 0;
             SkipFirstFallbackPlaybackFrame = false;
+            FallbackPlaybackCreatedTicks = 0;
+            FallbackPausedSinceCreation = false;
+            FallbackResumedAfterPause = false;
         }
     }
 
@@ -536,6 +574,14 @@ public static class AvPlayerExports
 
             player.Paused = true;
             player.PlaybackClock.Stop();
+            if (player.FallbackPlaybackAttempted)
+            {
+                player.FallbackPausedSinceCreation = true;
+                player.FallbackResumedAfterPause = false;
+            }
+            Trace(
+                $"pause handle=0x{player.Handle:X16} " +
+                $"fallback_waiting_resume={player.FallbackPausedSinceCreation}");
         }
 
 
@@ -560,10 +606,17 @@ public static class AvPlayerExports
             player = foundPlayer;
 
             player.Paused = false;
+            if (player.FallbackPausedSinceCreation)
+            {
+                player.FallbackResumedAfterPause = true;
+            }
             if (player.DecoderOutput is not null)
             {
                 player.PlaybackClock.Start();
             }
+            Trace(
+                $"resume handle=0x{player.Handle:X16} " +
+                $"fallback_resumed={player.FallbackResumedAfterPause}");
         }
 
         NotifyEvent(ctx, player, 3); // StatePlay
@@ -1359,11 +1412,15 @@ public static class AvPlayerExports
         }
 
         player.FallbackPlayback = new MediaFramePlayback(decoder);
+        player.FallbackPlaybackCreatedTicks = Stopwatch.GetTimestamp();
+        player.FallbackPausedSinceCreation = false;
+        player.FallbackResumedAfterPause = false;
         Trace(
             $"host_fallback_started handle=0x{player.Handle:X16} " +
             $"source={player.Width}x{player.Height} output={decoder.Width}x{decoder.Height} " +
             $"host_limit={maximumWidth}x{maximumHeight} " +
-            $"fps={decoder.FramesPerSecondNumerator}/{decoder.FramesPerSecondDenominator}");
+            $"fps={decoder.FramesPerSecondNumerator}/{decoder.FramesPerSecondDenominator} " +
+            "clock=waiting-for-resume-or-grace");
     }
 
     internal static int CalculateNv12Pitch(int width) =>

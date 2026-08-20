@@ -25,12 +25,11 @@ SPDX-License-Identifier: GPL-2.0-or-later
 </p>
 
 > [!IMPORTANT]
-> ### Fran4: Astro Bot intro is now on screen!
-> **Fran4 has been released.** This version takes **Astro Bot** beyond the
-> black screen and displays the complete intro video.
-> This is an important milestone, but Fran4 remains an experimental preview:
-> video playback is still slow and the following 3D rendering path needs more
-> work and testing.
+> ### Fran5: Astro Bot's intro now plays smoothly on screen!
+> **Fran5 has been released.** The complete intro video is now displayed with
+> fluid playback with video/audio synchronization and GPU optimizations.
+> With Fran6, my main goal will be to understand and implement the rest of the rendering engine,
+> including the text, menus and 3D graphics that follows the video.
 
 > [!WARNING]
 > SharpEmu is at a very early stage. Astro Bot and Grand Theft Auto V are
@@ -54,18 +53,18 @@ verified problem and test again.
 
 - Keep the project synchronized with useful upstream SharpEmu development.
 - Preserve and improve the valuable Acelogic work already integrated.
-- Improve Astro Bot intro playback performance and continue investigating the
-  title/menu rendering, shader and runtime paths reached after the video.
+- Continue investigating Astro Bot's title/menu rendering, shader and runtime
+  paths now that the intro video plays smoothly.
 - Advance GTA V through loader, kernel, audio, AGC and GPU failures.
 - Improve Vulkan on Windows/Linux and Metal/MoltenVK support on macOS.
 - Add focused regression tests for every fix that can be reproduced safely.
 
 SharpEmu can already load real `eboot.bin` files, execute native CPU code and
-load system modules. In Fran4, Astro Bot can display its complete intro video
-instead of remaining on a black screen and can advance to the title controller
-in the validated Windows test. Playback is currently slow, later guest 3D
-rendering remains incomplete, and SharpEmu is not yet a general-purpose or
-stable PS5 emulator.
+load system modules. In Fran5, Astro Bot can display its complete intro video
+with fluid, synchronized playback and can advance to the title controller in
+the validated Windows test. Text, menu and guest 3D rendering after the video
+remain incomplete and will be the main focus of Fran6. SharpEmu is not yet a
+general-purpose or stable PS5 emulator.
 
 ## Download and Run
 

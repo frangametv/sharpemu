@@ -351,6 +351,43 @@ public sealed class Gen5ScalarControlTests
         Assert.Contains("size=0x4", error);
     }
 
+    [Fact]
+    public void SetpcB64EndsStandaloneProgramBeforeTrailingDataAndCompiles()
+    {
+        var memory = new TestCpuMemory(ShaderAddress, 0x100);
+        Span<byte> shader = stackalloc byte[4 * sizeof(uint)];
+        BinaryPrimitives.WriteUInt32LittleEndian(shader, 0xBE802006u); // s_setpc_b64 s[6:7]
+        BinaryPrimitives.WriteUInt32LittleEndian(shader[sizeof(uint)..], 0x30306C73u); // trailing data
+        BinaryPrimitives.WriteUInt32LittleEndian(shader[(2 * sizeof(uint))..], 0x00000048u);
+        BinaryPrimitives.WriteUInt32LittleEndian(shader[(3 * sizeof(uint))..], 0x00000061u);
+        Assert.True(memory.TryWrite(ShaderAddress, shader));
+
+        var ctx = new CpuContext(memory, Generation.Gen5);
+        Assert.True(
+            Gen5ShaderTranslator.TryDecodeProgram(
+                ctx,
+                ShaderAddress,
+                out var program,
+                out var error),
+            error);
+        Assert.Equal("SSetpcB64", Assert.Single(program.Instructions).Opcode);
+
+        var state = new Gen5ShaderState(program, new uint[256], null);
+        Assert.True(
+            Gen5ShaderScalarEvaluator.TryEvaluate(ctx, state, out var evaluation, out error),
+            error);
+        Assert.True(
+            Gen5SpirvTranslator.TryCompileComputeShader(
+                state,
+                evaluation,
+                1,
+                1,
+                1,
+                out _,
+                out error),
+            error);
+    }
+
     private sealed class TestCpuMemory(ulong baseAddress, int size) : ICpuMemory
     {
         private readonly byte[] _storage = new byte[size];

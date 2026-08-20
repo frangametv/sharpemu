@@ -63,5 +63,5 @@ public sealed class Gen5IrBranchResolver : IIrBranchResolver
         string.Equals(instruction.Opcode, "SBranch", StringComparison.Ordinal);
 
     public static bool IsTerminator(Gen5ShaderInstruction instruction) =>
-        instruction.Opcode is "SEndpgm" or "SEndpgmSaved";
+        instruction.Opcode is "SEndpgm" or "SEndpgmSaved" or "SSetpcB64";
 }
