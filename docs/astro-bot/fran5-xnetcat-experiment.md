@@ -1,3 +1,8 @@
+<!--
+SPDX-FileCopyrightText: 2026 FranGameTv
+SPDX-License-Identifier: GPL-2.0-or-later
+-->
+
 # Fran5 xnetcat experiment
 
 This local-only branch evaluates selected ideas from xnetcat worktrees
