@@ -1377,13 +1377,26 @@ public static class Gen5ShaderScalarEvaluator
         out int dataLength)
     {
         var rented = GlobalMemoryPool.Rent(MaxGlobalMemoryBindingBytes);
-        for (var size = MaxGlobalMemoryBindingBytes; size >= 4096; size >>= 1)
+        // A descriptor with no declared byte size is still legal. Probe down
+        // to one dword instead of assuming every useful global buffer spans at
+        // least a page; small constant/argument buffers are common in compute
+        // shaders and were previously discarded entirely.
+        for (var size = MaxGlobalMemoryBindingBytes; size >= sizeof(uint); size >>= 1)
         {
-            if (ctx.Memory.TryRead(baseAddress, rented.AsSpan(0, size)))
+            var span = rented.AsSpan(0, size);
+            var readFromPvm = ctx.Memory.TryRead(baseAddress, span);
+            if (readFromPvm || FallbackMemoryReader?.Invoke(baseAddress, span) == true)
             {
                 Interlocked.Increment(ref GlobalMemoryReadCount);
                 Interlocked.Add(ref GlobalMemoryReadBytes, size);
-                Interlocked.Add(ref GlobalMemoryReadPvmBytes, size);
+                if (readFromPvm)
+                {
+                    Interlocked.Add(ref GlobalMemoryReadPvmBytes, size);
+                }
+                else
+                {
+                    Interlocked.Add(ref GlobalMemoryReadLibcBytes, size);
+                }
                 data = rented;
                 dataLength = size;
                 return true;
@@ -1407,7 +1420,7 @@ public static class Gen5ShaderScalarEvaluator
         dataLength = 0;
         if (sizeBytes == 0)
         {
-            return false;
+            return TryReadGlobalMemory(ctx, baseAddress, out data, out dataLength);
         }
 
         var cappedSize = Math.Min(sizeBytes, MaxGlobalMemoryBindingBytes);

@@ -103,6 +103,23 @@ public sealed class AvPlayerAbiTests
     }
 
     [Theory]
+    [InlineData(false, false, true)]
+    [InlineData(true, false, false)]
+    [InlineData(false, true, false)]
+    [InlineData(true, true, false)]
+    public void CompletedFallbackCannotRepublishPosterAfterRelease(
+        bool hasPresentation,
+        bool fallbackCompleted,
+        bool expected)
+    {
+        Assert.Equal(
+            expected,
+            AvPlayerExports.ShouldPublishFallbackPoster(
+                hasPresentation,
+                fallbackCompleted));
+    }
+
+    [Theory]
     [InlineData(false, false, false, false, 1_000L, 2_000L, false)]
     [InlineData(true, true, true, false, 1_000L, 2_000L, false)]
     [InlineData(true, false, true, false, 1_000L, 2_000L, false)]

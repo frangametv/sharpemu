@@ -6155,17 +6155,23 @@ public static partial class AgcExports
         if (state.IsSuspended)
         {
             // An explicit new submission supersedes a ring-tail park — the
-            // game moved to a fresh ring, so abandon the park.
+            // game moved to a fresh ring, so abandon the park. Removing the
+            // waiter is best-effort: it may already have been consumed by the
+            // monitor thread, but that stale registry race must not leave the
+            // queue permanently suspended.
             if (state.RingTailParkAddress == 0 ||
-                state.PendingSubmissions.Count == 0 ||
-                !GpuWaitRegistry.TryRemoveByState(state, state.RingTailParkAddress))
+                state.PendingSubmissions.Count == 0)
             {
                 return;
             }
 
+            var removedWaiter = GpuWaitRegistry.TryRemoveByState(
+                state,
+                state.RingTailParkAddress);
             TraceAgc(
                 $"agc.dcb.ring_tail_superseded addr=0x{state.RingTailParkAddress:X16} " +
-                $"queue={state.QueueName} submission={state.ActiveSubmissionId}");
+                $"queue={state.QueueName} submission={state.ActiveSubmissionId} " +
+                $"waiter_removed={removedWaiter}");
             // Keeps its full recorded extent so the arena sweep doesn't
             // double-run the tail once the game's own re-parse reaches it.
             state.RingTailParkAddress = 0;
@@ -13652,12 +13658,13 @@ public static partial class AgcExports
             }
 
             NoteRenderTargetAddress(address);
+            var (width, height) = DecodeRenderTargetDimensions(attrib2);
 
             targets.Add(new RenderTargetDescriptor(
                 slot,
                 address,
-                ((attrib2 >> 14) & 0x3FFFu) + 1,
-                (attrib2 & 0x3FFFu) + 1,
+                width,
+                height,
                 (info >> 2) & 0x1Fu,
                 (info >> 8) & 0x7u,
                 (info >> 11) & 0x3u,
@@ -13681,6 +13688,12 @@ public static partial class AgcExports
 
         return targets;
     }
+
+    // GFX10 CB_COLORn_ATTRIB2 stores MIP0_HEIGHT in bits 0..13 and
+    // MIP0_WIDTH in bits 14..27. Keep the decode named and covered by a test:
+    // several experimental forks accidentally swapped these fields.
+    internal static (uint Width, uint Height) DecodeRenderTargetDimensions(uint attrib2) =>
+        (((attrib2 >> 14) & 0x3FFFu) + 1, (attrib2 & 0x3FFFu) + 1);
 
     private static RenderTargetDescriptor[] BuildHostRenderTargets(
         IReadOnlyList<RenderTargetDescriptor> guestTargets,
@@ -20032,10 +20045,13 @@ public static partial class AgcExports
 
         var tracePackets = _traceAgc;
 
+        GuestGpu.Current.AttachGuestMemory(ctx.Memory);
+        TraceGuestMemoryCpuWriters(ctx, "multi-dcb-before");
         var gpuState = _submittedGpuStates.GetValue(
             CanonicalMemory(ctx.Memory), static _ => new SubmittedGpuState());
         lock (gpuState.Gate)
         {
+            gpuState.Graphics.QueueName = "dcb.graphics.multi";
             Gen5ShaderScalarEvaluator.BeginGlobalMemoryReadScope();
             try
             {
@@ -20049,6 +20065,10 @@ public static partial class AgcExports
                         continue;
                     }
 
+                    // Record the whole submitted range before parsing, just as
+                    // the single-DCB path does. This keeps orphan-preamble
+                    // recovery from rediscovering and executing a live buffer.
+                    RecordGameSubmittedRange(commandAddress, dwordCount);
                     if (tracePackets)
                     {
                         TraceAgc(
@@ -20056,7 +20076,18 @@ public static partial class AgcExports
                             $"addr=0x{commandAddress:X16} dwords={dwordCount}");
                     }
 
-                    ParseSubmittedDcb(ctx, gpuState, gpuState.Graphics, commandAddress, dwordCount, tracePackets);
+                    // Multi-DCB submission is still one ordered graphics
+                    // queue. Feed every buffer through the same resumable path
+                    // as DriverSubmitDcb so a wait in an earlier buffer cannot
+                    // be skipped by parsing a later buffer immediately.
+                    EnqueueSubmittedDcb(
+                        ctx,
+                        gpuState,
+                        gpuState.Graphics,
+                        commandAddress,
+                        dwordCount,
+                        ++gpuState.SubmissionSequence,
+                        tracePackets);
                 }
 
                 DrainResumableDcbs(ctx, gpuState, tracePackets);
@@ -20066,6 +20097,7 @@ public static partial class AgcExports
                 Gen5ShaderScalarEvaluator.EndGlobalMemoryReadScope();
             }
         }
+        TraceGuestMemoryCpuWriters(ctx, "multi-dcb-after");
 
         ctx[CpuRegister.Rax] = 0;
         return (int)OrbisGen2Result.ORBIS_GEN2_OK;

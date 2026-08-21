@@ -9,6 +9,30 @@ namespace SharpEmu.Libs.Tests.Cpu;
 
 public sealed class DirectExecutionBackendImportClassificationTests
 {
+	[Theory]
+	[InlineData("eV9wAD2riIA", unchecked((int)0x80020002))]
+	[InlineData("1G3lF1Gg1k8", unchecked((int)0x80020002))]
+	[InlineData("gEpBkcwxUjw", unchecked((int)0x80020002))]
+	[InlineData("27bAgiJmOh0", 60)]
+	[InlineData("BmMjYxmew1w", unchecked((int)0x8002003C))]
+	[InlineData("Zxa0VhQVTsk", unchecked((int)0x8002003C))]
+	[InlineData("fzyMKs9kim0", unchecked((int)0x8002003C))]
+	[InlineData("K-jXhbt2gn4", unchecked((int)0x80020010))]
+	[InlineData("12wOHk8ywb0", unchecked((int)0x80020010))]
+	[InlineData("H2a+IN9TP0E", unchecked((int)0x80020023))]
+	[InlineData("PIWqhn9oSxc", unchecked((int)0x80410123))]
+	[InlineData("yH17Q6NWtVg", unchecked((int)0x80960007))]
+	[InlineData("D-CzAxQL0XI", unchecked((int)0x80960009))]
+	public void KnownPollingResults_AreExpected(string nid, int result)
+	{
+		Assert.True(DirectExecutionBackend.IsExpectedImportResult(
+			nid,
+			(OrbisGen2Result)result));
+		Assert.False(DirectExecutionBackend.IsExpectedImportResult(
+			"unrelated-nid",
+			(OrbisGen2Result)result));
+	}
+
     [Theory]
     [InlineData("BmMjYxmew1w")]
     [InlineData("Zxa0VhQVTsk")]

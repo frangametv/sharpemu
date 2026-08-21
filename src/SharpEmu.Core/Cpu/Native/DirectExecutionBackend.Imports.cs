@@ -36,6 +36,12 @@ public sealed partial class DirectExecutionBackend
 
 	private readonly object _importResultLogSampleGate = new();
 	private readonly Dictionary<string, int> _importResultLogSamples = new(StringComparer.Ordinal);
+	// Import-result diagnostics are a process-start option. Cache them per backend
+	// instead of querying the environment on every expected polling result.
+	private readonly bool _logExpectedImportResults = string.Equals(
+		Environment.GetEnvironmentVariable("SHARPEMU_LOG_EXPECTED_IMPORT_RESULTS"),
+		"1",
+		StringComparison.Ordinal);
 	private int _il2CppExceptionDiagnosticCount;
 
 	private static ulong ImportDispatchGatewayManaged(nint backendHandle, int importIndex, nint argPackPtr)
@@ -1622,57 +1628,25 @@ public sealed partial class DirectExecutionBackend
 	internal static bool IsExpectedImportResult(string nid, OrbisGen2Result result)
 	{
 		var resultValue = unchecked((int)result);
-		var expectedFileProbeMiss =
-			result == OrbisGen2Result.ORBIS_GEN2_ERROR_NOT_FOUND &&
-			IsExpectedFileProbeNotFoundNid(nid);
-		var expectedPosixTimedWaitTimeout =
-			string.Equals(nid, "27bAgiJmOh0", StringComparison.Ordinal) &&
-			resultValue == 60;
-		var expectedSceTimedWaitTimeout =
-			string.Equals(nid, "BmMjYxmew1w", StringComparison.Ordinal) &&
-			result == OrbisGen2Result.ORBIS_GEN2_ERROR_TIMED_OUT;
-		var expectedKernelSemaTimeout =
-			string.Equals(nid, "Zxa0VhQVTsk", StringComparison.Ordinal) &&
-			result == OrbisGen2Result.ORBIS_GEN2_ERROR_TIMED_OUT;
-		var expectedEqueueTimeout =
-			string.Equals(nid, "fzyMKs9kim0", StringComparison.Ordinal) &&
-			result == OrbisGen2Result.ORBIS_GEN2_ERROR_TIMED_OUT;
-		var expectedMutexTrylockBusy =
-			string.Equals(nid, "K-jXhbt2gn4", StringComparison.Ordinal) &&
-			result == OrbisGen2Result.ORBIS_GEN2_ERROR_BUSY;
-		var expectedSemaphoreTrywaitAgain =
-			string.Equals(nid, "H2a+IN9TP0E", StringComparison.Ordinal) &&
-			result == OrbisGen2Result.ORBIS_GEN2_ERROR_TRY_AGAIN;
-		var expectedSemaphorePollBusy =
-			string.Equals(nid, "12wOHk8ywb0", StringComparison.Ordinal) &&
-			result == OrbisGen2Result.ORBIS_GEN2_ERROR_BUSY;
-		var expectedNetAcceptWouldBlock =
-			string.Equals(nid, "PIWqhn9oSxc", StringComparison.Ordinal) &&
-			resultValue == unchecked((int)0x80410123);
-		var expectedUserServiceNoEvent =
-			string.Equals(nid, "yH17Q6NWtVg", StringComparison.Ordinal) &&
-			resultValue == unchecked((int)0x80960007);
-		var expectedPrivacyInvalidParameter =
-			string.Equals(nid, "D-CzAxQL0XI", StringComparison.Ordinal) &&
-			resultValue == unchecked((int)0x80960009);
-		return expectedFileProbeMiss ||
-			expectedPosixTimedWaitTimeout ||
-			expectedSceTimedWaitTimeout ||
-			expectedKernelSemaTimeout ||
-			expectedEqueueTimeout ||
-			expectedMutexTrylockBusy ||
-			expectedSemaphoreTrywaitAgain ||
-			expectedSemaphorePollBusy ||
-			expectedNetAcceptWouldBlock ||
-			expectedUserServiceNoEvent ||
-			expectedPrivacyInvalidParameter;
+		return resultValue switch
+		{
+			unchecked((int)OrbisGen2Result.ORBIS_GEN2_ERROR_NOT_FOUND) =>
+				IsExpectedFileProbeNotFoundNid(nid),
+			60 => nid == "27bAgiJmOh0", // POSIX ETIMEDOUT
+			unchecked((int)OrbisGen2Result.ORBIS_GEN2_ERROR_TIMED_OUT) =>
+				nid is "BmMjYxmew1w" or "Zxa0VhQVTsk" or "fzyMKs9kim0",
+			unchecked((int)OrbisGen2Result.ORBIS_GEN2_ERROR_BUSY) =>
+				nid is "K-jXhbt2gn4" or "12wOHk8ywb0",
+			unchecked((int)OrbisGen2Result.ORBIS_GEN2_ERROR_TRY_AGAIN) =>
+				nid == "H2a+IN9TP0E",
+			unchecked((int)0x80410123) => nid == "PIWqhn9oSxc",
+			unchecked((int)0x80960007) => nid == "yH17Q6NWtVg",
+			unchecked((int)0x80960009) => nid == "D-CzAxQL0XI",
+			_ => false,
+		};
 	}
 
-	private static bool ShouldLogExpectedImportResults() =>
-		string.Equals(
-			Environment.GetEnvironmentVariable("SHARPEMU_LOG_EXPECTED_IMPORT_RESULTS"),
-			"1",
-			StringComparison.Ordinal);
+	private bool ShouldLogExpectedImportResults() => _logExpectedImportResults;
 
 	private static bool IsExpectedFileProbeNotFoundNid(string nid) =>
 		nid is

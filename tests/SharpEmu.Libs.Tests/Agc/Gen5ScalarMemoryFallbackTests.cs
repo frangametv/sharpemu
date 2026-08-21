@@ -28,6 +28,74 @@ public sealed class Gen5ScalarMemoryFallbackTests
     private static readonly object FallbackReaderGate = new();
 
     [Fact]
+    public void UnsizedBufferDescriptorCapturesSmallFallbackAllocation()
+    {
+        const ulong bufferAddress = 0x4_4665_9000;
+        byte[] expected = [0x12, 0x34, 0x56, 0x78];
+        var load = new Gen5ShaderInstruction(
+            0,
+            Gen5ShaderEncoding.Smem,
+            "SBufferLoadDword",
+            [],
+            [Gen5Operand.Scalar(0)],
+            [Gen5Operand.Scalar(16)],
+            new Gen5ScalarMemoryControl(1, 0, null));
+        var end = new Gen5ShaderInstruction(
+            8,
+            Gen5ShaderEncoding.Sopp,
+            "SEndpgm",
+            [],
+            [],
+            [],
+            null);
+        var state = new Gen5ShaderState(
+            new Gen5ShaderProgram(0, [load, end]),
+            [
+                unchecked((uint)bufferAddress),
+                (uint)(bufferAddress >> 32),
+                0, // no declared records/size
+                64u << 12,
+            ],
+            null);
+        var ctx = new CpuContext(new FakeCpuMemory(0x1000, 0x100), Generation.Gen5);
+
+        lock (FallbackReaderGate)
+        {
+            var previousReader = Gen5ShaderScalarEvaluator.FallbackMemoryReader;
+            try
+            {
+                Gen5ShaderScalarEvaluator.FallbackMemoryReader = ReadFallback;
+                Assert.True(
+                    Gen5ShaderScalarEvaluator.TryEvaluate(
+                        ctx,
+                        state,
+                        out var evaluation,
+                        out var error),
+                    error);
+                var binding = Assert.Single(evaluation.GlobalMemoryBindings);
+                Assert.Equal(bufferAddress, binding.BaseAddress);
+                Assert.Equal(expected.Length, binding.DataLength);
+                Assert.Equal(expected, binding.Data.AsSpan(0, binding.DataLength).ToArray());
+            }
+            finally
+            {
+                Gen5ShaderScalarEvaluator.FallbackMemoryReader = previousReader;
+            }
+        }
+
+        bool ReadFallback(ulong address, Span<byte> destination)
+        {
+            if (address != bufferAddress || destination.Length != expected.Length)
+            {
+                return false;
+            }
+
+            expected.CopyTo(destination);
+            return true;
+        }
+    }
+
+    [Fact]
     public void ScalarLoadReadsTrackedFallbackMemory()
     {
         var expected = new uint[]

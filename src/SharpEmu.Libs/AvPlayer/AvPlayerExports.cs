@@ -161,6 +161,11 @@ public static class AvPlayerExports
         return advanced || !hasPresentation;
     }
 
+    internal static bool ShouldPublishFallbackPoster(
+        bool hasPresentation,
+        bool fallbackPlaybackCompleted) =>
+        !hasPresentation && !fallbackPlaybackCompleted;
+
     private static readonly long FallbackInitialPauseGraceTicks =
         Stopwatch.Frequency / 2;
 
@@ -200,8 +205,10 @@ public static class AvPlayerExports
         player.FallbackPresentationWidth = 0;
         player.FallbackPresentationHeight = 0;
         player.FallbackPresentationSerial = 0;
-        player.FallbackPlaybackCompleted = false;
-        player.FallbackPlaybackCompletedTicks = 0;
+        // Keep the completed state as a tombstone until the player is reset.
+        // The guest may continue returning delayed video frames after the host
+        // decoder has finished; clearing this flag would let those frames
+        // recreate the poster immediately after we deliberately released it.
         player.SkipFirstFallbackPlaybackFrame = false;
         Interlocked.Increment(ref _fallbackPresentationReleaseSerial);
         Console.Error.WriteLine(
@@ -1287,7 +1294,9 @@ public static class AvPlayerExports
         if (player.TextureAllocatorFailed)
         {
             EnsureFallbackPlayback(player);
-            if (player.FallbackPresentationPixels is null)
+            if (ShouldPublishFallbackPoster(
+                    player.FallbackPresentationPixels is not null,
+                    player.FallbackPlaybackCompleted))
             {
                 // Keep one immediate poster frame while the background decoder
                 // starts. Subsequent frames come from the bounded, scaled host

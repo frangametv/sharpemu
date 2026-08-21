@@ -22,7 +22,10 @@ public sealed class AgcContextRegisterTests
     private const ulong BaseAddress = 0x2_0000_0000;
     private const ulong SubmitPacketAddress = BaseAddress + 0x40;
     private const ulong CommandAddress = BaseAddress + 0x200;
+    private const ulong SecondCommandAddress = BaseAddress + 0x300;
     private const ulong IndirectTableAddress = BaseAddress + 0x600;
+    private const ulong MultiAddressArray = BaseAddress + 0x700;
+    private const ulong MultiSizeArray = BaseAddress + 0x720;
 
     private const uint ItNop = 0x10;
     private const uint ItSetContextReg = 0x69;
@@ -34,6 +37,19 @@ public sealed class AgcContextRegisterTests
     // NOP sub-register in bits 2..7 — the parser reads it as (header >> 2) & 0x3F.
     private static uint Pm4Header(uint dwords, uint opcode, uint register = 0) =>
         0xC000_0000u | ((dwords - 2) << 16) | (opcode << 8) | ((register & 0x3Fu) << 2);
+
+    [Fact]
+    public void ColorTargetAttrib2UsesHighWidthAndLowHeightFields()
+    {
+        const uint expectedWidth = 1920;
+        const uint expectedHeight = 1080;
+        var attrib2 = ((expectedWidth - 1) << 14) | (expectedHeight - 1);
+
+        var (width, height) = AgcExports.DecodeRenderTargetDimensions(attrib2);
+
+        Assert.Equal(expectedWidth, width);
+        Assert.Equal(expectedHeight, height);
+    }
 
     [Fact]
     public void SetContextRegRetainsTargetMask()
@@ -155,6 +171,36 @@ public sealed class AgcContextRegisterTests
             AgcExports.TryGetGraphicsContextRegisterForTests(ctx, CbColorControl, out var value));
         Assert.Equal(0x00CC_0020u, value);
         Assert.Equal(2u, (value >> 4) & 0x7u);
+    }
+
+    [Fact]
+    public void MultiDcbSubmissionParsesEveryBufferInOrder()
+    {
+        var ctx = CreateContext(out var memory);
+        WriteDwords(
+            memory,
+            CommandAddress,
+            Pm4Header(3, ItSetContextReg),
+            CbTargetMask,
+            0x0000_0007u);
+        WriteDwords(
+            memory,
+            SecondCommandAddress,
+            Pm4Header(3, ItSetContextReg),
+            CbTargetMask,
+            0x0000_000Fu);
+        WriteUInt64(memory, MultiAddressArray, CommandAddress);
+        WriteUInt64(memory, MultiAddressArray + sizeof(ulong), SecondCommandAddress);
+        WriteUInt32(memory, MultiSizeArray, 3);
+        WriteUInt32(memory, MultiSizeArray + sizeof(uint), 3);
+        ctx[CpuRegister.Rdi] = MultiAddressArray;
+        ctx[CpuRegister.Rsi] = MultiSizeArray;
+        ctx[CpuRegister.Rdx] = 2;
+
+        Assert.Equal(0, AgcExports.DriverSubmitMultiDcbs(ctx));
+        Assert.True(
+            AgcExports.TryGetGraphicsContextRegisterForTests(ctx, CbTargetMask, out var value));
+        Assert.Equal(0x0000_000Fu, value);
     }
 
     private static void WriteIndirectRegisterCommand(

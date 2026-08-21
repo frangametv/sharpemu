@@ -187,6 +187,33 @@ internal static unsafe class VulkanVideoPresenter
         SpirvImageFormat Format,
         StorageImageComponentKind ComponentKind);
 
+    internal static bool HasUsableComputeResource(
+        IReadOnlyList<GuestDrawTexture> textures,
+        IReadOnlyList<GuestMemoryBuffer> globalMemoryBuffers)
+    {
+        // Sampled/read-only textures are real compute inputs too. Requiring a
+        // storage image rejected valid texture-only dispatches, while retaining
+        // the non-zero-address guard still blocks the all-fallback path that
+        // previously caused device loss on Astro Bot.
+        for (var i = 0; i < textures.Count; i++)
+        {
+            if (textures[i].Address != 0)
+            {
+                return true;
+            }
+        }
+
+        for (var i = 0; i < globalMemoryBuffers.Count; i++)
+        {
+            if (globalMemoryBuffers[i].BaseAddress != 0)
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
     internal static bool TryValidateComputeSpirv(
         ReadOnlySpan<byte> spirv,
         uint expectedLocalSizeX,
@@ -828,48 +855,6 @@ internal static unsafe class VulkanVideoPresenter
         }
 
         return penalty;
-    }
-
-    internal static bool ShouldDisableAmdComputePipelineOptimization(
-        uint vendorId,
-        bool isWindows,
-        string? configuredValue)
-    {
-        return isWindows &&
-            vendorId == AmdVendorId &&
-            !string.Equals(configuredValue, "0", StringComparison.Ordinal);
-    }
-
-    internal static bool ShouldDisableAmdNativeComputeSubgroups(
-        uint vendorId,
-        bool isWindows,
-        string? configuredValue)
-    {
-        return isWindows &&
-            vendorId == AmdVendorId &&
-            !string.Equals(configuredValue, "1", StringComparison.Ordinal);
-    }
-
-    // This module was captured immediately before AMD's Windows driver raised
-    // an access violation inside vkCreateComputePipelines on an RX 7900 XT.
-    // Keep the full translated-SPIR-V digest: shader addresses are allocations
-    // and therefore are not stable identities across games or builds.
-    private const string AmdWindowsFaultingComputeDigest =
-        "1A5205C396F8192DF173E537C480766DBE03024C9D0CE4502E39FE42B13464D8";
-
-    internal static bool ShouldQuarantineAmdWindowsComputeShader(
-        uint vendorId,
-        bool isWindows,
-        string shaderDigest,
-        string? configuredValue)
-    {
-        return isWindows &&
-            vendorId == AmdVendorId &&
-            !string.Equals(configuredValue, "0", StringComparison.Ordinal) &&
-            string.Equals(
-                shaderDigest,
-                AmdWindowsFaultingComputeDigest,
-                StringComparison.OrdinalIgnoreCase);
     }
 
     private static bool _splashHidden;
@@ -3035,40 +3020,7 @@ internal static unsafe class VulkanVideoPresenter
 
     private static long _tracedAvPlayerFallbackPresentationSerial;
     private static long _avPlayerFallbackPresentationCount;
-    private static long _observedAvPlayerFallbackReleaseSerial;
     private static readonly HashSet<long> _tracedGuestImagePresentRejections = new();
-
-    private static bool TryTakeGuestPresentationAfterHostMovieRelease(
-        out Presentation presentation)
-    {
-        var releaseSerial = AvPlayerExports.FallbackPresentationReleaseSerial;
-        if (releaseSerial == Volatile.Read(
-                ref _observedAvPlayerFallbackReleaseSerial))
-        {
-            presentation = default;
-            return false;
-        }
-
-        lock (_gate)
-        {
-            if (_latestPresentation is not { IsSplash: false } latest ||
-                !IsGuestWorkCompletedLocked(latest.RequiredGuestWorkSequence))
-            {
-                presentation = default;
-                return false;
-            }
-
-            Volatile.Write(
-                ref _observedAvPlayerFallbackReleaseSerial,
-                releaseSerial);
-            presentation = latest;
-        }
-
-        Console.Error.WriteLine(
-            "[VIDEOOUT][INFO] AvPlayer host fallback released; " +
-            $"restoring latest guest presentation seq={presentation.Sequence}.");
-        return true;
-    }
 
 	private static bool HasPendingGuestPresentation(long presentedSequence)
 	{
@@ -3840,7 +3792,6 @@ internal static unsafe class VulkanVideoPresenter
         private uint _maxComputeWorkGroupSizeZ;
         private uint _maxComputeWorkGroupInvocations;
         private ulong _minStorageBufferOffsetAlignment = 1;
-        private bool _disableComputePipelineOptimization;
         private bool _amdWindowsComputeSafety;
         private bool _supportsIndependentBlend;
         private uint _maxColorAttachments;
@@ -5140,38 +5091,12 @@ internal static unsafe class VulkanVideoPresenter
             LoadComputeDeviceLimits();
             _vk.GetPhysicalDeviceProperties(_physicalDevice, out var selected);
             _maxColorAttachments = selected.Limits.MaxColorAttachments;
-            _disableComputePipelineOptimization =
-                ShouldDisableAmdComputePipelineOptimization(
-                    selected.VendorID,
-                    OperatingSystem.IsWindows(),
-                    Environment.GetEnvironmentVariable("SHARPEMU_VK_AMD_COMPUTE_NO_OPT"));
-            var disableNativeComputeSubgroups =
-                ShouldDisableAmdNativeComputeSubgroups(
-                    selected.VendorID,
-                    OperatingSystem.IsWindows(),
-                    Environment.GetEnvironmentVariable("SHARPEMU_VK_AMD_COMPUTE_SUBGROUPS"));
-            System.Threading.Volatile.Write(
-                ref _disableNativeComputeSubgroups,
-                disableNativeComputeSubgroups ? 1 : 0);
+            System.Threading.Volatile.Write(ref _disableNativeComputeSubgroups, 0);
             _amdWindowsComputeSafety =
                 OperatingSystem.IsWindows() && selected.VendorID == AmdVendorId;
             var selectedName = SilkMarshal.PtrToString((nint)selected.DeviceName) ?? "unknown";
             Console.Error.WriteLine(
                 $"[LOADER][INFO] Vulkan device: {selectedName} ({selected.DeviceType})");
-            if (_disableComputePipelineOptimization)
-            {
-                Console.Error.WriteLine(
-                    "[LOADER][INFO] Vulkan AMD Windows compute workaround enabled: " +
-                    "pipeline optimization disabled " +
-                    "(set SHARPEMU_VK_AMD_COMPUTE_NO_OPT=0 to disable).");
-            }
-            if (disableNativeComputeSubgroups)
-            {
-                Console.Error.WriteLine(
-                    "[LOADER][INFO] Vulkan AMD Windows compute subgroup workaround enabled: " +
-                    "translated compute shaders use the compatibility path " +
-                    "(set SHARPEMU_VK_AMD_COMPUTE_SUBGROUPS=1 to restore native subgroups).");
-            }
             VideoOutExports.SetSelectedGpuName(selectedName);
             if (_window is not null)
             {
@@ -9303,10 +9228,7 @@ internal static unsafe class VulkanVideoPresenter
                 var pipelineInfo = new ComputePipelineCreateInfo
                 {
                     SType = StructureType.ComputePipelineCreateInfo,
-                    Flags = PipelineCreateFlags.CreateDispatchBaseBit |
-                        (_disableComputePipelineOptimization
-                            ? PipelineCreateFlags.CreateDisableOptimizationBit
-                            : 0),
+                    Flags = PipelineCreateFlags.CreateDispatchBaseBit,
                     Stage = stage,
                     Layout = resources.PipelineLayout,
                 };
@@ -13034,30 +12956,6 @@ internal static unsafe class VulkanVideoPresenter
                 return;
             }
 
-            var computeDigest = GetShaderDigest(work.ComputeSpirv);
-            if (ShouldQuarantineAmdWindowsComputeShader(
-                    _amdWindowsComputeSafety ? AmdVendorId : 0,
-                    OperatingSystem.IsWindows(),
-                    computeDigest,
-                    Environment.GetEnvironmentVariable(
-                        "SHARPEMU_VK_AMD_COMPUTE_QUARANTINE")))
-            {
-                // Preserve the exact module for diagnostics, then turn only
-                // this known driver-crashing dispatch into a no-op. Calling the
-                // native compiler cannot be guarded with a managed exception:
-                // the Radeon driver terminates the process with 0xC0000005.
-                RecordAmdComputePipelineCandidate(
-                    work.ShaderAddress,
-                    computeDigest,
-                    work.ComputeSpirv);
-                Console.Error.WriteLine(
-                    $"[LOADER][WARN] vk.amd_compute_pipeline_quarantined " +
-                    $"cs=0x{work.ShaderAddress:X16} digest={computeDigest[..16]} " +
-                    $"bytes={work.ComputeSpirv.Length} action=skip " +
-                    $"override=SHARPEMU_VK_AMD_COMPUTE_QUARANTINE=0");
-                return;
-            }
-
             TranslatedDrawResources? resources = null;
             CommandBuffer commandBuffer = default;
             var submitted = false;
@@ -13367,28 +13265,7 @@ internal static unsafe class VulkanVideoPresenter
             // after an empty SRT walk every binding can collapse to Address-0
             // fallbacks with no real globals — that path has lost the device
             // on Astro Bot right after the first presented frame.
-            var hasUsableStorage = false;
-            for (var i = 0; i < work.Textures.Count; i++)
-            {
-                var texture = work.Textures[i];
-                if (texture.IsStorage && texture.Address != 0)
-                {
-                    hasUsableStorage = true;
-                    break;
-                }
-            }
-
-            var hasUsableGlobal = false;
-            for (var i = 0; i < work.GlobalMemoryBuffers.Count; i++)
-            {
-                if (work.GlobalMemoryBuffers[i].BaseAddress != 0)
-                {
-                    hasUsableGlobal = true;
-                    break;
-                }
-            }
-
-            if (!hasUsableStorage && !hasUsableGlobal)
+            if (!HasUsableComputeResource(work.Textures, work.GlobalMemoryBuffers))
             {
                 error = "no-usable-resources";
                 return false;
@@ -17940,12 +17817,6 @@ internal static unsafe class VulkanVideoPresenter
 
             if (!tookPresentation &&
                 TryTakeHostMovieOnlyPresentation(_presentedSequence, out presentation))
-            {
-                tookPresentation = true;
-            }
-
-            if (!tookPresentation &&
-                TryTakeGuestPresentationAfterHostMovieRelease(out presentation))
             {
                 tookPresentation = true;
             }

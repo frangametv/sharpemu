@@ -25,11 +25,11 @@ SPDX-License-Identifier: GPL-2.0-or-later
 </p>
 
 > [!IMPORTANT]
-> ### Fran5: Astro Bot's intro now plays smoothly on screen!
-> **Fran5 has been released.** The complete intro video is now displayed with
-> fluid playback with video/audio synchronization and GPU optimizations.
-> With Fran6, my main goal will be to understand and implement the rest of the rendering engine,
-> including the text, menus and 3D graphics that follows the video.
+> ### Fran6 is now in development: the focus is on rendering!
+> **Fran5 has been released**, and I am now working on Fran6's rendering path,
+> including the shaders, text, menus and 3D graphics after the intro.
+> In my current tests, this fork progresses further than upstream `main`: after the
+> complete synchronized intro, the game keeps running and its in-game music can be heard.
 
 > [!WARNING]
 > SharpEmu is at a very early stage. Astro Bot and Grand Theft Auto V are

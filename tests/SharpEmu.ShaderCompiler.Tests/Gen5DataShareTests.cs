@@ -237,6 +237,34 @@ public sealed class Gen5DataShareTests
     }
 
     [Fact]
+    public void GdsWaveCountUsesOnlyVulkanLegal32BitBitCounts()
+    {
+        var program = DecodeProgram(0x3E, offset: 0x14, gds: true);
+        var state = new Gen5ShaderState(program, [], null);
+        var scalarRegisters = new uint[256];
+        var evaluation = new Gen5ShaderEvaluation(
+            scalarRegisters,
+            scalarRegisters,
+            [],
+            []);
+
+        Assert.True(
+            Gen5SpirvTranslator.TryCompileComputeShader(
+                state,
+                evaluation,
+                1,
+                1,
+                1,
+                out var shader,
+                out var error,
+                totalGlobalBufferCount: 1,
+                gdsBufferIndex: 0),
+            error);
+
+        AssertBitCountResultTypesAre32Bit(shader.Spirv);
+    }
+
+    [Fact]
     public void DsAddRtnU32LowersToAtomicAddAndReturnedValueStore()
     {
         var noReturnOpcodes = CompileAndReadSpirvOpcodes(0x00);
@@ -324,6 +352,43 @@ public sealed class Gen5DataShareTests
         }
 
         return opcodes;
+    }
+
+    private static void AssertBitCountResultTypesAre32Bit(byte[] spirv)
+    {
+        const ushort opTypeInt = 21;
+        var integerWidths = new Dictionary<uint, uint>();
+        var bitCountResultTypes = new List<uint>();
+
+        for (var offset = 5 * sizeof(uint); offset < spirv.Length;)
+        {
+            var instruction = BinaryPrimitives.ReadUInt32LittleEndian(
+                spirv.AsSpan(offset));
+            var wordCount = checked((int)(instruction >> 16));
+            var opcode = (ushort)instruction;
+            Assert.InRange(wordCount, 1, (spirv.Length - offset) / sizeof(uint));
+
+            if (opcode == opTypeInt && wordCount >= 4)
+            {
+                var resultId = BinaryPrimitives.ReadUInt32LittleEndian(
+                    spirv.AsSpan(offset + sizeof(uint)));
+                var width = BinaryPrimitives.ReadUInt32LittleEndian(
+                    spirv.AsSpan(offset + (2 * sizeof(uint))));
+                integerWidths[resultId] = width;
+            }
+            else if (opcode == (ushort)SpirvOp.BitCount && wordCount >= 4)
+            {
+                bitCountResultTypes.Add(BinaryPrimitives.ReadUInt32LittleEndian(
+                    spirv.AsSpan(offset + sizeof(uint))));
+            }
+
+            offset += wordCount * sizeof(uint);
+        }
+
+        Assert.NotEmpty(bitCountResultTypes);
+        Assert.All(
+            bitCountResultTypes,
+            typeId => Assert.Equal(32u, integerWidths[typeId]));
     }
 
     private sealed class TestCpuMemory(ulong baseAddress, int size) : ICpuMemory
