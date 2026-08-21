@@ -179,6 +179,7 @@ public sealed class AvPlayerAbiTests
         Assert.Equal(
             expected,
             AvPlayerExports.ShouldReleaseCompletedFallback(
+                hasPresentation: true,
                 fallbackCompleted,
                 guestEndOfStream,
                 completedTicks,
@@ -196,14 +197,24 @@ public sealed class AvPlayerAbiTests
         var completedTicks = Stopwatch.GetTimestamp();
         Assert.False(
             AvPlayerExports.ShouldReleaseCompletedFallback(
+                hasPresentation: true,
                 fallbackPlaybackCompleted: true,
                 guestEndOfStream: false,
                 completedTicks,
                 completedTicks + (Stopwatch.Frequency / 10)));
         Assert.True(
             AvPlayerExports.ShouldReleaseCompletedFallback(
+                hasPresentation: true,
                 fallbackPlaybackCompleted: true,
                 guestEndOfStream: false,
+                completedTicks,
+                completedTicks + (Stopwatch.Frequency * 2)));
+
+        Assert.False(
+            AvPlayerExports.ShouldReleaseCompletedFallback(
+                hasPresentation: false,
+                fallbackPlaybackCompleted: true,
+                guestEndOfStream: true,
                 completedTicks,
                 completedTicks + (Stopwatch.Frequency * 2)));
     }

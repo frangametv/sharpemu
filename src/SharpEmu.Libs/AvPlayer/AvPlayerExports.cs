@@ -110,6 +110,7 @@ public static class AvPlayerExports
                 // frame never reaches EOF, and an unbounded hold would pin the
                 // final movie image over everything the game renders next.
                 if (ShouldReleaseCompletedFallback(
+                        player.FallbackPresentationPixels is not null,
                         player.FallbackPlaybackCompleted,
                         player.EndOfStream,
                         player.FallbackPlaybackCompletedTicks,
@@ -191,10 +192,12 @@ public static class AvPlayerExports
     private static readonly long FallbackHoldGraceTicks = Stopwatch.Frequency;
 
     internal static bool ShouldReleaseCompletedFallback(
+        bool hasPresentation,
         bool fallbackPlaybackCompleted,
         bool guestEndOfStream,
         long completedTicks,
         long nowTicks) =>
+        hasPresentation &&
         fallbackPlaybackCompleted &&
         (guestEndOfStream ||
          completedTicks != 0 && nowTicks - completedTicks >= FallbackHoldGraceTicks);
@@ -211,10 +214,6 @@ public static class AvPlayerExports
         // recreate the poster immediately after we deliberately released it.
         player.SkipFirstFallbackPlaybackFrame = false;
         Interlocked.Increment(ref _fallbackPresentationReleaseSerial);
-        Console.Error.WriteLine(
-            "[AVPLAYER][INFO] " +
-            $"host_fallback_released handle=0x{player.Handle:X16} " +
-            $"guest_eof={player.EndOfStream}");
     }
 
     internal static bool ShouldTraceVideoBufferAddress(ulong address)

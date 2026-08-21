@@ -193,7 +193,10 @@ public static class Gen5ShaderScalarEvaluator
     private const int ScalarRegisterCount = 256;
     private const int ImageDescriptorDwords = 8;
     private const int SamplerDescriptorDwords = 4;
-    private const int MaxNeutralStaticImageBindings = 8;
+    // Real title shaders commonly contain more than eight image instructions
+    // behind indirect scalar branches.  Sixteen remains a strict bound against
+    // malformed programs while covering the observed 9/11-image UI shaders.
+    private const int MaxNeutralStaticImageBindings = 16;
     private const int MaxGlobalMemoryBindingBytes = 16 * 1024 * 1024;
     public static long GlobalMemoryReadCount;
     public static long GlobalMemoryReadBytes;
@@ -971,8 +974,9 @@ public static class Gen5ShaderScalarEvaluator
                 instruction.Control is Gen5ImageControl &&
                 !resolvedImageByPc.ContainsKey(instruction.Pc))
             .ToArray();
-        if (state.ComputeSystemRegisters is null &&
-            missingStaticImages.Length <= MaxNeutralStaticImageBindings)
+        if (ShouldBindNeutralStaticImages(
+                state.ComputeSystemRegisters is not null,
+                missingStaticImages.Length))
         {
             foreach (var instruction in missingStaticImages)
             {
@@ -1267,6 +1271,13 @@ public static class Gen5ShaderScalarEvaluator
         targetPc = (uint)target;
         return true;
     }
+
+    private static bool ShouldBindNeutralStaticImages(
+        bool isCompute,
+        int missingImageCount) =>
+        !isCompute &&
+        missingImageCount >= 0 &&
+        missingImageCount <= MaxNeutralStaticImageBindings;
 
     private static bool TryEvaluateKnownScalarBranch(
         string opcode,
