@@ -14,6 +14,69 @@ public sealed class Gen5ScalarControlTests
     private const ulong ShaderAddress = 0x1_0000_8000;
     private const uint SEndpgm = 0xBF810000;
 
+    [Fact]
+    public void UnreachedGraphicsBufferLoadGetsReadOnlyNeutralBinding()
+    {
+        const uint loadPc = 4;
+        var program = new Gen5ShaderProgram(
+            ShaderAddress,
+            [
+                new Gen5ShaderInstruction(
+                    0,
+                    Gen5ShaderEncoding.Sop1,
+                    "SSetpcB64",
+                    [0u],
+                    [],
+                    [],
+                    null),
+                new Gen5ShaderInstruction(
+                    loadPc,
+                    Gen5ShaderEncoding.Mubuf,
+                    "BufferLoadDwordx4",
+                    [0u],
+                    [],
+                    [],
+                    new Gen5BufferMemoryControl(
+                        4,
+                        0,
+                        0,
+                        24,
+                        0,
+                        IndexEnabled: false,
+                        OffsetEnabled: false,
+                        Glc: false,
+                        Slc: false)),
+                new Gen5ShaderInstruction(
+                    8,
+                    Gen5ShaderEncoding.Sopp,
+                    "SEndpgm",
+                    [SEndpgm],
+                    [],
+                    [],
+                    null),
+            ]);
+        var memory = new TestCpuMemory(ShaderAddress, 0x100);
+        var ctx = new CpuContext(memory, Generation.Gen5);
+        var state = new Gen5ShaderState(
+            program,
+            [],
+            null,
+            GraphicsSystemRegisters: new Gen5GraphicsSystemRegisters(0));
+
+        Assert.True(
+            Gen5ShaderScalarEvaluator.TryEvaluate(
+                ctx,
+                state,
+                out var evaluation,
+                out var error),
+            error);
+        var binding = Assert.Single(evaluation.GlobalMemoryBindings);
+        Assert.Equal([loadPc], binding.InstructionPcs);
+        Assert.Equal(16, binding.DataLength);
+        Assert.False(binding.Writable);
+        Assert.False(binding.WriteBackToGuest);
+    }
+
     [Theory]
     [InlineData(0x0000_0000u, 0xFFFF_FFFFu)]
     [InlineData(0x0000_0001u, 31u)]

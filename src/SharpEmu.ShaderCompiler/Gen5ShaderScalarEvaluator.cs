@@ -155,6 +155,8 @@ public static class Gen5ShaderScalarEvaluator
         new();
     private static readonly ConcurrentDictionary<(ulong Shader, uint Pc), byte>
         _neutralStaticImageFallbacks = new();
+    private static readonly ConcurrentDictionary<(ulong Shader, uint Pc), byte>
+        _neutralStaticBufferFallbacks = new();
 
     public static bool WasEmptySrtScalarPointerFallback(ulong shaderAddress) =>
         _emptySrtScalarPointerFallbacks.ContainsKey(shaderAddress);
@@ -197,6 +199,7 @@ public static class Gen5ShaderScalarEvaluator
     // behind indirect scalar branches.  Sixteen remains a strict bound against
     // malformed programs while covering the observed 9/11-image UI shaders.
     private const int MaxNeutralStaticImageBindings = 16;
+    private const int MaxNeutralStaticBufferBindings = 16;
     private const int MaxGlobalMemoryBindingBytes = 16 * 1024 * 1024;
     public static long GlobalMemoryReadCount;
     public static long GlobalMemoryReadBytes;
@@ -959,6 +962,51 @@ public static class Gen5ShaderScalarEvaluator
             }
 
             vertexInputBindings = capturedVertexInputs;
+        }
+
+        // Like image instructions, read-only buffer loads can remain in the
+        // translated CFG behind an indirect scalar branch that this snapshot
+        // evaluator cannot follow. Vulkan still needs a descriptor for those
+        // static instructions. Bind a PC-local zero buffer so the inactive
+        // path reads zero instead of making the complete graphics program fail.
+        // Never synthesize stores/atomics, and keep compute strict because its
+        // buffers can be the producers required by later rendering passes.
+        var missingStaticReadBuffers = state.Program.Instructions
+            .Where(instruction =>
+                instruction.Control is Gen5BufferMemoryControl &&
+                !IsBufferMemoryWrite(instruction.Opcode) &&
+                !HasGlobalMemoryBindingForPc(globalMemoryBindings, instruction.Pc))
+            .ToArray();
+        if (state.ComputeSystemRegisters is null &&
+            missingStaticReadBuffers.Length <= MaxNeutralStaticBufferBindings)
+        {
+            foreach (var instruction in missingStaticReadBuffers)
+            {
+                var buffer = (Gen5BufferMemoryControl)instruction.Control!;
+                var byteLength = checked(
+                    (int)Math.Max(buffer.DwordCount, 1u) * sizeof(uint));
+                globalMemoryBindings.Add(
+                    new Gen5GlobalMemoryBinding(
+                        buffer.ScalarResource,
+                        0,
+                        new List<uint> { instruction.Pc },
+                        new byte[byteLength],
+                        byteLength,
+                        DataPooled: false)
+                    {
+                        Writable = false,
+                        WriteBackToGuest = false,
+                    });
+                if (_neutralStaticBufferFallbacks.TryAdd(
+                        (state.Program.Address, instruction.Pc),
+                        0))
+                {
+                    Console.Error.WriteLine(
+                        "[LOADER][WARN] agc.buffer_static_fallback " +
+                        $"shader=0x{state.Program.Address:X16} pc=0x{instruction.Pc:X} " +
+                        $"op={instruction.Opcode} action=bind-neutral-zero");
+                }
+            }
         }
 
         // Indirect scalar control flow (S_SETPC/S_SWAPPC) and a few EXEC/VCC

@@ -1693,7 +1693,8 @@ public static partial class AgcExports
         bool WritesImage,
         uint MipLevel,
         IReadOnlyList<uint> SamplerDescriptor,
-        bool IsArrayed = false);
+        bool IsArrayed = false,
+        bool Is3D = false);
 
     private readonly record struct RenderTargetWriter(
         ulong Sequence,
@@ -10763,7 +10764,8 @@ public static partial class AgcExports
                 Gen5ShaderTranslator.IsImageWriteOperation(binding.Opcode),
                 binding.MipLevel ?? 0,
                 binding.SamplerDescriptor,
-                Gen5ShaderTranslator.IsArrayedImageBinding(binding)));
+                Gen5ShaderTranslator.IsArrayedImageBinding(binding),
+                binding.Control.Dimension == 2));
         }
 
         IReadOnlyList<Gen5VertexInputBinding> vertexInputs =
@@ -12839,7 +12841,8 @@ public static partial class AgcExports
                     Gen5ShaderTranslator.IsImageWriteOperation(binding.Opcode),
                     binding.MipLevel ?? 0,
                     binding.SamplerDescriptor,
-                    Gen5ShaderTranslator.IsArrayedImageBinding(binding)));
+                    Gen5ShaderTranslator.IsArrayedImageBinding(binding),
+                    binding.Control.Dimension == 2));
         }
 
         error = string.Empty;
@@ -14359,9 +14362,17 @@ public static partial class AgcExports
         fallbackTextureCount = 0;
         foreach (var binding in bindings)
         {
+            // The MIMG dimension controls the SPIR-V OpTypeImage. Preserve
+            // that same dimension in the host descriptor even when scalar
+            // fallback/recovery produced a conservative 2D texture type;
+            // otherwise Vulkan binds a 2D view to a shader-declared 3D image.
+            var descriptor = binding.Is3D &&
+                binding.Descriptor.Type != Gen5TextureType3D
+                    ? binding.Descriptor with { Type = Gen5TextureType3D }
+                    : binding.Descriptor;
             if (TryCreateGuestDrawTexture(
                     ctx,
-                    binding.Descriptor,
+                    descriptor,
                     binding.IsStorage,
                     binding.WritesImage,
                     binding.MipLevel,
@@ -16479,7 +16490,8 @@ public static partial class AgcExports
                     writesImage,
                     binding.MipLevel ?? 0,
                     binding.SamplerDescriptor,
-                    Gen5ShaderTranslator.IsArrayedImageBinding(binding)));
+                    Gen5ShaderTranslator.IsArrayedImageBinding(binding),
+                    binding.Control.Dimension == 2));
             hasStorageBinding |= isStorage;
 
             var descriptorState = descriptorValid ? string.Empty : "/invalid-desc";

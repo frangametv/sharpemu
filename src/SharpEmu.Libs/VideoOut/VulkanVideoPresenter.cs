@@ -714,6 +714,13 @@ internal static unsafe class VulkanVideoPresenter
     // render thread reaches the previous image, which otherwise starves
     // presentation indefinitely.
     private static readonly LinkedList<Presentation> _pendingGuestImagePresentations = new();
+    // Addresses that the guest has explicitly selected as VideoOut scanout
+    // buffers.  Some Gen5 titles submit the initial SetFlip and then keep
+    // rendering into that live buffer while signalling frame safety through
+    // AGC.  Retaining this small set lets the offscreen path expose the latest
+    // completed scanout generation without accidentally presenting arbitrary
+    // intermediate render targets.
+    private static readonly HashSet<ulong> _knownDisplayBufferAddresses = [];
     // Same fix as _pendingGuestImagePresentations above, for Submit()'s decoded video
     // frames: a single "latest wins" slot dropped frames the render loop didn't poll in time.
     private static readonly Queue<Presentation> _pendingVideoPresentations = new();
@@ -1094,6 +1101,7 @@ internal static unsafe class VulkanVideoPresenter
         _pendingSyncGuestWorkCount = 0;
         _pendingGuestWorkBytes = 0;
         _pendingGuestImagePresentations.Clear();
+        _knownDisplayBufferAddresses.Clear();
         _pendingVideoPresentations.Clear();
         _guestImageWorkSequences.Clear();
         _availableGuestImages.Clear();
@@ -1461,6 +1469,30 @@ internal static unsafe class VulkanVideoPresenter
             foreach (var target in targets)
             {
                 _guestImageWorkSequences[target.Address] = workSequence;
+            }
+
+            // Astro's frontend continues writing the registered scanout image
+            // after its first ordered flip.  Waiting exclusively for another
+            // SetFlip leaves the Sony text and later title composition trapped
+            // in the offscreen image.  Publish only a target that was already
+            // named by VideoOut, and tie it to this draw's sequence so the
+            // presenter cannot sample it before the GPU write completes.
+            var displayTarget = targets.FirstOrDefault(
+                target => _knownDisplayBufferAddresses.Contains(target.Address));
+            if (displayTarget is not null && displayTarget.Address != 0)
+            {
+                var sequence = (_latestPresentation?.Sequence ?? 0) + 1;
+                _latestPresentation = new Presentation(
+                    Pixels: null,
+                    displayTarget.Width,
+                    displayTarget.Height,
+                    sequence,
+                    GuestDrawKind.None,
+                    TranslatedDraw: null,
+                    RequiredGuestWorkSequence: workSequence,
+                    IsSplash: false,
+                    GuestImageAddress: displayTarget.Address,
+                    IsHdr: VideoOutExports.IsHdrOutputRequested);
             }
         }
     }
@@ -2159,6 +2191,8 @@ internal static unsafe class VulkanVideoPresenter
             {
                 return false;
             }
+
+            _knownDisplayBufferAddresses.Add(address);
 
             var version = ++_orderedGuestFlipVersionSequence;
             _lastOrderedGuestFlipVersions[(videoOutHandle, displayBufferIndex)] = version;
@@ -4018,6 +4052,8 @@ internal static unsafe class VulkanVideoPresenter
         // program content and descriptor-layout shape instead.
         private readonly Dictionary<ComputePipelineKey, Pipeline> _computePipelines = new();
         private readonly HashSet<string> _dumpedAmdComputeShaders =
+            new(StringComparer.Ordinal);
+        private readonly HashSet<string> _dumpedAmdGraphicsPipelines =
             new(StringComparer.Ordinal);
         private readonly Dictionary<GraphicsPipelineKey, Pipeline> _graphicsPipelines = new();
         private readonly Dictionary<GuestSampler, Sampler> _samplers = new();
@@ -8886,6 +8922,27 @@ internal static unsafe class VulkanVideoPresenter
 
                 var vertexBindingDescriptions = vertexBindingList.ToArray();
 
+                for (var index = 0; index < vertexAttributeDescriptions.Length; index++)
+                {
+                    var attribute = vertexAttributeDescriptions[index];
+                    if (SupportsVertexBufferFormat(attribute.Format))
+                    {
+                        continue;
+                    }
+
+                    throw new NotSupportedException(
+                        $"Vulkan vertex format {attribute.Format} is unsupported by the selected " +
+                        $"device (location={attribute.Location}, binding={attribute.Binding}).");
+                }
+
+                RecordAmdGraphicsPipelineCandidate(
+                    resources,
+                    vertexSpirv,
+                    fragmentSpirv,
+                    renderTargetFormats,
+                    vertexBindingDescriptions,
+                    vertexAttributeDescriptions);
+
                 fixed (VertexInputBindingDescription* vertexBindingPointerBase = vertexBindingDescriptions)
                 fixed (VertexInputAttributeDescription* vertexAttributePointerBase = vertexAttributeDescriptions)
                 {
@@ -9049,6 +9106,60 @@ internal static unsafe class VulkanVideoPresenter
                 _vk.DestroyShaderModule(_device, fragmentModule, null);
                 _vk.DestroyShaderModule(_device, vertexModule, null);
             }
+        }
+
+        private void RecordAmdGraphicsPipelineCandidate(
+            TranslatedDrawResources resources,
+            byte[] vertexSpirv,
+            byte[] fragmentSpirv,
+            IReadOnlyList<Format> renderTargetFormats,
+            IReadOnlyList<VertexInputBindingDescription> bindings,
+            IReadOnlyList<VertexInputAttributeDescription> attributes)
+        {
+            if (!_amdWindowsComputeSafety)
+            {
+                return;
+            }
+
+            var vertexDigest = GetShaderDigest(vertexSpirv);
+            var fragmentDigest = GetShaderDigest(fragmentSpirv);
+            var candidateKey = $"{vertexDigest}:{fragmentDigest}:{GetVertexLayoutKey(resources)}";
+            if (_dumpedAmdGraphicsPipelines.Count >= 256 ||
+                !_dumpedAmdGraphicsPipelines.Add(candidateKey))
+            {
+                return;
+            }
+
+            var dumpPath = "unavailable";
+            try
+            {
+                var dumpDirectory = Path.Combine(
+                    AppContext.BaseDirectory,
+                    "shader-dumps",
+                    "amd-graphics");
+                Directory.CreateDirectory(dumpDirectory);
+                var stem = $"gfx-{resources.ShaderAddress:X16}-{vertexDigest[..8]}-{fragmentDigest[..8]}";
+                File.WriteAllBytes(Path.Combine(dumpDirectory, $"{stem}.vs.spv"), vertexSpirv);
+                File.WriteAllBytes(Path.Combine(dumpDirectory, $"{stem}.ps.spv"), fragmentSpirv);
+                dumpPath = dumpDirectory;
+            }
+            catch (Exception exception)
+            {
+                dumpPath = $"unavailable({exception.GetType().Name})";
+            }
+
+            var bindingText = string.Join(',', bindings.Select(binding =>
+                $"b{binding.Binding}:stride={binding.Stride}:rate={binding.InputRate}"));
+            var attributeText = string.Join(',', attributes.Select(attribute =>
+                $"l{attribute.Location}:b{attribute.Binding}:{attribute.Format}:off={attribute.Offset}"));
+            Console.Error.WriteLine(
+                $"[LOADER][INFO] vk.amd_graphics_pipeline_candidate " +
+                $"shader=0x{resources.ShaderAddress:X16} " +
+                $"vs={vertexDigest[..16]}/{vertexSpirv.Length} " +
+                $"ps={fragmentDigest[..16]}/{fragmentSpirv.Length} " +
+                $"topology={resources.Topology} depth={(resources.HasDepthAttachment ? 1 : 0)} " +
+                $"targets=[{string.Join(',', renderTargetFormats)}] " +
+                $"bindings=[{bindingText}] attributes=[{attributeText}] dump='{dumpPath}'");
         }
 
         private DescriptorLayoutBundle GetOrCreateDescriptorLayout(
@@ -12652,6 +12763,12 @@ internal static unsafe class VulkanVideoPresenter
             return (properties.OptimalTilingFeatures & FormatFeatureFlags.ColorAttachmentBit) != 0;
         }
 
+        private bool SupportsVertexBufferFormat(Format format)
+        {
+            _vk.GetPhysicalDeviceFormatProperties(_physicalDevice, format, out var properties);
+            return (properties.BufferFeatures & FormatFeatureFlags.VertexBufferBit) != 0;
+        }
+
         private bool SupportsStorageImage(Format format)
         {
             _vk.GetPhysicalDeviceFormatProperties(_physicalDevice, format, out var properties);
@@ -14167,6 +14284,35 @@ internal static unsafe class VulkanVideoPresenter
                         return;
                     }
                 }
+            }
+
+            // A pixel program with no enabled color export can still be a
+            // meaningful depth or storage pass.  If none of those observable
+            // writes exist, however, creating and submitting its native
+            // graphics pipeline cannot affect guest-visible state.  In
+            // particular, Astro's first indirect bootstrap draw has an EXP
+            // with enable-mask zero; compiling that inert pipeline crashes
+            // current Windows AMD drivers inside vkCreateGraphicsPipelines.
+            // Keep all real Fran rendering work and discard only this proven
+            // no-effect packet.
+            var hasColorWrite = draw.RenderState.Blends.Any(
+                static blend => (blend.WriteMask & 0xFu) != 0);
+            var hasStorageImageWrite = draw.Textures.Any(
+                static texture => texture.IsStorage && texture.WritesImage);
+            var hasGlobalBufferWrite = draw.GlobalMemoryBuffers.Any(
+                static buffer => buffer.Writable && buffer.WriteBackToGuest);
+            if (!hasColorWrite &&
+                !draw.RenderState.Depth.WriteEnable &&
+                !draw.RenderState.Depth.ClearEnable &&
+                !hasStorageImageWrite &&
+                !hasGlobalBufferWrite)
+            {
+                Console.Error.WriteLine(
+                    $"[LOADER][INFO] vk.no_effect_draw_skipped " +
+                    $"shader=0x{work.ShaderAddress:X16} vertices={draw.VertexCount} " +
+                    $"instances={draw.InstanceCount} targets={work.Targets.Count}");
+                ReturnPooledGuestData(work.Draw);
+                return;
             }
 
             var formats = new Format[targetFormats.Length];

@@ -391,6 +391,7 @@ public static partial class Gen5SpirvTranslator
         private uint _ldsElementPointer;
         private uint _ldsDwordMask;
         private uint _positionOutput;
+        private uint _pointSizeOutput;
         private uint _vertexIndexInput;
         private uint _instanceIndexInput;
         private uint _fragCoordInput;
@@ -1335,6 +1336,14 @@ public static partial class Gen5SpirvTranslator
                     _subgroupInvocationIdInput,
                     SpirvDecoration.BuiltIn,
                     (uint)SpirvBuiltIn.SubgroupLocalInvocationId);
+                if (_stage == Gen5SpirvStage.Pixel)
+                {
+                    // Vulkan requires integer fragment inputs, including
+                    // subgroup built-ins, to carry Flat explicitly.
+                    _module.AddDecoration(
+                        _subgroupInvocationIdInput,
+                        SpirvDecoration.Flat);
+                }
                 _interfaces.Add(_subgroupInvocationIdInput);
 
                 if (_emulateWave64)
@@ -1396,6 +1405,17 @@ public static partial class Gen5SpirvTranslator
                     SpirvDecoration.BuiltIn,
                     (uint)SpirvBuiltIn.Position);
                 _interfaces.Add(_positionOutput);
+
+                var pointSizePointer =
+                    _module.TypePointer(SpirvStorageClass.Output, _floatType);
+                _pointSizeOutput = _module.AddGlobalVariable(
+                    pointSizePointer,
+                    SpirvStorageClass.Output);
+                _module.AddDecoration(
+                    _pointSizeOutput,
+                    SpirvDecoration.BuiltIn,
+                    (uint)SpirvBuiltIn.PointSize);
+                _interfaces.Add(_pointSizeOutput);
 
                 if (_pixelInputControls.Count != 0)
                 {
@@ -1779,6 +1799,10 @@ public static partial class Gen5SpirvTranslator
                         Float(0f),
                         Float(2f),
                         Float(1f)));
+                // Required when the guest selects point-list topology on
+                // devices without maintenance5. Guest point-size export is
+                // not modelled yet, so use Vulkan's conventional 1px value.
+                Store(_pointSizeOutput, Float(1f));
 
                 // Give every declared param output a defined starting value.
                 // Outputs the program actually exports overwrite this; the

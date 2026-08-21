@@ -250,6 +250,7 @@ public enum SpirvDecoration : uint
 public enum SpirvBuiltIn : uint
 {
     Position = 0,
+    PointSize = 1,
     VertexIndex = 42,
     InstanceIndex = 43,
     FragCoord = 15,
