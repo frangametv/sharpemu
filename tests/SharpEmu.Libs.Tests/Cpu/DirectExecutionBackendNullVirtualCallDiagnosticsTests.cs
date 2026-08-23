@@ -107,4 +107,71 @@ public sealed class DirectExecutionBackendNullVirtualCallDiagnosticsTests
             before,
             new byte[] { 0x48, 0x89, 0x48, 0x08 }));
     }
+
+    [Fact]
+    public void GtaNullAssetTable_MatchesExactPersistentTableInitialization()
+    {
+        byte[] before =
+        {
+            0x4D, 0x8B, 0x75, 0x60,
+            0x48, 0xC1, 0xE3, 0x04,
+            0x45, 0x31, 0xE4,
+            0x4C, 0x8D, 0xB8, 0xE0, 0xFF, 0xFF, 0xFF,
+            0xEB, 0x1D,
+            0x0F, 0x1F, 0x00,
+        };
+        byte[] current =
+        {
+            0x43, 0xC7, 0x44, 0x26, 0x08, 0x00, 0x00, 0x00, 0x00,
+            0x4B, 0xC7, 0x04, 0x26, 0x00, 0x00, 0x00, 0x00,
+        };
+
+        Assert.True(DirectExecutionBackend.IsGtaNullAssetTablePattern(
+            before,
+            current,
+			rbx: 0,
+            r12: 0,
+            r14: 0,
+            accessType: 1,
+            accessTarget: 8));
+    }
+
+    [Theory]
+	[InlineData(1UL, 0UL, 0UL, 1UL, 8UL)]
+	[InlineData(0UL, 1UL, 0UL, 1UL, 8UL)]
+	[InlineData(0UL, 0UL, 1UL, 1UL, 8UL)]
+	[InlineData(0UL, 0UL, 0UL, 0UL, 8UL)]
+	[InlineData(0UL, 0UL, 0UL, 1UL, 0UL)]
+    public void GtaNullAssetTable_RejectsDifferentFaultState(
+		ulong rbx,
+        ulong r12,
+        ulong r14,
+        ulong accessType,
+        ulong accessTarget)
+    {
+        byte[] before =
+        {
+            0x4D, 0x8B, 0x75, 0x60,
+            0x48, 0xC1, 0xE3, 0x04,
+            0x45, 0x31, 0xE4,
+            0x4C, 0x8D, 0xB8, 0xE0, 0xFF, 0xFF, 0xFF,
+            0xEB, 0x1D,
+            0x0F, 0x1F, 0x00,
+        };
+        byte[] current =
+        {
+            0x43, 0xC7, 0x44, 0x26, 0x08, 0x00, 0x00, 0x00, 0x00,
+            0x4B, 0xC7, 0x04, 0x26, 0x00, 0x00, 0x00, 0x00,
+        };
+
+        Assert.False(DirectExecutionBackend.IsGtaNullAssetTablePattern(
+            before,
+            current,
+			rbx,
+            r12,
+            r14,
+            accessType,
+            accessTarget));
+    }
+
 }

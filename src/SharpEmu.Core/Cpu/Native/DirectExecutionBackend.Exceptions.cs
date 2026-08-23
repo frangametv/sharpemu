@@ -19,6 +19,7 @@ public sealed partial class DirectExecutionBackend
 	private static int _lazyCommitTraceCount;
 	private static int _guestAllocatorHoleRecoveries;
 	private static int _nullVirtualAllocatorRecoveries;
+	private static int _gtaNullAssetTableRecoveries;
 	private static int _auxiliaryThreadExecuteFaultRecoveries;
 	private static int _auxiliaryThreadExecuteFaultSkips;
 	private nint _workerAbortStack;
@@ -150,6 +151,11 @@ public sealed partial class DirectExecutionBackend
 			}
 			if (exceptionCode == 3221225477u &&
 				TryRecoverGuestAllocatorHole(exceptionRecord, contextRecord, rip))
+			{
+				return -1;
+			}
+			if (exceptionCode == 3221225477u &&
+				TryRecoverGtaNullAssetTable(exceptionRecord, contextRecord, rip))
 			{
 				return -1;
 			}
@@ -705,6 +711,85 @@ public sealed partial class DirectExecutionBackend
 		return true;
 	}
 
+	private unsafe bool TryRecoverGtaNullAssetTable(
+		EXCEPTION_RECORD* exceptionRecord,
+		void* contextRecord,
+		ulong rip)
+	{
+		if (string.Equals(
+				Environment.GetEnvironmentVariable("SHARPEMU_DISABLE_GTA_ASSET_TABLE_RECOVERY"),
+				"1",
+				StringComparison.Ordinal) ||
+			exceptionRecord->NumberParameters < 2 ||
+			rip < 23)
+		{
+			return false;
+		}
+
+		var accessType = exceptionRecord->ExceptionInformation[0];
+		var accessTarget = exceptionRecord->ExceptionInformation[1];
+		var rbx = ReadCtxU64(contextRecord, CTX_RBX);
+		var r12 = ReadCtxU64(contextRecord, CTX_R12);
+		var r13 = ReadCtxU64(contextRecord, CTX_R13);
+		var r14 = ReadCtxU64(contextRecord, CTX_R14);
+		Span<byte> before = stackalloc byte[23];
+		Span<byte> current = stackalloc byte[17];
+		if (r13 < 0x10000 ||
+			!TryReadHostBytes(rip - (ulong)before.Length, before) ||
+			!TryReadHostBytes(rip, current) ||
+			!IsGtaNullAssetTablePattern(before, current, rbx, r12, r14, accessType, accessTarget))
+		{
+			return false;
+		}
+
+		// RBX is the table byte length after the preceding shl rbx,4. RAGE's
+		// overlapping-instruction zero-length exit starts at RIP+0x2E (the 0x58
+		// byte also serving as the displacement of call [rax+58h]). Entering the
+		// do/while body with RBX=0 otherwise wraps R12 and clears memory forever.
+		const ulong emptyTableExitDelta = 0x2E;
+		WriteCtxU64(contextRecord, CTX_RIP, rip + emptyTableExitDelta);
+		var recovery = Interlocked.Increment(ref _gtaNullAssetTableRecoveries);
+		Console.Error.WriteLine(
+			$"[LOADER][WARN] Recovered GTA empty asset table #{recovery}: " +
+			$"rip=0x{rip:X16} -> 0x{rip + emptyTableExitDelta:X16} owner=0x{r13:X16}");
+		Console.Error.Flush();
+		return true;
+	}
+
+	internal static bool IsGtaNullAssetTablePattern(
+		ReadOnlySpan<byte> before,
+		ReadOnlySpan<byte> current,
+		ulong rbx,
+		ulong r12,
+		ulong r14,
+		ulong accessType,
+		ulong accessTarget)
+	{
+		ReadOnlySpan<byte> expectedBefore = new byte[]
+		{
+			0x4D, 0x8B, 0x75, 0x60,                         // mov r14,[r13+60h]
+			0x48, 0xC1, 0xE3, 0x04,                         // shl rbx,4
+			0x45, 0x31, 0xE4,                               // xor r12d,r12d
+			0x4C, 0x8D, 0xB8, 0xE0, 0xFF, 0xFF, 0xFF,       // lea r15,[rax-20h]
+			0xEB, 0x1D,                                     // jump to the table probe
+			0x0F, 0x1F, 0x00,                               // alignment nop
+		};
+		ReadOnlySpan<byte> expectedCurrent = new byte[]
+		{
+			0x43, 0xC7, 0x44, 0x26, 0x08, 0x00, 0x00, 0x00, 0x00, // mov dword [r14+r12+8],0
+			0x4B, 0xC7, 0x04, 0x26, 0x00, 0x00, 0x00, 0x00,       // mov qword [r14+r12],0
+		};
+
+		return rbx == 0 &&
+			r12 == 0 &&
+			r14 == 0 &&
+			accessType == 1 &&
+			accessTarget == 8 &&
+			before.SequenceEqual(expectedBefore) &&
+			current.SequenceEqual(expectedCurrent);
+	}
+
+
 	private unsafe bool TryRecoverNullVirtualAllocatorResult(
 		EXCEPTION_RECORD* exceptionRecord,
 		void* contextRecord,
@@ -908,6 +993,16 @@ public sealed partial class DirectExecutionBackend
 			return;
 		}
 
+		var extraInstructionCount = 48;
+		if (int.TryParse(
+				Environment.GetEnvironmentVariable("SHARPEMU_LOG_DISASM_INSTRUCTIONS"),
+				NumberStyles.Integer,
+				CultureInfo.InvariantCulture,
+				out var configuredCount))
+		{
+			extraInstructionCount = Math.Clamp(configuredCount, 1, 4096);
+		}
+
 		foreach (var token in extraAddresses.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
 		{
 			var normalized = token.StartsWith("0x", StringComparison.OrdinalIgnoreCase)
@@ -918,7 +1013,7 @@ public sealed partial class DirectExecutionBackend
 				continue;
 			}
 
-			DumpGuestInstructionStream($"extra-0x{address:X16}", address, 48);
+			DumpGuestInstructionStream($"extra-0x{address:X16}", address, extraInstructionCount);
 		}
 	}
 

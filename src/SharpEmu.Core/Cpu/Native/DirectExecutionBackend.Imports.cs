@@ -378,6 +378,8 @@ public sealed partial class DirectExecutionBackend
 				$"thread=0x{GuestThreadExecution.CurrentGuestThreadHandle:X16} " +
 				$"nid={importStubEntry.Nid} ret=0x{num7:X16} " +
 				$"rsp=0x{(ulong)argPackPtr + 96:X16} rbp=0x{value4:X16} " +
+				$"rbx=0x{value3:X16} r12=0x{value5:X16} r13=0x{value6:X16} " +
+				$"r14=0x{value7:X16} r15=0x{value8:X16} " +
 				$"saved_rbp=0x{frameValue:X16} saved_ret=0x{frameReturn:X16}");
 		}
 		var isGuestWorker = GuestThreadExecution.IsGuestThread;
@@ -1427,6 +1429,7 @@ public sealed partial class DirectExecutionBackend
 				$"rdx=0x{*(ulong*)(argPackPtr + 16):X16} " +
 				$"rcx=0x{*(ulong*)(argPackPtr + 24):X16} " +
 				$"r8=0x{*(ulong*)(argPackPtr + 32):X16} " +
+				$"r12=0x{*(ulong*)(argPackPtr + 64):X16} " +
 				$"ret=0x{returnRip:X16}");
 		}
 		var leafStackPointer = (ulong)argPackPtr + 96UL;

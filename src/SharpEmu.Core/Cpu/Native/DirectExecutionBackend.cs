@@ -8,6 +8,7 @@ using System.Diagnostics;
 using System.Linq;
 using System.Runtime.InteropServices;
 using System.Threading;
+using Iced.Intel;
 using SharpEmu.Core.Cpu;
 using SharpEmu.Core.Cpu.Debugging;
 using SharpEmu.Core.Loader;
@@ -3330,12 +3331,27 @@ public sealed unsafe partial class DirectExecutionBackend : INativeCpuBackend, I
 			if (flag && flag2 && num6 > num5 + MinTlsPatchInstructionBytes)
 			{
 				byte* ptr = (byte*)num5;
-				int scanBytes = (int)(num6 - num5);
-				for (int i = 0; i <= scanBytes - MinTlsPatchInstructionBytes; i++)
+				int scanBytes = checked((int)(num6 - num5));
+				var decoder = Decoder.Create(64, new CpuPatcher.UnsafeCodeReader(ptr, scanBytes));
+				decoder.IP = num5;
+				while (decoder.IP < num6)
 				{
+					decoder.Decode(out var instruction);
+					if (instruction.Code == Code.INVALID || instruction.IP < num5 || instruction.IP >= num6)
+					{
+						continue;
+					}
+
+					int i = checked((int)(instruction.IP - num5));
 					nint address = (nint)(ptr + i);
 					int remainingBytes = scanBytes - i;
-					if (TryPatchTlsLoadInstruction(address, ptr + i, remainingBytes, i))
+					// Iced gives us a real instruction boundary, avoiding the former
+					// one-byte look-behind heuristic, which could mistake the last
+					// opcode byte of the previous instruction for a short branch. That made
+					// the scanner skip a genuine 0x66 prefix and patch at the following
+					// 0x64 byte, leaving `66 E8`: a 16-bit call that pushed only two return
+					// bytes and ultimately skipped the guest function epilogue.
+					if (TryPatchTlsLoadInstruction(address, ptr + i, remainingBytes))
 					{
 						num3++;
 					}
@@ -3482,23 +3498,9 @@ public sealed unsafe partial class DirectExecutionBackend : INativeCpuBackend, I
 	private unsafe bool TryPatchTlsLoadInstruction(
 		nint address,
 		byte* source,
-		int availableLength,
-		int regionOffset)
+		int availableLength)
 	{
 		if (availableLength < MinTlsPatchInstructionBytes)
-		{
-			return false;
-		}
-
-		// Adapted from foufouadi/sharpemu@35b727f.
-		// A linear byte scan can land on the displacement of a preceding short
-		// jump. In the GTA V sequence EB 66 followed by a 66-prefixed FS:[0]
-		// load, treating the jump displacement as an operand-size prefix makes
-		// the patch overwrite that displacement and turns the forward jump into
-		// an infinite loop. EB always owns a following disp8, so a candidate
-		// immediately preceded by EB is provably not an instruction boundary.
-		if (regionOffset > 0 &&
-			!IsTlsPatchCandidateBoundary(regionOffset, source[-1]))
 		{
 			return false;
 		}
@@ -3555,6 +3557,8 @@ public sealed unsafe partial class DirectExecutionBackend : INativeCpuBackend, I
 		return PatchTlsLoadInstruction(address, instructionLength, destinationRegister);
 	}
 
+	// Retained for callers/tests that validate the legacy byte-scanner rule.
+	// The production TLS scanner now decodes instruction boundaries with Iced.
 	internal static bool IsTlsPatchCandidateBoundary(int regionOffset, byte precedingByte) =>
 		regionOffset == 0 || precedingByte != 0xEB;
 

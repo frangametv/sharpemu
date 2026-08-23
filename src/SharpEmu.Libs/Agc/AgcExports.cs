@@ -7856,27 +7856,19 @@ public static partial class AgcExports
         state.PendingAcquireBase = 0;
         state.PendingAcquireSize = 0;
 
-        var queueName = state.QueueName;
-        var submissionId = state.ActiveSubmissionId;
-        var debugName =
-            $"acquire_mem_flush base=0x{baseAddress:X16} size=0x{sizeBytes:X16}";
-        void ApplyAcquire()
+        // SyncCpuWrittenGuestImages is only a scoped wake for the render
+        // thread's dirty-image drain; it neither reads a GPU result nor emits
+        // host GPU work. Ordering that wake through the Vulkan queue forced a
+        // new host submission and fence wait for every coalesced ACQUIRE_MEM.
+        // The actual upload remains ordered by the render drain, while PM4
+        // operations that consume GPU results keep their explicit fences.
+        SyncCpuWrittenGuestImages(ctx, baseAddress, sizeBytes);
+        if (tracePacket)
         {
-            SyncCpuWrittenGuestImages(ctx, baseAddress, sizeBytes);
-            if (tracePacket)
-            {
-                TraceAgc(
-                    $"agc.acquire_mem_applied queue={queueName} " +
-                    $"submission={submissionId} " +
-                    $"work_sequence={GuestGpu.Current.CurrentGuestWorkSequenceForDiagnostics} " +
-                    $"base=0x{baseAddress:X16} size=0x{sizeBytes:X16}");
-            }
-        }
-
-        var sequence = GuestGpu.Current.SubmitOrderedGuestAction(ApplyAcquire, debugName);
-        if (sequence == 0)
-        {
-            ApplyAcquire();
+            TraceAgc(
+                $"agc.acquire_mem_applied queue={state.QueueName} " +
+                $"submission={state.ActiveSubmissionId} mode=deferred-render-drain " +
+                $"base=0x{baseAddress:X16} size=0x{sizeBytes:X16}");
         }
     }
 
