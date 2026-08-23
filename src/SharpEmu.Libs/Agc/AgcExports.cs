@@ -1842,6 +1842,11 @@ public static partial class AgcExports
     {
         public object Gate { get; } = new();
         public SubmittedDcbState Graphics { get; } = new();
+        // Adapted from foufouadi/sharpemu@aba206f.
+        // A flip can be built in a persistent ACB arena that is not reachable
+        // from the root DCB. Keep its parser state separate so a suspended root
+        // queue cannot strand the producer tail.
+        public SubmittedDcbState ProducerGraphics { get; } = new();
         public Dictionary<uint, SubmittedDcbState> ComputeQueues { get; } = new();
         public Dictionary<ulong, ComputeImageWriter> ComputeImageWriters { get; } = new();
         public Dictionary<uint, string> ResourceOwners { get; } = new();
@@ -1855,6 +1860,8 @@ public static partial class AgcExports
         public uint NextResource { get; set; } = 1;
         public ulong WorkSequence { get; set; }
         public ulong SubmissionSequence { get; set; }
+        public ulong PendingFlipProducerAddress { get; set; }
+        public uint PendingFlipProducerDwords { get; set; }
         public int WaitMonitorRunning;
         public object WaitMonitorSignalGate { get; } = new();
         public long WaitMonitorSignalVersion { get; set; }
@@ -5591,6 +5598,32 @@ public static partial class AgcExports
         }
 
         TraceAgc($"agc.dcb_set_flip buf=0x{commandBufferAddress:X16} cmd=0x{commandAddress:X16} handle={videoOutHandle} index={displayBufferIndex} mode={flipMode} arg=0x{flipArg:X16}");
+        var flipBase = TryReadUInt64(ctx, commandBufferAddress, out var baseRaw)
+            ? baseRaw
+            : 0;
+        var flipUp = TryReadUInt64(
+                ctx,
+                commandBufferAddress + CommandBufferCursorUpOffset,
+                out var upRaw)
+            ? upRaw
+            : 0;
+        if (flipBase != 0 &&
+            flipUp > flipBase &&
+            (flipUp - flipBase) / sizeof(uint) <= uint.MaxValue)
+        {
+            // Store this on the canonical guest-memory state rather than in
+            // process-global fields: multiple emulator instances must not
+            // consume one another's persistent producer arenas.
+            var gpuState = _submittedGpuStates.GetValue(
+                CanonicalMemory(ctx.Memory),
+                static _ => new SubmittedGpuState());
+            lock (gpuState.Gate)
+            {
+                gpuState.PendingFlipProducerAddress = flipBase;
+                gpuState.PendingFlipProducerDwords =
+                    (uint)((flipUp - flipBase) / sizeof(uint));
+            }
+        }
         return ReturnPointer(ctx, commandAddress);
     }
 
@@ -5848,6 +5881,29 @@ public static partial class AgcExports
                 ++gpuState.SubmissionSequence,
                 tracePackets);
             DrainResumableDcbs(ctx, gpuState, tracePackets);
+
+            var producerAddress = gpuState.PendingFlipProducerAddress;
+            var producerDwords = gpuState.PendingFlipProducerDwords;
+            gpuState.PendingFlipProducerAddress = 0;
+            gpuState.PendingFlipProducerDwords = 0;
+            if (producerAddress != 0 &&
+                producerDwords != 0 &&
+                !SubmissionContainsRange(
+                    commandAddress,
+                    dwordCount,
+                    producerAddress,
+                    producerDwords))
+            {
+                gpuState.ProducerGraphics.QueueName = "dcb.graphics.producer";
+                EnqueueSubmittedDcb(
+                    ctx,
+                    gpuState,
+                    gpuState.ProducerGraphics,
+                    producerAddress,
+                    producerDwords,
+                    ++gpuState.SubmissionSequence,
+                    tracePackets);
+            }
         }
         TraceGuestMemoryCpuWriters(ctx, "dcb-after");
 
@@ -5856,6 +5912,25 @@ public static partial class AgcExports
         // wait monitor drains this instead.
         ctx[CpuRegister.Rax] = 0;
         return (int)OrbisGen2Result.ORBIS_GEN2_OK;
+    }
+
+    internal static bool SubmissionContainsRange(
+        ulong submissionAddress,
+        uint submissionDwords,
+        ulong candidateAddress,
+        uint candidateDwords)
+    {
+        var submissionBytes = (ulong)submissionDwords * sizeof(uint);
+        var candidateBytes = (ulong)candidateDwords * sizeof(uint);
+        if (submissionAddress > ulong.MaxValue - submissionBytes ||
+            candidateAddress > ulong.MaxValue - candidateBytes)
+        {
+            return false;
+        }
+
+        return candidateAddress >= submissionAddress &&
+            candidateAddress + candidateBytes <=
+                submissionAddress + submissionBytes;
     }
 
     [SysAbiExport(
@@ -6223,7 +6298,8 @@ public static partial class AgcExports
         // sceAgcDriverAddEqEvent. Graphics keeps ident 0; a compute queue uses the
         // owner handle it was submitted under.
         var completionEventId = state.CompletionEventId;
-        var isGraphics = ReferenceEquals(state, gpuState.Graphics);
+        var isGraphics = ReferenceEquals(state, gpuState.Graphics) ||
+            ReferenceEquals(state, gpuState.ProducerGraphics);
         var queueName = state.QueueName;
         void TriggerCompletionEvents()
         {

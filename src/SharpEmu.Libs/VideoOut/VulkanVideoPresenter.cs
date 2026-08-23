@@ -864,6 +864,82 @@ internal static unsafe class VulkanVideoPresenter
         return penalty;
     }
 
+    internal static bool ShouldDisableAmdComputePipelineOptimization(
+        uint vendorId,
+        bool isWindows,
+        string? configuredValue)
+    {
+        return isWindows &&
+            vendorId == AmdVendorId &&
+            !string.Equals(configuredValue, "0", StringComparison.Ordinal);
+    }
+
+    internal static bool ShouldDisableAmdGraphicsPipelineOptimization(
+        uint vendorId,
+        bool isWindows,
+        string? configuredValue)
+    {
+        return isWindows &&
+            vendorId == AmdVendorId &&
+            !string.Equals(configuredValue, "0", StringComparison.Ordinal);
+    }
+
+    internal static bool ShouldDisableAmdNativeComputeSubgroups(
+        uint vendorId,
+        bool isWindows,
+        string? configuredValue)
+    {
+        return isWindows &&
+            vendorId == AmdVendorId &&
+            !string.Equals(configuredValue, "1", StringComparison.Ordinal);
+    }
+
+    // These translated modules were captured immediately before AMD's Windows
+    // driver raised access violations in vkCreate*Pipelines on an RX 7900 XT.
+    // Full SPIR-V digests are stable across titles and builds; guest shader
+    // addresses and native driver addresses are not.
+    private const string AmdWindowsFaultingComputeDigest =
+        "1A5205C396F8192DF173E537C480766DBE03024C9D0CE4502E39FE42B13464D8";
+    private const string AmdWindowsFaultingGraphicsVertexDigest =
+        "346E080C9952918F2BB22A1D9E2FD73D8381F2B43A21DD3B60950BA75D1180EA";
+    private const string AmdWindowsFaultingGraphicsFragmentDigest =
+        "D17904BBF37B1B9C6E7CF6C8222AF540340A2BB1B4B5DB66EE477934DAB3C3AA";
+
+    internal static bool ShouldQuarantineAmdWindowsComputeShader(
+        uint vendorId,
+        bool isWindows,
+        string shaderDigest,
+        string? configuredValue)
+    {
+        return isWindows &&
+            vendorId == AmdVendorId &&
+            !string.Equals(configuredValue, "0", StringComparison.Ordinal) &&
+            string.Equals(
+                shaderDigest,
+                AmdWindowsFaultingComputeDigest,
+                StringComparison.OrdinalIgnoreCase);
+    }
+
+    internal static bool ShouldQuarantineAmdWindowsGraphicsPipeline(
+        uint vendorId,
+        bool isWindows,
+        string vertexDigest,
+        string fragmentDigest,
+        string? configuredValue)
+    {
+        return isWindows &&
+            vendorId == AmdVendorId &&
+            !string.Equals(configuredValue, "0", StringComparison.Ordinal) &&
+            string.Equals(
+                vertexDigest,
+                AmdWindowsFaultingGraphicsVertexDigest,
+                StringComparison.OrdinalIgnoreCase) &&
+            string.Equals(
+                fragmentDigest,
+                AmdWindowsFaultingGraphicsFragmentDigest,
+                StringComparison.OrdinalIgnoreCase);
+    }
+
     private static bool _splashHidden;
     private static long _enqueuedGuestWorkSequence;
     // Largest contiguous completed sequence, retained for compact diagnostics.
@@ -3826,7 +3902,9 @@ internal static unsafe class VulkanVideoPresenter
         private uint _maxComputeWorkGroupSizeZ;
         private uint _maxComputeWorkGroupInvocations;
         private ulong _minStorageBufferOffsetAlignment = 1;
-        private bool _amdWindowsComputeSafety;
+        private bool _disableComputePipelineOptimization;
+        private bool _disableGraphicsPipelineOptimization;
+        private bool _amdWindowsDriverSafety;
         private bool _supportsIndependentBlend;
         private uint _maxColorAttachments;
         private Device _device;
@@ -5127,12 +5205,38 @@ internal static unsafe class VulkanVideoPresenter
             LoadComputeDeviceLimits();
             _vk.GetPhysicalDeviceProperties(_physicalDevice, out var selected);
             _maxColorAttachments = selected.Limits.MaxColorAttachments;
-            System.Threading.Volatile.Write(ref _disableNativeComputeSubgroups, 0);
-            _amdWindowsComputeSafety =
+            _disableComputePipelineOptimization =
+                ShouldDisableAmdComputePipelineOptimization(
+                    selected.VendorID,
+                    OperatingSystem.IsWindows(),
+                    Environment.GetEnvironmentVariable("SHARPEMU_VK_AMD_COMPUTE_NO_OPT"));
+            _disableGraphicsPipelineOptimization =
+                ShouldDisableAmdGraphicsPipelineOptimization(
+                    selected.VendorID,
+                    OperatingSystem.IsWindows(),
+                    Environment.GetEnvironmentVariable("SHARPEMU_VK_AMD_GRAPHICS_NO_OPT"));
+            var disableNativeComputeSubgroups =
+                ShouldDisableAmdNativeComputeSubgroups(
+                    selected.VendorID,
+                    OperatingSystem.IsWindows(),
+                    Environment.GetEnvironmentVariable("SHARPEMU_VK_AMD_COMPUTE_SUBGROUPS"));
+            System.Threading.Volatile.Write(
+                ref _disableNativeComputeSubgroups,
+                disableNativeComputeSubgroups ? 1 : 0);
+            _amdWindowsDriverSafety =
                 OperatingSystem.IsWindows() && selected.VendorID == AmdVendorId;
             var selectedName = SilkMarshal.PtrToString((nint)selected.DeviceName) ?? "unknown";
             Console.Error.WriteLine(
                 $"[LOADER][INFO] Vulkan device: {selectedName} ({selected.DeviceType})");
+            if (_amdWindowsDriverSafety)
+            {
+                Console.Error.WriteLine(
+                    $"[LOADER][INFO] Vulkan AMD Windows driver safety: " +
+                    $"compute_no_opt={(_disableComputePipelineOptimization ? 1 : 0)} " +
+                    $"graphics_no_opt={(_disableGraphicsPipelineOptimization ? 1 : 0)} " +
+                    $"native_compute_subgroups={(disableNativeComputeSubgroups ? 0 : 1)} " +
+                    "compute_quarantine=automatic graphics_quarantine=automatic");
+            }
             VideoOutExports.SetSelectedGpuName(selectedName);
             if (_window is not null)
             {
@@ -6845,10 +6949,40 @@ internal static unsafe class VulkanVideoPresenter
                 $"completed={_completedTimeline} name='{work.DebugName}'");
         }
 
+        // Adapted from foufouadi/sharpemu@7889b29.
+        // A flip identifies guest memory, not the Vulkan format/size variant.
+        // The active entry can be a newly rebound but still uninitialized image
+        // while an older retained variant contains the producer's completed
+        // pixels. Select the newest initialized content for this address.
+        private GuestImageResource? ResolveGuestFlipSource(ulong address)
+        {
+            _guestImages.TryGetValue(address, out var active);
+            GuestImageResource? best = active is { Initialized: true }
+                ? active
+                : null;
+
+            foreach (var (key, candidate) in _guestImageVariants)
+            {
+                if (key.Address != address || !candidate.Initialized)
+                {
+                    continue;
+                }
+
+                if (best is null ||
+                    candidate.ContentGeneration > best.ContentGeneration)
+                {
+                    best = candidate;
+                }
+            }
+
+            // Preserve the active uninitialized entry for failure diagnostics.
+            return best ?? active;
+        }
+
         private void ExecuteOrderedGuestFlip(VulkanOrderedGuestFlip work)
         {
             FlushBatchedGuestCommands();
-            _guestImages.TryGetValue(work.Address, out var source);
+            var source = ResolveGuestFlipSource(work.Address);
             if (_deviceLost ||
                 source is null ||
                 !source.Initialized)
@@ -9065,6 +9199,9 @@ internal static unsafe class VulkanVideoPresenter
                     var pipelineInfo = new GraphicsPipelineCreateInfo
                     {
                         SType = StructureType.GraphicsPipelineCreateInfo,
+                        Flags = _disableGraphicsPipelineOptimization
+                            ? PipelineCreateFlags.CreateDisableOptimizationBit
+                            : 0,
                         StageCount = 2,
                         PStages = shaderStages,
                         PVertexInputState = &vertexInput,
@@ -9116,7 +9253,7 @@ internal static unsafe class VulkanVideoPresenter
             IReadOnlyList<VertexInputBindingDescription> bindings,
             IReadOnlyList<VertexInputAttributeDescription> attributes)
         {
-            if (!_amdWindowsComputeSafety)
+            if (!_amdWindowsDriverSafety)
             {
                 return;
             }
@@ -9160,6 +9297,55 @@ internal static unsafe class VulkanVideoPresenter
                 $"topology={resources.Topology} depth={(resources.HasDepthAttachment ? 1 : 0)} " +
                 $"targets=[{string.Join(',', renderTargetFormats)}] " +
                 $"bindings=[{bindingText}] attributes=[{attributeText}] dump='{dumpPath}'");
+        }
+
+        private void RecordAmdGraphicsPipelineQuarantine(
+            VulkanOffscreenGuestDraw work,
+            string vertexDigest,
+            string fragmentDigest)
+        {
+            var candidateKey = $"quarantine:{vertexDigest}:{fragmentDigest}";
+            if (_dumpedAmdGraphicsPipelines.Count >= 256 ||
+                !_dumpedAmdGraphicsPipelines.Add(candidateKey))
+            {
+                return;
+            }
+
+            var dumpPath = "unavailable";
+            try
+            {
+                var dumpDirectory = Path.Combine(
+                    AppContext.BaseDirectory,
+                    "shader-dumps",
+                    "amd-graphics");
+                Directory.CreateDirectory(dumpDirectory);
+                var stem =
+                    $"gfx-{work.ShaderAddress:X16}-{vertexDigest[..8]}-{fragmentDigest[..8]}";
+                var vertexPath = Path.Combine(dumpDirectory, $"{stem}.vs.spv");
+                var fragmentPath = Path.Combine(dumpDirectory, $"{stem}.ps.spv");
+                if (!File.Exists(vertexPath))
+                {
+                    File.WriteAllBytes(vertexPath, work.Draw.VertexSpirv);
+                }
+                if (!File.Exists(fragmentPath))
+                {
+                    File.WriteAllBytes(fragmentPath, work.Draw.PixelSpirv);
+                }
+                dumpPath = dumpDirectory;
+            }
+            catch (Exception exception)
+            {
+                dumpPath = $"unavailable({exception.GetType().Name})";
+            }
+
+            Console.Error.WriteLine(
+                $"[LOADER][WARN] vk.amd_graphics_pipeline_quarantined " +
+                $"shader=0x{work.ShaderAddress:X16} " +
+                $"vs={vertexDigest[..16]}/{work.Draw.VertexSpirv.Length} " +
+                $"ps={fragmentDigest[..16]}/{work.Draw.PixelSpirv.Length} " +
+                $"targets={work.Targets.Count} action=skip " +
+                $"reason=known-radeon-driver-av dump='{dumpPath}' " +
+                $"override=SHARPEMU_VK_AMD_GRAPHICS_QUARANTINE=0");
         }
 
         private DescriptorLayoutBundle GetOrCreateDescriptorLayout(
@@ -9339,7 +9525,10 @@ internal static unsafe class VulkanVideoPresenter
                 var pipelineInfo = new ComputePipelineCreateInfo
                 {
                     SType = StructureType.ComputePipelineCreateInfo,
-                    Flags = PipelineCreateFlags.CreateDispatchBaseBit,
+                    Flags = PipelineCreateFlags.CreateDispatchBaseBit |
+                        (_disableComputePipelineOptimization
+                            ? PipelineCreateFlags.CreateDisableOptimizationBit
+                            : 0),
                     Stage = stage,
                     Layout = resources.PipelineLayout,
                 };
@@ -9374,7 +9563,7 @@ internal static unsafe class VulkanVideoPresenter
             string shaderDigest,
             byte[] computeSpirv)
         {
-            if (!_amdWindowsComputeSafety ||
+            if (!_amdWindowsDriverSafety ||
                 _dumpedAmdComputeShaders.Count >= 256 ||
                 !_dumpedAmdComputeShaders.Add(shaderDigest))
             {
@@ -13073,6 +13262,30 @@ internal static unsafe class VulkanVideoPresenter
                 return;
             }
 
+            var computeDigest = GetShaderDigest(work.ComputeSpirv);
+            if (ShouldQuarantineAmdWindowsComputeShader(
+                    _amdWindowsDriverSafety ? AmdVendorId : 0,
+                    OperatingSystem.IsWindows(),
+                    computeDigest,
+                    Environment.GetEnvironmentVariable(
+                        "SHARPEMU_VK_AMD_COMPUTE_QUARANTINE")))
+            {
+                // Calling the native compiler cannot be guarded with a managed
+                // exception: the Radeon driver terminates the process with
+                // 0xC0000005. Preserve the exact module, then no-op only this
+                // proven-fatal dispatch.
+                RecordAmdComputePipelineCandidate(
+                    work.ShaderAddress,
+                    computeDigest,
+                    work.ComputeSpirv);
+                Console.Error.WriteLine(
+                    $"[LOADER][WARN] vk.amd_compute_pipeline_quarantined " +
+                    $"cs=0x{work.ShaderAddress:X16} digest={computeDigest[..16]} " +
+                    $"bytes={work.ComputeSpirv.Length} action=skip " +
+                    $"override=SHARPEMU_VK_AMD_COMPUTE_QUARANTINE=0");
+                return;
+            }
+
             TranslatedDrawResources? resources = null;
             CommandBuffer commandBuffer = default;
             var submitted = false;
@@ -14311,6 +14524,24 @@ internal static unsafe class VulkanVideoPresenter
                     $"[LOADER][INFO] vk.no_effect_draw_skipped " +
                     $"shader=0x{work.ShaderAddress:X16} vertices={draw.VertexCount} " +
                     $"instances={draw.InstanceCount} targets={work.Targets.Count}");
+                ReturnPooledGuestData(work.Draw);
+                return;
+            }
+
+            var vertexDigest = GetShaderDigest(draw.VertexSpirv);
+            var fragmentDigest = GetShaderDigest(draw.PixelSpirv);
+            if (ShouldQuarantineAmdWindowsGraphicsPipeline(
+                    _amdWindowsDriverSafety ? AmdVendorId : 0,
+                    OperatingSystem.IsWindows(),
+                    vertexDigest,
+                    fragmentDigest,
+                    Environment.GetEnvironmentVariable(
+                        "SHARPEMU_VK_AMD_GRAPHICS_QUARANTINE")))
+            {
+                RecordAmdGraphicsPipelineQuarantine(
+                    work,
+                    vertexDigest,
+                    fragmentDigest);
                 ReturnPooledGuestData(work.Draw);
                 return;
             }

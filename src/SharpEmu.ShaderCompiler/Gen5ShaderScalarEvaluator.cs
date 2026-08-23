@@ -582,13 +582,6 @@ public static class Gen5ShaderScalarEvaluator
                 var baseAddress =
                     scalarRegisters[globalMemory.ScalarAddress] |
                     ((ulong)scalarRegisters[globalMemory.ScalarAddress + 1] << 32);
-                if (baseAddress == 0)
-                {
-                    error = $"global-address-null pc=0x{instruction.Pc:X}";
-                    return false;
-                }
-
-                var key = (globalMemory.ScalarAddress, baseAddress);
                 var writable =
                     instruction.Opcode.StartsWith(
                         "GlobalStore",
@@ -602,6 +595,54 @@ public static class Gen5ShaderScalarEvaluator
                     instruction.Opcode.StartsWith(
                         "FlatAtomic",
                         StringComparison.Ordinal);
+                if (baseAddress == 0)
+                {
+                    if (_strictScalarLoad)
+                    {
+                        error = $"global-address-null pc=0x{instruction.Pc:X}";
+                        return false;
+                    }
+
+                    // Adapted from foufouadi/sharpemu@b3bed40.
+                    // Optional global resources can be null on the scalar path
+                    // even though their instructions remain in the translated
+                    // CFG. Preserve the dispatch with a small zero-filled host
+                    // binding. Bounds checks turn larger accesses into safe
+                    // zero reads/no-ops, and synthetic writes never reach guest
+                    // address zero.
+                    var nullKey = (globalMemory.ScalarAddress, 0UL);
+                    if (globalMemoryByAddress.TryGetValue(
+                            nullKey,
+                            out var nullBinding))
+                    {
+                        nullBinding.Writable |= writable;
+                        if (nullBinding.InstructionPcs is List<uint> nullPcs &&
+                            !nullPcs.Contains(instruction.Pc))
+                        {
+                            nullPcs.Add(instruction.Pc);
+                        }
+                    }
+                    else
+                    {
+                        var binding = new Gen5GlobalMemoryBinding(
+                            globalMemory.ScalarAddress,
+                            0,
+                            new List<uint> { instruction.Pc },
+                            new byte[sizeof(uint)],
+                            sizeof(uint),
+                            DataPooled: false)
+                        {
+                            Writable = writable,
+                            WriteBackToGuest = false,
+                        };
+                        globalMemoryByAddress.Add(nullKey, binding);
+                        globalMemoryBindings.Add(binding);
+                    }
+
+                    continue;
+                }
+
+                var key = (globalMemory.ScalarAddress, baseAddress);
                 if (globalMemoryByAddress.TryGetValue(key, out var existingBinding))
                 {
                     if (existingBinding.InstructionPcs is List<uint> instructionPcs &&

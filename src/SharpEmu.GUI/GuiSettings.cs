@@ -24,7 +24,8 @@ public sealed class GuiSettings
     public bool StrictDynlibResolution { get; set; }
 
     /// <summary>
-    /// Mirror emulator output to user/logs/&lt;titleId&gt;-&lt;timestamp&gt;.log, if <see cref="LogFilePath"/> is null.
+    /// Mirror emulator output to user/logs/&lt;game&gt;-&lt;customVersion&gt;-&lt;timestamp&gt;.log,
+    /// if <see cref="LogFilePath"/> is null.
     /// </summary>
     public bool LogToFile { get; set; }
 
@@ -32,7 +33,8 @@ public sealed class GuiSettings
     public string? LogFilePath { get; set; }
 
     /// <summary> 
-    /// If <see cref="OverrideLogFile"/> is false it appends &lt;titleId&gt;-&lt;timestamp&gt; to the filename specified by 
+    /// If <see cref="OverrideLogFile"/> is false it appends
+    /// &lt;game&gt;-&lt;customVersion&gt;-&lt;timestamp&gt; to the filename specified by
     /// <see cref="LogFilePath"/>. Otherwise it uses the exact filename from <see cref="LogFilePath"/>
     /// </summary>
     public bool OverrideLogFile { get; set; }

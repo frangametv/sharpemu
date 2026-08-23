@@ -2516,8 +2516,8 @@ public partial class MainWindow : Window
     }
 
     /// <summary>
-    /// Builds "user/logs/&lt;titleId&gt;-&lt;timestamp&gt;.log" next to the emulator
-    /// executable, following the same portable-data convention as savedata.
+    /// Builds "user/logs/&lt;game&gt;-&lt;customVersion&gt;-&lt;timestamp&gt;.log" next to
+    /// the emulator executable, following the same portable-data convention as savedata.
     /// </summary>
     private string? BuildLogFilePath(string? titleId)
     {
@@ -2532,13 +2532,7 @@ public partial class MainWindow : Window
             var logsDirectory = Path.Combine(exeDirectory, "user", "logs");
             Directory.CreateDirectory(logsDirectory);
 
-            var id = string.IsNullOrWhiteSpace(titleId) ? "UNKNOWN" : titleId;
-            foreach (var invalid in Path.GetInvalidFileNameChars())
-            {
-                id = id.Replace(invalid, '_');
-            }
-
-            return Path.Combine(logsDirectory, $"{id}-{DateTime.Now:yyyyMMdd-HHmmss}.log");
+            return Path.Combine(logsDirectory, SessionLogFileName.Build(titleId, DateTime.Now));
         }
         catch (Exception)
         {
@@ -2702,16 +2696,12 @@ public partial class MainWindow : Window
         }
 
         var path = _settings.LogFilePath;
-        var id = string.IsNullOrWhiteSpace(titleId) ? "UNKNOWN" : titleId;
-        foreach (var invalid in Path.GetInvalidFileNameChars())
-        {
-            id = id.Replace(invalid.ToString(), string.Empty, StringComparison.Ordinal);
-        }
-
         var directory = Path.GetDirectoryName(path);
         var filename = Path.GetFileNameWithoutExtension(path);
         var extension = Path.GetExtension(path);
-        var timestampedName = $"{filename}-{id}-{DateTime.Now:yyyyMMdd-HHmmss}{extension}";
+        var sessionName = Path.GetFileNameWithoutExtension(
+            SessionLogFileName.Build(titleId, DateTime.Now));
+        var timestampedName = $"{filename}-{sessionName}{extension}";
         return string.IsNullOrEmpty(directory) ? timestampedName : Path.Combine(directory, timestampedName);
     }
 

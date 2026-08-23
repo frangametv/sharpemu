@@ -715,14 +715,8 @@ internal static partial class Program
     {
         var baseDirectory = AppContext.BaseDirectory;
         var logsDirectory = Path.Combine(baseDirectory, "user", "logs");
-        var name = TryReadTitleId(ebootPath) ?? "UNKNOWN";
-
-        foreach (var invalid in Path.GetInvalidFileNameChars())
-        {
-            name = name.Replace(invalid, '_');
-        }
-
-        return Path.Combine(logsDirectory, $"{name}-{DateTime.Now:yyyyMMdd-HHmmss}.log");
+        var titleId = TryReadTitleId(ebootPath);
+        return Path.Combine(logsDirectory, SessionLogFileName.Build(titleId, DateTime.Now));
     }
 
     private static string? TryReadTitleId(string? ebootPath)

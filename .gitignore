@@ -2,6 +2,8 @@
 # SPDX-License-Identifier: GPL-2.0-or-later
 
 PUBLISH_RELEASE.txt
+/build-fran6-local.ps1
+/build-fran6-local.bat
 [Dd]ebug/
 [Rr]elease/
 [Bb]in/

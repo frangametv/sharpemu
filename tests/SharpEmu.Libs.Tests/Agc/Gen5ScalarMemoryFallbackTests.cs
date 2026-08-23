@@ -608,4 +608,53 @@ public sealed class Gen5ScalarMemoryFallbackTests
         Assert.All(binding.ResourceDescriptor, word => Assert.Equal(0u, word));
         Assert.All(binding.SamplerDescriptor, word => Assert.Equal(0u, word));
     }
+
+    [Fact]
+    public void NullGlobalPointerGetsNonPersistentNeutralBinding()
+    {
+        var load = new Gen5ShaderInstruction(
+            0,
+            Gen5ShaderEncoding.Flat,
+            "GlobalLoadDword",
+            [],
+            [],
+            [Gen5Operand.Vector(0)],
+            new Gen5GlobalMemoryControl(
+                DwordCount: 1,
+                VectorAddress: 0,
+                VectorData: 0,
+                ScalarAddress: 0,
+                OffsetBytes: 0,
+                Glc: false,
+                Slc: false));
+        var end = new Gen5ShaderInstruction(
+            8,
+            Gen5ShaderEncoding.Sopp,
+            "SEndpgm",
+            [],
+            [],
+            [],
+            null);
+        var state = new Gen5ShaderState(
+            new Gen5ShaderProgram(0, [load, end]),
+            new uint[2],
+            null);
+        var ctx = new CpuContext(
+            new FakeCpuMemory(0x1000, 0x100),
+            Generation.Gen5);
+
+        Assert.True(
+            Gen5ShaderScalarEvaluator.TryEvaluate(
+                ctx,
+                state,
+                out var evaluation,
+                out var error),
+            error);
+        var binding = Assert.Single(evaluation.GlobalMemoryBindings);
+        Assert.Equal(0UL, binding.BaseAddress);
+        Assert.False(binding.DataPooled);
+        Assert.False(binding.WriteBackToGuest);
+        Assert.Equal(sizeof(uint), binding.DataLength);
+        Assert.All(binding.Data, value => Assert.Equal(0, value));
+    }
 }

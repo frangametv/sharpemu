@@ -607,26 +607,47 @@ public static partial class Gen5MslTranslator
                 condition = EmitCompareClass(instruction);
             }
             else if (opcode is
-                     "VCmpTruF32" or "VCmpxTruF32" or "VCmpTI32" or "VCmpTU32" or
+                     "VCmpTruF32" or "VCmpxTruF32" or
+                     "VCmpTruF16" or "VCmpxTruF16" or
+                     "VCmpTI32" or "VCmpTU32" or
                      "VCmpTU64" or "VCmpxTU64")
             {
                 condition = "true";
             }
             else if (opcode is
-                     "VCmpFF32" or "VCmpxFF32" or "VCmpFI32" or "VCmpFU32" or
+                     "VCmpFF32" or "VCmpxFF32" or
+                     "VCmpFF16" or "VCmpxFF16" or
+                     "VCmpFI32" or "VCmpFU32" or
                      "VCmpFU64" or "VCmpxFU64")
             {
                 condition = "false";
             }
-            else if (opcode is "VCmpOF32" or "VCmpxOF32")
+            else if (opcode is
+                     "VCmpOF32" or "VCmpxOF32" or
+                     "VCmpOF16" or "VCmpxOF16")
             {
-                condition = $"(!isnan({F(instruction, 0)}) && !isnan({F(instruction, 1)}))";
+                var left = opcode.EndsWith("F16", StringComparison.Ordinal)
+                    ? F16(instruction, 0)
+                    : F(instruction, 0);
+                var right = opcode.EndsWith("F16", StringComparison.Ordinal)
+                    ? F16(instruction, 1)
+                    : F(instruction, 1);
+                condition = $"(!isnan({left}) && !isnan({right}))";
             }
-            else if (opcode is "VCmpUF32" or "VCmpxUF32")
+            else if (opcode is
+                     "VCmpUF32" or "VCmpxUF32" or
+                     "VCmpUF16" or "VCmpxUF16")
             {
-                condition = $"(isnan({F(instruction, 0)}) || isnan({F(instruction, 1)}))";
+                var left = opcode.EndsWith("F16", StringComparison.Ordinal)
+                    ? F16(instruction, 0)
+                    : F(instruction, 0);
+                var right = opcode.EndsWith("F16", StringComparison.Ordinal)
+                    ? F16(instruction, 1)
+                    : F(instruction, 1);
+                condition = $"(isnan({left}) || isnan({right}))";
             }
-            else if (opcode.EndsWith("F32", StringComparison.Ordinal))
+            else if (opcode.EndsWith("F32", StringComparison.Ordinal) ||
+                     opcode.EndsWith("F16", StringComparison.Ordinal))
             {
                 // Ordered compares are the plain C operators (false on NaN);
                 // the Nxx forms are their unordered negations (true on NaN).
@@ -652,7 +673,13 @@ public static partial class Gen5MslTranslator
                     return false;
                 }
 
-                var comparison = $"({F(instruction, 0)} {op} {F(instruction, 1)})";
+                var left = opcode.EndsWith("F16", StringComparison.Ordinal)
+                    ? F16(instruction, 0)
+                    : F(instruction, 0);
+                var right = opcode.EndsWith("F16", StringComparison.Ordinal)
+                    ? F16(instruction, 1)
+                    : F(instruction, 1);
+                var comparison = $"({left} {op} {right})";
                 condition = unordered ? $"(!{comparison})" : comparison;
             }
             else if (opcode.EndsWith("U64", StringComparison.Ordinal))

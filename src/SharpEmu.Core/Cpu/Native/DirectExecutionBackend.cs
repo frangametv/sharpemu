@@ -3479,17 +3479,26 @@ public sealed unsafe partial class DirectExecutionBackend : INativeCpuBackend, I
 		return true;
 	}
 
-	private unsafe bool TryPatchTlsLoadInstruction(nint address, byte* source, int availableLength, int regionOffset)
+	private unsafe bool TryPatchTlsLoadInstruction(
+		nint address,
+		byte* source,
+		int availableLength,
+		int regionOffset)
 	{
 		if (availableLength < MinTlsPatchInstructionBytes)
 		{
 			return false;
 		}
 
-		// A bare 0xEB (JMP rel8) always owns a disp8 after it, so it can
-		// never be the last byte of a valid instruction. If it precedes our
-		// candidate, we're mid-instruction: reject and let the scan retry.
-		if (regionOffset >= 1 && source[-1] == 0xEB)
+		// Adapted from foufouadi/sharpemu@35b727f.
+		// A linear byte scan can land on the displacement of a preceding short
+		// jump. In the GTA V sequence EB 66 followed by a 66-prefixed FS:[0]
+		// load, treating the jump displacement as an operand-size prefix makes
+		// the patch overwrite that displacement and turns the forward jump into
+		// an infinite loop. EB always owns a following disp8, so a candidate
+		// immediately preceded by EB is provably not an instruction boundary.
+		if (regionOffset > 0 &&
+			!IsTlsPatchCandidateBoundary(regionOffset, source[-1]))
 		{
 			return false;
 		}
@@ -3545,6 +3554,9 @@ public sealed unsafe partial class DirectExecutionBackend : INativeCpuBackend, I
 
 		return PatchTlsLoadInstruction(address, instructionLength, destinationRegister);
 	}
+
+	internal static bool IsTlsPatchCandidateBoundary(int regionOffset, byte precedingByte) =>
+		regionOffset == 0 || precedingByte != 0xEB;
 
 	private unsafe bool PatchTlsLoadInstruction(nint address, int instructionLength, int destinationRegister)
 	{

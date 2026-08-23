@@ -1645,31 +1645,72 @@ public static partial class Gen5SpirvTranslator
                     SignedClass(0x020, 0x040, zero));
             }
             else if (opcode is
-                     "VCmpFF32" or "VCmpxFF32" or "VCmpFI32" or "VCmpFU32" or
+                     "VCmpFF32" or "VCmpxFF32" or
+                     "VCmpFF16" or "VCmpxFF16" or
+                     "VCmpFI32" or "VCmpFU32" or
                      "VCmpFU64" or "VCmpxFU64")
             {
                 condition = _module.ConstantBool(false);
             }
             else if (opcode is
-                     "VCmpTruF32" or "VCmpxTruF32" or "VCmpTI32" or "VCmpTU32" or
+                     "VCmpTruF32" or "VCmpxTruF32" or
+                     "VCmpTruF16" or "VCmpxTruF16" or
+                     "VCmpTI32" or "VCmpTU32" or
                      "VCmpTU64" or "VCmpxTU64")
             {
                 condition = _module.ConstantBool(true);
             }
             else if (opcode is
                      "VCmpOF32" or "VCmpxOF32" or
-                     "VCmpUF32" or "VCmpxUF32")
+                     "VCmpUF32" or "VCmpxUF32" or
+                     "VCmpOF16" or "VCmpxOF16" or
+                     "VCmpUF16" or "VCmpxUF16")
             {
-                var left = GetFloatSource(instruction, 0);
-                var right = GetFloatSource(instruction, 1);
+                var isHalf = opcode.EndsWith("F16", StringComparison.Ordinal);
+                var left = isHalf
+                    ? GetFloat16Source(instruction, 0)
+                    : GetFloatSource(instruction, 0);
+                var right = isHalf
+                    ? GetFloat16Source(instruction, 1)
+                    : GetFloatSource(instruction, 1);
                 var unordered = _module.AddInstruction(
                     SpirvOp.LogicalOr,
                     _boolType,
                     _module.AddInstruction(SpirvOp.IsNan, _boolType, left),
                     _module.AddInstruction(SpirvOp.IsNan, _boolType, right));
-                condition = opcode is "VCmpUF32" or "VCmpxUF32"
+                condition = opcode is
+                    "VCmpUF32" or "VCmpxUF32" or
+                    "VCmpUF16" or "VCmpxUF16"
                     ? unordered
                     : _module.AddInstruction(SpirvOp.LogicalNot, _boolType, unordered);
+            }
+            else if (opcode.EndsWith("F16", StringComparison.Ordinal))
+            {
+                var left = GetFloat16Source(instruction, 0);
+                var right = GetFloat16Source(instruction, 1);
+                var operation = opcode switch
+                {
+                    "VCmpLtF16" or "VCmpxLtF16" => SpirvOp.FOrdLessThan,
+                    "VCmpEqF16" or "VCmpxEqF16" => SpirvOp.FOrdEqual,
+                    "VCmpLeF16" or "VCmpxLeF16" => SpirvOp.FOrdLessThanEqual,
+                    "VCmpGtF16" or "VCmpxGtF16" => SpirvOp.FOrdGreaterThan,
+                    "VCmpLgF16" or "VCmpxLgF16" => SpirvOp.FOrdNotEqual,
+                    "VCmpGeF16" or "VCmpxGeF16" => SpirvOp.FOrdGreaterThanEqual,
+                    "VCmpNeqF16" or "VCmpxNeqF16" => SpirvOp.FUnordNotEqual,
+                    "VCmpNltF16" or "VCmpxNltF16" => SpirvOp.FUnordGreaterThanEqual,
+                    "VCmpNleF16" or "VCmpxNleF16" => SpirvOp.FUnordGreaterThan,
+                    "VCmpNgtF16" or "VCmpxNgtF16" => SpirvOp.FUnordLessThanEqual,
+                    "VCmpNgeF16" or "VCmpxNgeF16" => SpirvOp.FUnordLessThan,
+                    "VCmpNlgF16" or "VCmpxNlgF16" => SpirvOp.FUnordEqual,
+                    _ => SpirvOp.Nop,
+                };
+                if (operation == SpirvOp.Nop)
+                {
+                    error = $"unsupported half compare {opcode}";
+                    return false;
+                }
+
+                condition = _module.AddInstruction(operation, _boolType, left, right);
             }
             else if (opcode is not ("VCmpClassF32" or "VCmpxClassF32") &&
                      opcode.EndsWith("F32", StringComparison.Ordinal))

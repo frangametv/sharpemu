@@ -37,4 +37,20 @@ public sealed class TlsScanWindowTests
                 entryPoint: 0x0000000000300010UL,
                 allocationBase: 0x0000000000200000UL));
     }
+
+    [Theory]
+    [InlineData(0, 0xEB, true)]
+    [InlineData(1, 0x90, true)]
+    [InlineData(1, 0xEB, false)]
+    public void PatchCandidateRejectsShortJumpDisplacement(
+        int regionOffset,
+        byte precedingByte,
+        bool expected)
+    {
+        Assert.Equal(
+            expected,
+            DirectExecutionBackend.IsTlsPatchCandidateBoundary(
+                regionOffset,
+                precedingByte));
+    }
 }
