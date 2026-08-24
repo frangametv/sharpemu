@@ -125,6 +125,29 @@ public static partial class AgcExports
     // Multiple producers can share one target label; last-writer-wins would
     // starve waits on the others.
     private static readonly Dictionary<ulong, List<ulong>> _cbReleaseMemTargets = new();
+    // CMASK meta-state tracking: maps colour-buffer addresses to their
+    // compression metadata.  Keyed by colour-buffer base address so the
+    // consumption path (which only knows the surface address) can query
+    // directly without a reverse lookup.
+    private record struct MetaSurfaceInfo(
+        ulong CmaskAddress,
+        uint ClearWord0,
+        uint ClearWord1,
+        bool IsCleared);
+    private static readonly Dictionary<ulong, MetaSurfaceInfo> _metaSurfaces = new();
+    // Reverse map: CMASK address → colour-buffer address.  Needed so
+    // CheckCmaskWrite (which only sees the write target address) can
+    // find the owning surface.
+    private static readonly Dictionary<ulong, ulong> _cmaskToColorBuffer = new();
+    // Guards _metaSurfaces and _cmaskToColorBuffer.  Two threads touch them:
+    // the parse thread (registration in TrackCmaskAddresses, CheckCmaskWrite
+    // from DMA/compute writes, EFC consumption) and the render thread
+    // (MarkAllSurfacesCleared at guest flip, IsMetaClearedForSurface /
+    // ConsumeMetaClear / GetMetaClearValue at pass-record time).  Plain
+    // Dictionaries corrupt under concurrent write, so every access below
+    // holds this gate.  Keep the critical sections tiny and never block on
+    // anything external while holding it.
+    private static readonly object _metaSurfaceGate = new();
     // header -> {ring base, write cursor} of the last submitted slice.
     // Submissions stay cursor-bounded since rings aren't zeroed. Lap
     // distinguishes a stale cursor from a previous pass over the same base.
@@ -1108,15 +1131,20 @@ public static partial class AgcExports
     private const uint CbColor0Base = 0x318;
     private const uint CbColorRegisterStride = 15;
     private const uint CbColor0Info = 0x31C;
+    private const uint CbColor0Cmask = 0x31F;
     private const uint CbColor0ClearWord0 = 0x323;
     private const uint CbColor0ClearWord1 = 0x324;
+    private const uint CbColor0DccBase = 0x325;
     private const uint CbColor0BaseExt = 0x390;
+    private const uint CbColor0CmaskBaseExt = 0x398;
+    private const uint CbColor0DccBaseExt = 0x3A8;
     private const uint CbColor0Attrib2 = 0x3B0;
     private const uint CbColor0Attrib3 = 0x3B8;
     // CB_COLORn_INFO.DCC_ENABLE (gc_10_1_0_sh_mask.h). On GFX10 the legacy
     // FAST_CLEAR and COMPRESSION bits stay clear because DCC, not CMASK,
     // carries the compression.
     private const uint CbColorInfoDccEnableMask = 1u << 28;
+    private const uint CbColorInfoFastClearEnableMask = 1u << 12;
     private const uint CbBlend0Control = 0x1E0;
     private const uint PaScModeCntl0 = 0x292;
     // GFX10 DB context registers (register byte address minus 0x28000, / 4).
@@ -1138,8 +1166,8 @@ public static partial class AgcExports
     private const uint EsUserDataRegister = 0xCC;
     private const uint ComputeUserDataRegister = 0x240;
     private const uint NggUserDataScalarRegisterBase = 8;
-    private const uint Gen5TextureFormatR8G8B8A8Unorm = 10;
-    private const uint Gen5TextureFormatR16G16B16A16Float = 12;
+    internal const uint Gen5TextureFormatR8G8B8A8Unorm = 10;
+    internal const uint Gen5TextureFormatR16G16B16A16Float = 12;
     private const uint Gen5TextureType1D = 8;
     private const uint Gen5TextureType2D = 9;
     private const uint Gen5TextureType3D = 10;
@@ -6752,6 +6780,10 @@ public static partial class AgcExports
 
             if (op == ItNop && register == RDmaData && length >= 7)
             {
+                // Ensure CMASK addresses are tracked before DMA fills
+                var tempTargets = GetRenderTargets(state.CxRegisters);
+                TrackCmaskAddresses(state.CxRegisters, tempTargets);
+
                 ApplySubmittedDmaData(
                     ctx,
                     gpuState,
@@ -6919,6 +6951,7 @@ public static partial class AgcExports
             {
                 TraceFramePacketSummary(state);
                 SyncCpuWrittenGuestImages(ctx);
+                GpuWaitRegistry.AdvanceFrame();
                 if (!TryReadUInt32(ctx, currentAddress + 4, out var videoOutHandle) ||
                     !TryReadUInt32(ctx, currentAddress + 8, out var displayBufferIndexRaw) ||
                     !TryReadUInt32(ctx, currentAddress + 12, out var flipMode) ||
@@ -8119,6 +8152,13 @@ public static partial class AgcExports
         uint? fillValue,
         ulong sourceAddress = 0)
     {
+        // Check if this DMA write targets a CMASK address (shadPS4's FillBuffer
+        // logic: when a buffer fill targets CMASK metadata, mark it as "all clear")
+        if (fillValue is { } fillVal && fillVal == 0)
+        {
+            CheckCmaskWrite(destinationAddress, null);
+        }
+
         var hasImage = GuestGpu.Current.TryGetGuestImageExtent(
             destinationAddress,
             out var width,
@@ -9024,14 +9064,20 @@ public static partial class AgcExports
 
         if (hasCurrent && GpuWaitRegistry.Compare(waiter, currentValue))
         {
-            if (IsProducedCreditEligible(waiter))
+            // Value satisfies the condition, but only bypass if the label was
+            // written in the current frame. A stale label from a previous frame
+            // means the producer hasn't written yet this frame — must wait.
+            if (GpuWaitRegistry.IsLabelFresh(ctx.Memory, waitAddress))
             {
-                // Mark the matching producer edge observed while the label is
-                // still live, so it cannot be replayed after a later reset.
-                GpuWaitRegistry.TryConsumeProducedSatisfaction(waiter);
-            }
+                if (IsProducedCreditEligible(waiter))
+                {
+                    // Mark the matching producer edge observed while the label is
+                    // still live, so it cannot be replayed after a later reset.
+                    GpuWaitRegistry.TryConsumeProducedSatisfaction(waiter);
+                }
 
-            return false; // already satisfied — keep parsing
+                return false; // satisfied by current-frame write — keep parsing
+            }
         }
 
         if (!_gpuWaitSuspendEnabled)
@@ -10166,7 +10212,8 @@ public static partial class AgcExports
         var hasPsInputEna = state.CxRegisters.TryGetValue(SpiPsInputEna, out var psInputEna);
         var hasPsInputAddr = state.CxRegisters.TryGetValue(SpiPsInputAddr, out var psInputAddr);
         state.UcRegisters.TryGetValue(VgtPrimitiveType, out var primitiveType);
-        var renderTargets = GetRenderTargets(state.CxRegisters);
+var renderTargets = GetRenderTargets(state.CxRegisters);
+        TrackCmaskAddresses(state.CxRegisters, renderTargets);
         var drawSequence = ++gpuState.WorkSequence;
         if (state.PendingTargetlessDraw is { } stalePendingDraw)
         {
@@ -10186,6 +10233,31 @@ public static partial class AgcExports
         if (TryGetCbColorControlMode(state.CxRegisters, out var cbMode) &&
             IsCbMetadataColorMode(cbMode))
         {
+            // EliminateFastClear: the game explicitly asks the CB to clear
+            // the fast-clear metadata and the colour buffer.
+            if (cbMode == (uint)CbColorMode.EliminateFastClear &&
+                renderTargets.Count > 0 &&
+                renderTargets[0].Address != 0)
+            {
+                var targetAddr = renderTargets[0].Address;
+                bool requestClear;
+                lock (_metaSurfaceGate)
+                {
+                    requestClear =
+                        _metaSurfaces.TryGetValue(targetAddr, out var meta) &&
+                        meta.IsCleared;
+                    if (requestClear)
+                    {
+                        _metaSurfaces[targetAddr] = meta with { IsCleared = false };
+                    }
+                }
+
+                if (requestClear)
+                {
+                    VulkanVideoPresenter.RequestGuestColorClear(targetAddr);
+                }
+            }
+
             if (_traceAgcShader || ShouldTraceHotPath(ref _cbMetadataSkipTraceCount))
             {
                 TraceAgcShader(
@@ -10422,6 +10494,34 @@ public static partial class AgcExports
                     index: true);
                 state.TranslatedDraw = null;
                 return;
+            }
+
+            // DbRenderControl CLEARON (bit0): when set, the CB clears color
+            // targets on first draw. Handle color targets (depth is already
+            // handled by DecodeDepthState).
+            if (state.CxRegisters.TryGetValue(DbRenderControl, out var rc) && (rc & 0x1u) != 0)
+            {
+                foreach (var rt in translatedDraw.RenderTargets)
+                {
+                    if (rt.Address != 0)
+                    {
+                        VulkanVideoPresenter.RequestGuestColorClear(rt.Address);
+                    }
+                }
+            }
+
+            // CMASK fast clear: CB_COLORn_INFO.FAST_CLEAR (bit12) set on
+            // one or more targets. The CB clears via CMASK before the draw
+            // writes; mark targets for clear-on-first-use.
+            if (IsCmaskFastClearDraw(state.CxRegisters, translatedDraw.RenderTargets))
+            {
+                foreach (var rt in translatedDraw.RenderTargets)
+                {
+                    if (rt.Address != 0)
+                    {
+                        VulkanVideoPresenter.RequestGuestColorClear(rt.Address);
+                    }
+                }
             }
 
             var firstTarget = translatedDraw.RenderTargets.FirstOrDefault();
@@ -13193,6 +13293,193 @@ public static partial class AgcExports
     }
 
     /// <summary>
+    /// GFX10 CMASK fast clear: CB_COLORn_INFO.FAST_CLEAR (bit 12) set on
+    /// one or more targets. The CB clears via CMASK before the draw writes;
+    /// mark targets for clear-on-first-use. Unlike DCC, the draw content
+    /// IS written (not dropped). Dead Cells uses DbRenderControl CLEARON
+    /// instead (bit0), not this mechanism.
+    /// </summary>
+    private static bool IsCmaskFastClearDraw(
+        IReadOnlyDictionary<uint, uint> registers,
+        IReadOnlyList<RenderTargetDescriptor> renderTargets)
+    {
+        foreach (var rt in renderTargets)
+        {
+            var stride = rt.Slot * CbColorRegisterStride;
+            if (registers.TryGetValue(CbColor0Info + stride, out var info) &&
+                (info & CbColorInfoFastClearEnableMask) != 0)
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /// <summary>
+    /// Registers the CMASK metadata mapping for each colour buffer.
+    /// Does NOT mark as cleared — clearing only happens on actual clear
+    /// events (DMA fill, compute write, EFC draw).
+    /// </summary>
+    private static void TrackCmaskAddresses(
+        IReadOnlyDictionary<uint, uint> registers,
+        IReadOnlyList<RenderTargetDescriptor> renderTargets)
+    {
+        foreach (var rt in renderTargets)
+        {
+            var stride = rt.Slot * CbColorRegisterStride;
+
+            // CMASK metadata address (legacy GCN path).
+            var cmaskRegAddr = CbColor0Cmask + stride;
+            registers.TryGetValue(cmaskRegAddr, out var cmaskLow);
+            var cmaskExtAddr = CbColor0CmaskBaseExt + rt.Slot;
+            registers.TryGetValue(cmaskExtAddr, out var cmaskExt);
+            var cmaskAddress = ((ulong)(cmaskExt & 0xFFu) << 40) |
+                               ((ulong)(cmaskLow & 0x1FFFFFFFu) << 8);
+
+            // DCC metadata address (GFX10+ primary path).
+            var dccRegAddr = CbColor0DccBase + stride;
+            registers.TryGetValue(dccRegAddr, out var dccLow);
+            var dccExtAddr = CbColor0DccBaseExt + rt.Slot;
+            registers.TryGetValue(dccExtAddr, out var dccExt);
+            var dccAddress = ((ulong)(dccExt & 0xFFu) << 40) |
+                             ((ulong)(dccLow & 0x1FFFFFFFu) << 8);
+
+            // Prefer CMASK if present; fall back to DCC.
+            var metaAddress = cmaskAddress != 0 ? cmaskAddress : dccAddress;
+
+            var cw0Addr = CbColor0ClearWord0 + stride;
+            var cw1Addr = CbColor0ClearWord1 + stride;
+            registers.TryGetValue(cw0Addr, out var cw0);
+            registers.TryGetValue(cw1Addr, out var cw1);
+
+            lock (_metaSurfaceGate)
+            {
+                _metaSurfaces[rt.Address] = new MetaSurfaceInfo(
+                    metaAddress, cw0, cw1,
+                    // Re-registration runs on every draw; keep the cleared state
+                    // so a mark-clear event survives until the pass consumes it.
+                    // If the metadata binding changed, the old state refers to
+                    // the old metadata and must be reset.
+                    IsCleared: _metaSurfaces.TryGetValue(rt.Address, out var prev) &&
+                               prev.IsCleared &&
+                               prev.CmaskAddress == metaAddress);
+                if (metaAddress != 0)
+                {
+                    _cmaskToColorBuffer[metaAddress] = rt.Address;
+                }
+            }
+        }
+    }
+
+    /// <summary>
+    /// Checks if a write targets a registered CMASK address. If so,
+    /// marks the owning colour buffer's metadata as "all clear".
+    /// </summary>
+    private static void CheckCmaskWrite(
+        ulong writeAddress,
+        SubmittedGpuState? gpuState)
+    {
+        if (writeAddress == 0)
+        {
+            return;
+        }
+
+        lock (_metaSurfaceGate)
+        {
+            // Exact match: write directly to a registered CMASK address.
+            if (_cmaskToColorBuffer.TryGetValue(writeAddress, out var cbAddr))
+            {
+                if (_metaSurfaces.TryGetValue(cbAddr, out var meta))
+                {
+                    _metaSurfaces[cbAddr] = meta with { IsCleared = true };
+                }
+
+                return;
+            }
+
+            // CMASK surfaces are small (typically ≤ 4 KiB).  Check the ±1024
+            // window around each registered address to catch partial writes.
+            foreach (var (cmaskAddr, colorBufAddr) in _cmaskToColorBuffer)
+            {
+                if (writeAddress >= cmaskAddr && writeAddress < cmaskAddr + 1024)
+                {
+                    if (_metaSurfaces.TryGetValue(colorBufAddr, out var meta))
+                    {
+                        _metaSurfaces[colorBufAddr] = meta with { IsCleared = true };
+                    }
+
+                    return;
+                }
+            }
+        }
+    }
+
+    /// <summary>
+    /// Returns true if the colour buffer at <paramref name="colorBufferAddress"/>
+    /// has pending CMASK "all clear" metadata — i.e. the surface was fast-cleared
+    /// but not yet rendered into.
+    /// </summary>
+    internal static bool IsMetaClearedForSurface(ulong colorBufferAddress)
+    {
+        lock (_metaSurfaceGate)
+        {
+            return _metaSurfaces.TryGetValue(colorBufferAddress, out var meta) &&
+                   meta.IsCleared;
+        }
+    }
+
+    /// <summary>
+    /// Consumes the "all clear" state for the given surface, marking it dirty.
+    /// Called after the first render pass uses LoadOp.Clear.
+    /// </summary>
+    internal static void ConsumeMetaClear(ulong colorBufferAddress)
+    {
+        lock (_metaSurfaceGate)
+        {
+            if (_metaSurfaces.TryGetValue(colorBufferAddress, out var meta))
+            {
+                _metaSurfaces[colorBufferAddress] = meta with { IsCleared = false };
+            }
+        }
+    }
+
+    /// <summary>
+    /// Returns the CB clear word values for the given colour buffer.
+    /// </summary>
+    internal static (uint Cw0, uint Cw1) GetMetaClearValue(ulong colorBufferAddress)
+    {
+        lock (_metaSurfaceGate)
+        {
+            if (_metaSurfaces.TryGetValue(colorBufferAddress, out var meta))
+            {
+                return (meta.ClearWord0, meta.ClearWord1);
+            }
+        }
+
+        return (0, 0);
+    }
+
+    /// <summary>
+    /// Marks all registered surfaces as "all clear".  Called at guest flip
+    /// (frame boundary).  Real hardware applies a fast clear / load-clear to
+    /// its per-frame surfaces every frame; the emulator restores that
+    /// per-frame clear here, per surface, at flip time.  This is the
+    /// per-surface successor of the removed flip-arm heuristic (which reset
+    /// only the first multi-attachment group).
+    /// </summary>
+    internal static void MarkAllSurfacesCleared()
+    {
+        lock (_metaSurfaceGate)
+        {
+            foreach (var (addr, meta) in _metaSurfaces)
+            {
+                _metaSurfaces[addr] = meta with { IsCleared = true };
+            }
+        }
+    }
+
+    /// <summary>
     /// True when the draw's float32x3 position stream spans the full clip
     /// rectangle, i.e. x and y both reach -1 and +1.
     /// </summary>
@@ -13646,7 +13933,7 @@ public static partial class AgcExports
     private static readonly HashSet<ulong> _sampledRenderTargets = new();
     private static readonly object _renderTargetProbeGate = new();
     private static long _renderTargetSampleTraceCount;
-    private static long _indirectDrawProbeCount;
+private static long _indirectDrawProbeCount;
     private static long _indirectDrawEmitCount;
     private static long _indirectDrawEmitRejectCount;
     private static long _indirectMultiProbeCount;
@@ -16575,6 +16862,10 @@ public static partial class AgcExports
                     shaderAddress,
                     binding.Opcode);
 
+                // Check if this compute shader writes to a CMASK address
+                // (shadPS4's IsComputeMetaClear logic)
+                CheckCmaskWrite(texture.Address, gpuState);
+
                 TraceAgcShader(
                     $"agc.compute_writer addr=0x{texture.Address:X16} " +
                     $"fmt={texture.Format} num={texture.NumberType} tile={texture.TileMode} " +
@@ -17181,11 +17472,14 @@ public static partial class AgcExports
                     return;
                 }
 
-                GuestImageWriteTracker.Track(
+GuestImageWriteTracker.Track(
                     destinationAddress,
                     (ulong)output.Length,
                     VulkanVideoPresenter.CurrentGuestWorkSequenceForDiagnostics,
                     "agc.constant-fill");
+
+                VulkanVideoPresenter.RequestGuestColorClear(destinationAddress);
+
             },
             $"constant_fill dst=0x{destinationAddress:X16} bytes={output.Length}");
         description =

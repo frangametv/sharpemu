@@ -65,7 +65,13 @@ internal static class GpuWaitRegistry
     private readonly record struct ProducedLabelState(
         ulong Value,
         long Generation,
-        long ConsumedGeneration);
+        long ConsumedGeneration,
+        long FrameId);
+
+    // Frame-staleness guard: tracks the frame ID of each label write so that
+    // WAIT_REG_MEM in frame N+1 is not satisfied by a stale write from frame N.
+    private static readonly Dictionary<(object, ulong), long> _labelFrameIds = new();
+    private static long _currentFrameId;
 
     private static readonly Dictionary<(object, ulong), ProducedLabelState> _lastProduced = new();
     private static long _producedGeneration;
@@ -91,6 +97,34 @@ internal static class GpuWaitRegistry
         }
 
         return memory;
+    }
+
+    /// <summary>
+    /// Advances the frame counter. Called at each frame boundary (flip) so that
+    /// stale label writes from previous frames cannot satisfy WAIT_REG_MEM.
+    /// </summary>
+    public static void AdvanceFrame()
+    {
+        System.Threading.Interlocked.Increment(ref _currentFrameId);
+    }
+
+    /// <summary>
+    /// Returns true if the label at (memory, address) was written in the
+    /// current frame, or has never been written (uninitialized).
+    /// Only labels written in a PREVIOUS frame are considered stale.
+    /// </summary>
+    public static bool IsLabelFresh(object memory, ulong address)
+    {
+        memory = Canonicalize(memory)!;
+        lock (_gate)
+        {
+            if (!_labelFrameIds.TryGetValue((memory, address), out var frameId))
+            {
+                return true; // never written — treat as fresh (not stale)
+            }
+
+            return frameId >= System.Threading.Volatile.Read(ref _currentFrameId);
+        }
     }
 
     public static int Count
@@ -750,14 +784,17 @@ internal static class GpuWaitRegistry
 
             var key = (memory, address);
             var generation = ++_producedGeneration;
+            var frameId = System.Threading.Volatile.Read(ref _currentFrameId);
             var previousConsumed = _lastProduced.TryGetValue(key, out var previous)
                 ? previous.ConsumedGeneration
                 : 0;
             var produced = new ProducedLabelState(
                 value,
                 generation,
-                previousConsumed);
+                previousConsumed,
+                frameId);
             _lastProduced[key] = produced;
+            _labelFrameIds[key] = frameId;
             _recoveredProducerless.Remove((memory, address));
 
             // A write that finds a live waiter has already spent this edge: the
@@ -797,6 +834,7 @@ internal static class GpuWaitRegistry
             var key = (memory, waiter.WaitAddress);
             if (!_lastProduced.TryGetValue(key, out var produced) ||
                 produced.Generation == produced.ConsumedGeneration ||
+                produced.FrameId < System.Threading.Volatile.Read(ref _currentFrameId) ||
                 !Compare(waiter, produced.Value))
             {
                 return false;
@@ -925,9 +963,11 @@ internal static class GpuWaitRegistry
         {
             _waiters.Clear();
             _lastProduced.Clear();
+            _labelFrameIds.Clear();
             _recoveredProducerless.Clear();
             _learnedProducerBackedDeadlocks.Clear();
             _producedGeneration = 0;
+            _currentFrameId = 0;
         }
     }
 }

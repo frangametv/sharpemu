@@ -3536,29 +3536,6 @@ public static partial class Gen5SpirvTranslator
                 _module.AddInstruction(SpirvOp.UConvert, _uintType, high));
         }
 
-        private uint EmitFloatBinary(
-            Gen5ShaderInstruction instruction,
-            SpirvOp operation,
-            bool reverse = false)
-        {
-            var left = GetFloatSource(instruction, reverse ? 1 : 0);
-            var right = GetFloatSource(instruction, reverse ? 0 : 1);
-            return EmitFloatResult(
-                instruction,
-                _module.AddInstruction(operation, _floatType, left, right));
-        }
-
-        private uint EmitFloatExtBinary(
-            Gen5ShaderInstruction instruction,
-            uint operation) =>
-            EmitFloatResult(
-                instruction,
-                Ext(
-                    operation,
-                    _floatType,
-                    GetFloatSource(instruction, 0),
-                    GetFloatSource(instruction, 1)));
-
         private uint EmitFloat16Binary(
             Gen5ShaderInstruction instruction,
             uint destination,
@@ -3585,6 +3562,29 @@ public static partial class Gen5SpirvTranslator
                     _floatType,
                     GetFloat16Source(instruction, 0),
                     GetFloat16Source(instruction, 1)));
+
+        private uint EmitFloatBinary(
+            Gen5ShaderInstruction instruction,
+            SpirvOp operation,
+            bool reverse = false)
+        {
+            var left = GetFloatSource(instruction, reverse ? 1 : 0);
+            var right = GetFloatSource(instruction, reverse ? 0 : 1);
+            return EmitFloatResult(
+                instruction,
+                _module.AddInstruction(operation, _floatType, left, right));
+        }
+
+        private uint EmitFloatExtBinary(
+            Gen5ShaderInstruction instruction,
+            uint operation) =>
+            EmitFloatResult(
+                instruction,
+                Ext(
+                    operation,
+                    _floatType,
+                    GetFloatSource(instruction, 0),
+                    GetFloatSource(instruction, 1)));
 
         private uint EmitFloatTernaryExt(
             Gen5ShaderInstruction instruction,
