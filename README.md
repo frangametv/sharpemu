@@ -25,11 +25,11 @@ SPDX-License-Identifier: GPL-2.0-or-later
 </p>
 
 > [!IMPORTANT]
-> ### Fran6 is now in development: the focus is on rendering!
-> **Fran5 has been released**, and I am now working on Fran6's rendering path,
-> including the shaders, text, menus and 3D graphics after the intro.
-> In my current tests, this fork progresses further than upstream `main`: after the
-> complete synchronized intro, the game keeps running and its in-game music can be heard.
+> ### Fran6: GTA V now reaches the game menu!
+> **Fran6 has been released.** Grand Theft Auto V now completes its introduction
+> and reaches the game menu; this is the first time this milestone has been reached on SharpEmu.
+> With Fran7, my main goal will be to improve rendering, stability and performance,
+> and continue progressing towards gameplay in both Astro Bot and GTA V.
 
 > [!WARNING]
 > SharpEmu is at a very early stage. Astro Bot and Grand Theft Auto V are
@@ -55,16 +55,17 @@ verified problem and test again.
 - Preserve and improve the valuable Acelogic work already integrated.
 - Continue investigating Astro Bot's title/menu rendering, shader and runtime
   paths now that the intro video plays smoothly.
-- Advance GTA V through loader, kernel, audio, AGC and GPU failures.
+- Advance GTA V beyond its newly reached game menu and improve its rendering,
+  stability and performance.
 - Improve Vulkan on Windows/Linux and Metal/MoltenVK support on macOS.
 - Add focused regression tests for every fix that can be reproduced safely.
 
 SharpEmu can already load real `eboot.bin` files, execute native CPU code and
-load system modules. In Fran5, Astro Bot can display its complete intro video
-with fluid, synchronized playback and can advance to the title controller in
-the validated Windows test. Text, menu and guest 3D rendering after the video
-remain incomplete and will be the main focus of Fran6. SharpEmu is not yet a
-general-purpose or stable PS5 emulator.
+load system modules. Fran5 enabled Astro Bot to display its complete,
+synchronized intro video and advance to the title controller in the validated
+Windows test. Fran6 now advances Grand Theft Auto V through its introduction
+and reaches the game menu. Text, menu and guest 3D rendering are still
+incomplete, and SharpEmu is not yet a general-purpose or stable PS5 emulator.
 
 ## Download and Run
 

@@ -904,6 +904,8 @@ internal static unsafe class VulkanVideoPresenter
         "346E080C9952918F2BB22A1D9E2FD73D8381F2B43A21DD3B60950BA75D1180EA";
     private const string AmdWindowsFaultingGraphicsFragmentDigest =
         "D17904BBF37B1B9C6E7CF6C8222AF540340A2BB1B4B5DB66EE477934DAB3C3AA";
+    private const string AmdWindowsFaultingGraphicsFragmentDigest2 =
+        "C710C7055121A5C5E2821E6765EBEAE4E130AD17120D8986F14849534D57DC00";
 
     internal static bool ShouldQuarantineAmdWindowsComputeShader(
         uint vendorId,
@@ -934,9 +936,28 @@ internal static unsafe class VulkanVideoPresenter
                 vertexDigest,
                 AmdWindowsFaultingGraphicsVertexDigest,
                 StringComparison.OrdinalIgnoreCase) &&
+            (string.Equals(
+                 fragmentDigest,
+                 AmdWindowsFaultingGraphicsFragmentDigest,
+                 StringComparison.OrdinalIgnoreCase) ||
+             string.Equals(
+                 fragmentDigest,
+                 AmdWindowsFaultingGraphicsFragmentDigest2,
+                 StringComparison.OrdinalIgnoreCase));
+    }
+
+    internal static bool ShouldUseAmdWindowsFullscreenVertexFallback(
+        uint vendorId,
+        bool isWindows,
+        string vertexDigest,
+        string? configuredValue)
+    {
+        return isWindows &&
+            vendorId == AmdVendorId &&
+            !string.Equals(configuredValue, "0", StringComparison.Ordinal) &&
             string.Equals(
-                fragmentDigest,
-                AmdWindowsFaultingGraphicsFragmentDigest,
+                vertexDigest,
+                AmdWindowsFaultingGraphicsVertexDigest,
                 StringComparison.OrdinalIgnoreCase);
     }
 
@@ -4133,6 +4154,8 @@ internal static unsafe class VulkanVideoPresenter
             new(StringComparer.Ordinal);
         private readonly HashSet<string> _dumpedAmdGraphicsPipelines =
             new(StringComparer.Ordinal);
+        private readonly HashSet<string> _loggedAmdGraphicsVertexFallbacks =
+            new(StringComparer.Ordinal);
         private readonly Dictionary<GraphicsPipelineKey, Pipeline> _graphicsPipelines = new();
         private readonly Dictionary<GuestSampler, Sampler> _samplers = new();
         private readonly Dictionary<byte[], string> _shaderDigests =
@@ -5235,7 +5258,8 @@ internal static unsafe class VulkanVideoPresenter
                     $"compute_no_opt={(_disableComputePipelineOptimization ? 1 : 0)} " +
                     $"graphics_no_opt={(_disableGraphicsPipelineOptimization ? 1 : 0)} " +
                     $"native_compute_subgroups={(disableNativeComputeSubgroups ? 0 : 1)} " +
-                    "compute_quarantine=automatic graphics_quarantine=automatic");
+                    "compute_quarantine=automatic graphics_quarantine=automatic " +
+                    "fullscreen_vertex_fallback=automatic");
             }
             VideoOutExports.SetSelectedGpuName(selectedName);
             if (_window is not null)
@@ -8338,7 +8362,29 @@ internal static unsafe class VulkanVideoPresenter
             ulong shaderAddress = 0)
         {
             var isTitleDraw = IsTitleDraw(draw.VertexBuffers);
-            var forceFullscreenVertex = _forceFullscreenPipeline ||
+            var originalVertexDigest = _amdWindowsDriverSafety
+                ? GetShaderDigest(draw.VertexSpirv)
+                : string.Empty;
+            var useAmdFullscreenVertexFallback =
+                ShouldUseAmdWindowsFullscreenVertexFallback(
+                    _amdWindowsDriverSafety ? AmdVendorId : 0,
+                    OperatingSystem.IsWindows(),
+                    originalVertexDigest,
+                    Environment.GetEnvironmentVariable(
+                        "SHARPEMU_VK_AMD_FULLSCREEN_VERTEX_FALLBACK"));
+            if (useAmdFullscreenVertexFallback &&
+                _loggedAmdGraphicsVertexFallbacks.Add(originalVertexDigest))
+            {
+                Console.Error.WriteLine(
+                    $"[LOADER][WARN] vk.amd_graphics_vertex_fallback " +
+                    $"shader=0x{shaderAddress:X16} vs={originalVertexDigest[..16]} " +
+                    "action=fixed-fullscreen-vertex " +
+                    "reason=known-radeon-driver-av " +
+                    "override=SHARPEMU_VK_AMD_FULLSCREEN_VERTEX_FALLBACK=0");
+            }
+
+            var forceFullscreenVertex = useAmdFullscreenVertexFallback ||
+                _forceFullscreenPipeline ||
                 _forceFullscreenVertex ||
                 isTitleDraw && _forceTitleFullscreenVertex ||
                 shaderAddress != 0 && AddressListContains(
@@ -14530,7 +14576,15 @@ internal static unsafe class VulkanVideoPresenter
 
             var vertexDigest = GetShaderDigest(draw.VertexSpirv);
             var fragmentDigest = GetShaderDigest(draw.PixelSpirv);
-            if (ShouldQuarantineAmdWindowsGraphicsPipeline(
+            var useAmdFullscreenVertexFallback =
+                ShouldUseAmdWindowsFullscreenVertexFallback(
+                    _amdWindowsDriverSafety ? AmdVendorId : 0,
+                    OperatingSystem.IsWindows(),
+                    vertexDigest,
+                    Environment.GetEnvironmentVariable(
+                        "SHARPEMU_VK_AMD_FULLSCREEN_VERTEX_FALLBACK"));
+            if (!useAmdFullscreenVertexFallback &&
+                ShouldQuarantineAmdWindowsGraphicsPipeline(
                     _amdWindowsDriverSafety ? AmdVendorId : 0,
                     OperatingSystem.IsWindows(),
                     vertexDigest,
