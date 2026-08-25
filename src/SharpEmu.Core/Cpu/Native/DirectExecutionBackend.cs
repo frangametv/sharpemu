@@ -3557,6 +3557,77 @@ public sealed unsafe partial class DirectExecutionBackend : INativeCpuBackend, I
 		return PatchTlsLoadInstruction(address, instructionLength, destinationRegister);
 	}
 
+	// Kept for the upstream TLS-boundary regression tests. The production
+	// scanner above already decodes instruction boundaries with Iced, so it
+	// does not need this byte-window fallback.
+	internal static bool IsTlsLoadCandidateInsideShortJump(ReadOnlySpan<byte> region, int candidateOffset)
+	{
+		if ((uint)candidateOffset >= (uint)region.Length ||
+			candidateOffset < 1 ||
+			region[candidateOffset - 1] != 0xEB)
+		{
+			return false;
+		}
+
+		if (IsRel8ControlFlowInstructionEndingAtCandidate(region, candidateOffset))
+		{
+			return false;
+		}
+
+		return true;
+	}
+
+	private static bool IsRel8ControlFlowInstructionEndingAtCandidate(
+		ReadOnlySpan<byte> region,
+		int candidateOffset)
+	{
+		if (candidateOffset < 2)
+		{
+			return false;
+		}
+
+		var branchOffset = candidateOffset - 2;
+		var opcode = region[branchOffset];
+		if (!((opcode >= 0x70 && opcode <= 0x7F) ||
+			opcode is >= 0xE0 and <= 0xE3 ||
+			opcode == 0xEB))
+		{
+			return false;
+		}
+
+		var branchTarget = candidateOffset + (sbyte)region[candidateOffset - 1];
+		if (branchTarget < 0 || branchTarget >= branchOffset)
+		{
+			return false;
+		}
+
+		var decoder = Decoder.Create(
+			64,
+			new ByteArrayCodeReader(region[branchTarget..candidateOffset].ToArray()));
+		decoder.IP = (ulong)branchTarget;
+		while (decoder.IP < (ulong)candidateOffset)
+		{
+			var instructionOffset = (int)decoder.IP;
+			decoder.Decode(out var instruction);
+			if (instruction.Code == Code.INVALID || instruction.Length <= 0)
+			{
+				return false;
+			}
+
+			if (instructionOffset == branchOffset)
+			{
+				return instruction.Length == 2 && decoder.IP == (ulong)candidateOffset;
+			}
+
+			if (decoder.IP > (ulong)branchOffset)
+			{
+				return false;
+			}
+		}
+
+		return false;
+	}
+
 	// Retained for callers/tests that validate the legacy byte-scanner rule.
 	// The production TLS scanner now decodes instruction boundaries with Iced.
 	internal static bool IsTlsPatchCandidateBoundary(int regionOffset, byte precedingByte) =>
