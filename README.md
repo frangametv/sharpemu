@@ -25,11 +25,11 @@ SPDX-License-Identifier: GPL-2.0-or-later
 </p>
 
 > [!IMPORTANT]
-> ### Fran6: GTA V now reaches the game menu!
-> **Fran6 has been released.** Grand Theft Auto V now completes its introduction
-> and reaches the game menu; this is the first time this milestone has been reached on SharpEmu.
-> With Fran7, my main goal will be to improve rendering, stability and performance,
-> and continue progressing towards gameplay in both Astro Bot and GTA V.
+> ### Fran7 is now in development: the focus is on gameplay!
+> **Fran6 has been released**, and I am now working on Fran7's rendering path,
+> stability and performance as both Astro Bot and GTA V progress beyond their introductions.
+> In my current tests, GTA V reaches the game menu for the first time on SharpEmu;
+> the next goal is to turn this progress into stable, rendered gameplay in both games.
 
 > [!WARNING]
 > SharpEmu is at a very early stage. Astro Bot and Grand Theft Auto V are

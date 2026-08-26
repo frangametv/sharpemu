@@ -127,6 +127,8 @@ public static partial class KernelMemoryCompatExports
     private static readonly Dictionary<string, string> _guestMounts = new(StringComparer.OrdinalIgnoreCase);
     private static readonly HashSet<string> _readOnlyGuestMounts = new(StringComparer.OrdinalIgnoreCase);
     private static readonly HashSet<string> _tracedStatResults = new(StringComparer.Ordinal);
+    private const int DefaultUniqueStatTraceLimit = 64;
+    private static int _defaultUniqueStatTraceCount;
     // Both caches memoize host filesystem probe outcomes, so their key
     // equivalence must match the host filesystem's — see HostFsPath. On a
     // case-sensitive host an ignore-case cache aliases distinct paths: a
@@ -9005,21 +9007,35 @@ public static partial class KernelMemoryCompatExports
 
     private static void LogUniqueStatTrace(string guestPath, string hostPath, bool found)
     {
-        if (!string.Equals(Environment.GetEnvironmentVariable("SHARPEMU_LOG_IO"), "1", StringComparison.Ordinal))
-        {
-            return;
-        }
-
         var result = found ? "found" : "not_found";
+        var verbose = string.Equals(
+            Environment.GetEnvironmentVariable("SHARPEMU_LOG_IO"),
+            "1",
+            StringComparison.Ordinal);
         lock (_ioTraceGate)
         {
             if (!_tracedStatResults.Add($"{result}\0{guestPath}"))
             {
                 return;
             }
+
+            if (!verbose && _defaultUniqueStatTraceCount >= DefaultUniqueStatTraceLimit)
+            {
+                return;
+            }
+
+            _defaultUniqueStatTraceCount++;
         }
 
-        LogIoTrace("stat", guestPath, $"host='{hostPath}' result={result}");
+        if (verbose)
+        {
+            LogIoTrace("stat", guestPath, $"host='{hostPath}' result={result}");
+        }
+        else
+        {
+            Console.Error.WriteLine(
+                $"[LOADER][INFO] stat.unique path='{guestPath}' host='{hostPath}' result={result}");
+        }
     }
 
     private static string? GetNegativeStatCacheKey(string guestPath)

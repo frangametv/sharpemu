@@ -906,6 +906,10 @@ internal static unsafe class VulkanVideoPresenter
         "D17904BBF37B1B9C6E7CF6C8222AF540340A2BB1B4B5DB66EE477934DAB3C3AA";
     private const string AmdWindowsFaultingGraphicsFragmentDigest2 =
         "C710C7055121A5C5E2821E6765EBEAE4E130AD17120D8986F14849534D57DC00";
+    private const string AmdWindowsFaultingAstroVertexDigestPrefix = "D46E13BF027B050D";
+    private const string AmdWindowsFaultingAstroFragmentDigestPrefix = "02B5BD96E82E762F";
+    private const string AmdWindowsFaultingGtaVertexDigestPrefix = "5CD1D345A0121A5E";
+    private const string AmdWindowsFaultingGtaFragmentDigestPrefix = "407058204AFB4080";
 
     internal static bool ShouldQuarantineAmdWindowsComputeShader(
         uint vendorId,
@@ -929,21 +933,92 @@ internal static unsafe class VulkanVideoPresenter
         string fragmentDigest,
         string? configuredValue)
     {
-        return isWindows &&
-            vendorId == AmdVendorId &&
-            !string.Equals(configuredValue, "0", StringComparison.Ordinal) &&
-            string.Equals(
+        if (!isWindows ||
+            vendorId != AmdVendorId ||
+            string.Equals(configuredValue, "0", StringComparison.Ordinal))
+        {
+            return false;
+        }
+
+        return MatchesShaderPair(
                 vertexDigest,
+                fragmentDigest,
                 AmdWindowsFaultingGraphicsVertexDigest,
+                AmdWindowsFaultingGraphicsFragmentDigest) ||
+            MatchesShaderPair(
+                vertexDigest,
+                fragmentDigest,
+                AmdWindowsFaultingGraphicsVertexDigest,
+                AmdWindowsFaultingGraphicsFragmentDigest2) ||
+            MatchesShaderPairPrefix(
+                vertexDigest,
+                fragmentDigest,
+                AmdWindowsFaultingAstroVertexDigestPrefix,
+                AmdWindowsFaultingAstroFragmentDigestPrefix) ||
+            MatchesShaderPairPrefix(
+                vertexDigest,
+                fragmentDigest,
+                AmdWindowsFaultingGtaVertexDigestPrefix,
+                AmdWindowsFaultingGtaFragmentDigestPrefix);
+    }
+
+    internal static bool ShouldUseAmdWindowsSolidFragmentFallback(
+        uint vendorId,
+        bool isWindows,
+        string vertexDigest,
+        string fragmentDigest,
+        string? configuredValue)
+    {
+        if (!isWindows ||
+            vendorId != AmdVendorId ||
+            string.Equals(configuredValue, "0", StringComparison.Ordinal))
+        {
+            return false;
+        }
+
+        return MatchesShaderPairPrefix(
+                vertexDigest,
+                fragmentDigest,
+                AmdWindowsFaultingAstroVertexDigestPrefix,
+                AmdWindowsFaultingAstroFragmentDigestPrefix) ||
+            MatchesShaderPairPrefix(
+                vertexDigest,
+                fragmentDigest,
+                AmdWindowsFaultingGtaVertexDigestPrefix,
+                AmdWindowsFaultingGtaFragmentDigestPrefix);
+    }
+
+    private static bool MatchesShaderPair(
+        string vertexDigest,
+        string fragmentDigest,
+        string expectedVertexDigest,
+        string expectedFragmentDigest)
+    {
+        return string.Equals(
+                vertexDigest,
+                expectedVertexDigest,
                 StringComparison.OrdinalIgnoreCase) &&
-            (string.Equals(
-                 fragmentDigest,
-                 AmdWindowsFaultingGraphicsFragmentDigest,
-                 StringComparison.OrdinalIgnoreCase) ||
-             string.Equals(
-                 fragmentDigest,
-                 AmdWindowsFaultingGraphicsFragmentDigest2,
-                 StringComparison.OrdinalIgnoreCase));
+            string.Equals(
+                fragmentDigest,
+                expectedFragmentDigest,
+                StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static bool MatchesShaderPairPrefix(
+        string vertexDigest,
+        string fragmentDigest,
+        string expectedVertexPrefix,
+        string expectedFragmentPrefix)
+    {
+        // The isolation logs retain the first 64 bits of each SHA-256 digest.
+        // Requiring both independent prefixes gives a 128-bit pair identity
+        // while allowing the field report to protect subsequent local builds.
+        return vertexDigest.StartsWith(
+                expectedVertexPrefix,
+                StringComparison.OrdinalIgnoreCase) &&
+            fragmentDigest.StartsWith(
+                expectedFragmentPrefix,
+                StringComparison.OrdinalIgnoreCase);
     }
 
     internal static bool ShouldUseAmdWindowsFullscreenVertexFallback(
@@ -959,6 +1034,19 @@ internal static unsafe class VulkanVideoPresenter
                 vertexDigest,
                 AmdWindowsFaultingGraphicsVertexDigest,
                 StringComparison.OrdinalIgnoreCase);
+    }
+
+    internal static bool ShouldUseAmdWindowsGlobalFullscreenVertexFallback(
+        uint vendorId,
+        bool isWindows,
+        string? configuredValue)
+    {
+        // The Radeon isolation matrix reaches guest Havok/WebApi work only
+        // with the run-10 fixed fullscreen vertex path. Keep that compatibility
+        // profile automatic until translated vertex pipelines are driver-safe.
+        return isWindows &&
+            vendorId == AmdVendorId &&
+            !string.Equals(configuredValue, "0", StringComparison.Ordinal);
     }
 
     private static bool _splashHidden;
@@ -2995,11 +3083,12 @@ internal static unsafe class VulkanVideoPresenter
 
             if (_pendingGuestImagePresentations.Count > 0)
             {
-                var pending = _pendingGuestImagePresentations.First!.Value;
-                if (IsGuestWorkCompletedLocked(pending.RequiredGuestWorkSequence))
+                if (HeadPreservingQueueRetention.TryTakeFirstReady(
+                        _pendingGuestImagePresentations,
+                        pending => IsGuestWorkCompletedLocked(pending.RequiredGuestWorkSequence),
+                        out var pending))
                 {
                     presentation = pending;
-                    _pendingGuestImagePresentations.RemoveFirst();
                     TryReplaceWithHostMovieFrame(ref presentation);
                     return true;
                 }
@@ -5259,7 +5348,7 @@ internal static unsafe class VulkanVideoPresenter
                     $"graphics_no_opt={(_disableGraphicsPipelineOptimization ? 1 : 0)} " +
                     $"native_compute_subgroups={(disableNativeComputeSubgroups ? 0 : 1)} " +
                     "compute_quarantine=automatic graphics_quarantine=automatic " +
-                    "fullscreen_vertex_fallback=automatic");
+                    "fullscreen_vertex_fallback=global-automatic");
             }
             VideoOutExports.SetSelectedGpuName(selectedName);
             if (_window is not null)
@@ -8366,21 +8455,30 @@ internal static unsafe class VulkanVideoPresenter
             var originalVertexDigest = _amdWindowsDriverSafety
                 ? GetShaderDigest(draw.VertexSpirv)
                 : string.Empty;
-            var useAmdFullscreenVertexFallback =
+            var useAmdGlobalFullscreenVertexFallback =
+                ShouldUseAmdWindowsGlobalFullscreenVertexFallback(
+                    _amdWindowsDriverSafety ? AmdVendorId : 0,
+                    OperatingSystem.IsWindows(),
+                    Environment.GetEnvironmentVariable(
+                        "SHARPEMU_VK_AMD_FULLSCREEN_VERTEX_FALLBACK"));
+            var useAmdFullscreenVertexFallback = useAmdGlobalFullscreenVertexFallback ||
                 ShouldUseAmdWindowsFullscreenVertexFallback(
                     _amdWindowsDriverSafety ? AmdVendorId : 0,
                     OperatingSystem.IsWindows(),
                     originalVertexDigest,
                     Environment.GetEnvironmentVariable(
                         "SHARPEMU_VK_AMD_FULLSCREEN_VERTEX_FALLBACK"));
+            var amdVertexFallbackLogKey = useAmdGlobalFullscreenVertexFallback
+                ? "global"
+                : originalVertexDigest;
             if (useAmdFullscreenVertexFallback &&
-                _loggedAmdGraphicsVertexFallbacks.Add(originalVertexDigest))
+                _loggedAmdGraphicsVertexFallbacks.Add(amdVertexFallbackLogKey))
             {
                 Console.Error.WriteLine(
                     $"[LOADER][WARN] vk.amd_graphics_vertex_fallback " +
                     $"shader=0x{shaderAddress:X16} vs={originalVertexDigest[..16]} " +
                     "action=fixed-fullscreen-vertex " +
-                    "reason=known-radeon-driver-av " +
+                    $"reason={(useAmdGlobalFullscreenVertexFallback ? "run10-radeon-compat" : "known-radeon-driver-av")} " +
                     "override=SHARPEMU_VK_AMD_FULLSCREEN_VERTEX_FALLBACK=0");
             }
 
@@ -8406,9 +8504,20 @@ internal static unsafe class VulkanVideoPresenter
             var forceTitleSolidFragment =
                 _forceTitleSolidFragment &&
                 isTitleDraw;
+            var guestVertexDigest = GetShaderDigest(draw.VertexSpirv);
+            var guestFragmentDigest = GetShaderDigest(draw.PixelSpirv);
+            var useAmdSolidFragmentFallback =
+                ShouldUseAmdWindowsSolidFragmentFallback(
+                    _amdWindowsDriverSafety ? AmdVendorId : 0,
+                    OperatingSystem.IsWindows(),
+                    guestVertexDigest,
+                    guestFragmentDigest,
+                    Environment.GetEnvironmentVariable(
+                        "SHARPEMU_VK_AMD_SOLID_FRAGMENT_FALLBACK"));
             var forceSolidFragment = forceTitleSolidFragment ||
                 _forceFullscreenPipeline ||
                 _forceSolidFragment ||
+                useAmdSolidFragmentFallback ||
                 shaderAddress != 0 && AddressListContains(
                     "SHARPEMU_FORCE_SOLID_FRAGMENT_SHADER_ADDRS",
                     shaderAddress) ||
@@ -8434,6 +8543,15 @@ internal static unsafe class VulkanVideoPresenter
                 : forceAttributeFragment
                     ? SpirvFixedShaders.CreateAttributeFragment(attributeFragmentLocation)
                 : draw.PixelSpirv;
+            if (useAmdSolidFragmentFallback)
+            {
+                Console.Error.WriteLine(
+                    $"[LOADER][WARN] vk.amd_solid_fragment_fallback " +
+                    $"shader=0x{shaderAddress:X16} " +
+                    $"vs={guestVertexDigest[..16]} ps={guestFragmentDigest[..16]} " +
+                    "action=fixed-solid-fragment " +
+                    "override=SHARPEMU_VK_AMD_SOLID_FRAGMENT_FALLBACK=0");
+            }
             if (forceSolidFragment && !string.IsNullOrWhiteSpace(_fixedFragmentDumpPath))
             {
                 File.WriteAllBytes(_fixedFragmentDumpPath, fragmentSpirv);
@@ -14578,6 +14696,11 @@ internal static unsafe class VulkanVideoPresenter
             var vertexDigest = GetShaderDigest(draw.VertexSpirv);
             var fragmentDigest = GetShaderDigest(draw.PixelSpirv);
             var useAmdFullscreenVertexFallback =
+                ShouldUseAmdWindowsGlobalFullscreenVertexFallback(
+                    _amdWindowsDriverSafety ? AmdVendorId : 0,
+                    OperatingSystem.IsWindows(),
+                    Environment.GetEnvironmentVariable(
+                        "SHARPEMU_VK_AMD_FULLSCREEN_VERTEX_FALLBACK")) ||
                 ShouldUseAmdWindowsFullscreenVertexFallback(
                     _amdWindowsDriverSafety ? AmdVendorId : 0,
                     OperatingSystem.IsWindows(),
