@@ -174,4 +174,34 @@ public sealed class DirectExecutionBackendNullVirtualCallDiagnosticsTests
             accessTarget));
     }
 
+    [Fact]
+    public void GtaNullStorySingleton_MatchesExactNullWriteSequence()
+    {
+        byte[] before =
+        {
+            0x84, 0xDB,
+            0x0F, 0x84, 0x44, 0x02, 0x00, 0x00,
+            0x48, 0x8B, 0x1D, 0xA2, 0x30, 0xDB, 0x04,
+        };
+        byte[] current =
+        {
+            0xC7, 0x83, 0xFC, 0x00, 0x00, 0x00,
+            0x00, 0x00, 0x00, 0x00,
+        };
+
+        Assert.True(DirectExecutionBackend.IsGtaNullStorySingletonPattern(
+            before,
+            current,
+            rbx: 0,
+            accessType: 1,
+            accessTarget: 0xFC));
+
+        Assert.False(DirectExecutionBackend.IsGtaNullStorySingletonPattern(
+            before,
+            current,
+            rbx: 1,
+            accessType: 1,
+            accessTarget: 0xFC));
+    }
+
 }

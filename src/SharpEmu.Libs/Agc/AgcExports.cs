@@ -10723,6 +10723,19 @@ var renderTargets = GetRenderTargets(state.CxRegisters);
             // Trace-only: broad shader tracing and the address-specific filters
             // share the same detailed draw summary. The latter must stay useful
             // without enabling the extremely noisy global shader trace.
+            if (pixelShaderAddress == 0x0000000142384800ul &&
+                vertexCount is 288 or 366 or 402 or 444)
+            {
+                TraceTranslatedGuestDraw(
+                    ctx,
+                    gpuState,
+                    state,
+                    translatedDraw,
+                    psInputEna,
+                    psInputAddr,
+                    force: true);
+            }
+
             var traceTargetedDraw =
                 Array.IndexOf(_tracePixelShaderAddresses, pixelShaderAddress) >= 0 ||
                 _traceVertexShaderAddress == exportShaderAddress ||
@@ -13934,6 +13947,7 @@ var renderTargets = GetRenderTargets(state.CxRegisters);
     private static readonly object _renderTargetProbeGate = new();
     private static long _renderTargetSampleTraceCount;
 private static long _indirectDrawProbeCount;
+private static readonly ConcurrentDictionary<uint, byte> _gtaUiVertexDumped = new();
     private static long _indirectDrawEmitCount;
     private static long _indirectDrawEmitRejectCount;
     private static long _indirectMultiProbeCount;
@@ -14587,6 +14601,72 @@ private static long _indirectDrawProbeCount;
         uint psInputAddr,
         bool force)
     {
+        if (draw.PixelShaderAddress == 0x0000000142384800ul &&
+            draw.VertexCount is 288 or 366 or 402 or 444 &&
+            _gtaUiVertexDumped.TryAdd(draw.VertexCount, 0) &&
+            draw.VertexInputs.FirstOrDefault() is { } tracedInput)
+        {
+            var tracedBinding = draw.GlobalMemoryBindings.FirstOrDefault(binding =>
+                tracedInput.BaseAddress >= binding.BaseAddress &&
+                tracedInput.BaseAddress - binding.BaseAddress < (ulong)binding.DataLength);
+            if (tracedBinding is not null)
+            {
+                var offset = checked((int)(tracedInput.BaseAddress - tracedBinding.BaseAddress));
+                var length = tracedBinding.DataLength - offset;
+                var path = Path.Combine(
+                    AppContext.BaseDirectory,
+                    "user",
+                    "logs",
+                    $"gta-ui-vertices-{draw.VertexCount}-current.bin");
+                Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+                File.WriteAllBytes(path, tracedBinding.Data.AsSpan(offset, length).ToArray());
+                var indexPath = Path.Combine(
+                    AppContext.BaseDirectory,
+                    "user",
+                    "logs",
+                    $"gta-ui-indices-{draw.VertexCount}-current.bin");
+                if (draw.IndexBuffer is { } tracedIndices)
+                {
+                    File.WriteAllBytes(
+                        indexPath,
+                        tracedIndices.Data.AsSpan(0, tracedIndices.Length).ToArray());
+                }
+
+                File.WriteAllText(
+                    Path.ChangeExtension(path, ".txt"),
+                    $"baseVertex={draw.BaseVertex}\n" +
+                    $"vertexCount={draw.VertexCount}\n" +
+                    $"vertexAddress=0x{tracedInput.BaseAddress:X16}\n" +
+                    $"stride={tracedInput.Stride}\n" +
+                    $"index32={(draw.IndexBuffer?.Is32Bit == true ? 1 : 0)}\n" +
+                    $"indexBytes={draw.IndexBuffer?.Length ?? 0}\n" +
+                    $"targets={string.Join(',', draw.RenderTargets.Select(target => $"0x{target.Address:X16}:{target.Width}x{target.Height}:fmt{target.Format}:num{target.NumberType}:tile{target.TileMode}"))}\n" +
+                    $"textures={string.Join(',', draw.Textures.Select(texture => $"0x{texture.Descriptor.Address:X16}:{texture.Descriptor.Width}x{texture.Descriptor.Height}:fmt{texture.Descriptor.Format}:num{texture.Descriptor.NumberType}:tile{texture.Descriptor.TileMode}"))}\n" +
+                    $"scissor={(draw.RenderState.Scissor is { } s ? $"{s.X},{s.Y},{s.Width}x{s.Height}" : "full")}\n" +
+                    $"viewport={(draw.RenderState.Viewport is { } v ? $"{v.X},{v.Y},{v.Width}x{v.Height}:{v.MinDepth}-{v.MaxDepth}" : "full")}\n" +
+                    $"blend={draw.RenderState.Blend}\n" +
+                    $"raster={draw.RenderState.Raster}\n" +
+                    $"depth={draw.RenderState.Depth}\n");
+
+                for (var bindingIndex = 0;
+                     bindingIndex < draw.GlobalMemoryBindings.Count;
+                     bindingIndex++)
+                {
+                    var binding = draw.GlobalMemoryBindings[bindingIndex];
+                    File.WriteAllBytes(
+                        Path.Combine(
+                            Path.GetDirectoryName(path)!,
+                            $"gta-ui-{draw.VertexCount}-binding-{bindingIndex:D2}-" +
+                            $"0x{binding.BaseAddress:X16}-s{binding.ScalarAddress}.bin"),
+                        binding.Data.AsSpan(0, binding.DataLength).ToArray());
+                }
+
+                File.AppendAllText(
+                    Path.ChangeExtension(path, ".txt"),
+                    $"vertexScalars={string.Join(',', draw.VertexInitialScalars.Select((value, index) => $"s{index}=0x{value:X8}"))}\n");
+            }
+        }
+
         var targets = draw.RenderTargets.Count == 0
             ? "none"
             : string.Join(
@@ -14634,11 +14714,17 @@ private static long _indirectDrawProbeCount;
                     $"fmt{texture.Format}/num{texture.NumberType}/tile{texture.TileMode}" +
                     $"/storage={binding.IsStorage}{target}/{probe}{writer}";
             }));
+        var traceDrawBufferBytes =
+            draw.PixelShaderAddress == 0x0000000142384800ul
+                ? 4096
+                : 256;
         var buffers = string.Join(
             ',',
             draw.GlobalMemoryBindings.Select((binding, index) =>
                 $"{index}:0x{binding.BaseAddress:X16}:{binding.DataLength}:" +
-                Convert.ToHexString(binding.Data.AsSpan(0, Math.Min(binding.DataLength, 256)))));
+                Convert.ToHexString(binding.Data.AsSpan(
+                    0,
+                    Math.Min(binding.DataLength, traceDrawBufferBytes)))));
         var indices = draw.IndexBuffer is { } indexBuffer
             ? $"{(indexBuffer.Is32Bit ? 32 : 16)}:" +
               Convert.ToHexString(indexBuffer.Data.AsSpan(0, Math.Min(indexBuffer.Length, 32)))

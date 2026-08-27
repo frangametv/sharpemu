@@ -2120,6 +2120,16 @@ public static partial class Gen5SpirvTranslator
                         $"target=0x{targetPc:X} forced=fallthrough");
                 }
 
+                if (ForcePixelBranchTaken(terminator))
+                {
+                    condition = _module.ConstantBool(true);
+                    Console.Error.WriteLine(
+                        $"[AGC][PIXEL-BRANCH-PROBE] " +
+                        $"address=0x{_state.Program.Address:X16} " +
+                        $"pc=0x{terminator.Pc:X} opcode={terminator.Opcode} " +
+                        $"target=0x{targetPc:X} forced=taken");
+                }
+
                 var takenBlock = targetExits ? uint.MaxValue : (uint)targetBlock;
                 var selected = _module.AddInstruction(
                     SpirvOp.Select,
@@ -2178,10 +2188,14 @@ public static partial class Gen5SpirvTranslator
             {
                 "SCbranchScc0" => LogicalNot(Load(_boolType, _scc)),
                 "SCbranchScc1" => Load(_boolType, _scc),
-                "SCbranchVccz" => LogicalNot(SubgroupAny(Load(_boolType, _vcc))),
-                "SCbranchVccnz" => SubgroupAny(Load(_boolType, _vcc)),
-                "SCbranchExecz" => LogicalNot(SubgroupAny(Load(_boolType, _exec))),
-                "SCbranchExecnz" => SubgroupAny(Load(_boolType, _exec)),
+                // VCC and EXEC are guest wave masks. A Wave64 guest shader can
+                // run as two native Wave32 subgroups, so a subgroup vote sees
+                // only half of the mask and can make the halves take different
+                // scalar branches. Test the synchronized 64-bit SGPR pair.
+                "SCbranchVccz" => LogicalNot(IsNotZero64(LoadS64(106))),
+                "SCbranchVccnz" => IsNotZero64(LoadS64(106)),
+                "SCbranchExecz" => LogicalNot(IsNotZero64(LoadS64(126))),
+                "SCbranchExecnz" => IsNotZero64(LoadS64(126)),
                 // SharpEmu does not attach a guest GPU debugger, so the
                 // hardware COND_DBG_SYS status bit is always clear.
                 "SCbranchCdbgsys" => _module.ConstantBool(false),
@@ -5981,6 +5995,23 @@ public static partial class Gen5SpirvTranslator
                     out var address) ||
                 !TryParseEnvironmentUnsigned(
                     "SHARPEMU_FORCE_PIXEL_BRANCH_FALLTHROUGH_PC",
+                    out var pc))
+            {
+                return false;
+            }
+
+            return _state.Program.Address == address && instruction.Pc == pc;
+        }
+
+        private bool ForcePixelBranchTaken(
+            Gen5ShaderInstruction instruction)
+        {
+            if (_stage != Gen5SpirvStage.Pixel ||
+                !TryParseEnvironmentUnsigned(
+                    "SHARPEMU_FORCE_PIXEL_BRANCH_TAKEN_ADDRESS",
+                    out var address) ||
+                !TryParseEnvironmentUnsigned(
+                    "SHARPEMU_FORCE_PIXEL_BRANCH_TAKEN_PC",
                     out var pc))
             {
                 return false;

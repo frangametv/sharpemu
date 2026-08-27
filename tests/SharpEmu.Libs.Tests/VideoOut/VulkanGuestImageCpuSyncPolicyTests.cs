@@ -17,6 +17,23 @@ namespace SharpEmu.Libs.Tests.VideoOut;
 /// </summary>
 public sealed class VulkanGuestImageCpuSyncPolicyTests
 {
+    [Theory]
+    [InlineData(false, false, false)]
+    [InlineData(false, true, true)]
+    [InlineData(true, false, true)]
+    [InlineData(true, true, true)]
+    public void CpuRefreshDoesNotEraseGpuOnlyImageWithEmptyPayload(
+        bool isCpuBacked,
+        bool payloadHasNonzeroBytes,
+        bool expected)
+    {
+        Assert.Equal(
+            expected,
+            VulkanVideoPresenter.ShouldApplyCpuTextureRefresh(
+                isCpuBacked,
+                payloadHasNonzeroBytes));
+    }
+
     private const uint Rgba8Format = 10;
     private const uint Rgba16FFormat = 11;
     private const uint Rgba32FFormat = 14;

@@ -213,7 +213,6 @@ public sealed class ProviderLleExportsTests
             Json2LleExports.MissingGuestProvider,
             NetLleExports.MissingGuestProvider,
             NetCtlLleExports.MissingGuestProvider,
-            NpAuthLleExports.MissingGuestProvider,
             NpCommerceLleExports.MissingGuestProvider,
             NpEntitlementAccessLleExports.MissingGuestProvider,
             NpGameIntentLleExports.MissingGuestProvider,

@@ -20,6 +20,7 @@ public sealed partial class DirectExecutionBackend
 	private static int _guestAllocatorHoleRecoveries;
 	private static int _nullVirtualAllocatorRecoveries;
 	private static int _gtaNullAssetTableRecoveries;
+	private static int _gtaNullStorySingletonRecoveries;
 	private static int _auxiliaryThreadExecuteFaultRecoveries;
 	private static int _auxiliaryThreadExecuteFaultSkips;
 	private nint _workerAbortStack;
@@ -156,6 +157,11 @@ public sealed partial class DirectExecutionBackend
 			}
 			if (exceptionCode == 3221225477u &&
 				TryRecoverGtaNullAssetTable(exceptionRecord, contextRecord, rip))
+			{
+				return -1;
+			}
+			if (exceptionCode == 3221225477u &&
+				TryRecoverGtaNullStorySingleton(exceptionRecord, contextRecord, rip))
 			{
 				return -1;
 			}
@@ -785,6 +791,73 @@ public sealed partial class DirectExecutionBackend
 			r14 == 0 &&
 			accessType == 1 &&
 			accessTarget == 8 &&
+			before.SequenceEqual(expectedBefore) &&
+			current.SequenceEqual(expectedCurrent);
+	}
+
+	private unsafe bool TryRecoverGtaNullStorySingleton(
+		EXCEPTION_RECORD* exceptionRecord,
+		void* contextRecord,
+		ulong rip)
+	{
+		if (exceptionRecord->NumberParameters < 2 || rip < 15)
+		{
+			return false;
+		}
+
+		var accessType = exceptionRecord->ExceptionInformation[0];
+		var accessTarget = exceptionRecord->ExceptionInformation[1];
+		var rbx = ReadCtxU64(contextRecord, CTX_RBX);
+		Span<byte> before = stackalloc byte[15];
+		Span<byte> current = stackalloc byte[10];
+		if (!TryReadHostBytes(rip - (ulong)before.Length, before) ||
+			!TryReadHostBytes(rip, current) ||
+			!IsGtaNullStorySingletonPattern(
+				before,
+				current,
+				rbx,
+				accessType,
+				accessTarget))
+		{
+			return false;
+		}
+
+		// The guest already has an object-absent path selected by the JE just
+		// before the singleton load. The state flag and pointer can temporarily
+		// disagree while Story Mode is being entered; resume at that existing
+		// path instead of fabricating an object with an unknown virtual table.
+		const ulong objectAbsentPathDelta = 0x23D;
+		WriteCtxU64(contextRecord, CTX_RIP, rip + objectAbsentPathDelta);
+		var recovery = Interlocked.Increment(ref _gtaNullStorySingletonRecoveries);
+		Console.Error.WriteLine(
+			$"[LOADER][WARN] Recovered GTA null Story singleton #{recovery}: " +
+			$"rip=0x{rip:X16} -> 0x{rip + objectAbsentPathDelta:X16}");
+		Console.Error.Flush();
+		return true;
+	}
+
+	internal static bool IsGtaNullStorySingletonPattern(
+		ReadOnlySpan<byte> before,
+		ReadOnlySpan<byte> current,
+		ulong rbx,
+		ulong accessType,
+		ulong accessTarget)
+	{
+		ReadOnlySpan<byte> expectedBefore = new byte[]
+		{
+			0x84, 0xDB,                                     // test bl,bl
+			0x0F, 0x84, 0x44, 0x02, 0x00, 0x00,             // je object-absent path
+			0x48, 0x8B, 0x1D, 0xA2, 0x30, 0xDB, 0x04,       // mov rbx,[singleton]
+		};
+		ReadOnlySpan<byte> expectedCurrent = new byte[]
+		{
+			0xC7, 0x83, 0xFC, 0x00, 0x00, 0x00,
+			0x00, 0x00, 0x00, 0x00,                         // mov dword [rbx+0fch],0
+		};
+
+		return rbx == 0 &&
+			accessType == 1 &&
+			accessTarget == 0xFC &&
 			before.SequenceEqual(expectedBefore) &&
 			current.SequenceEqual(expectedCurrent);
 	}

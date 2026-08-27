@@ -1569,14 +1569,16 @@ internal static unsafe class VulkanVideoPresenter
             }
 
             // Astro's frontend continues writing the registered scanout image
-            // after its first ordered flip.  Waiting exclusively for another
-            // SetFlip leaves the Sony text and later title composition trapped
-            // in the offscreen image.  Publish only a target that was already
-            // named by VideoOut, and tie it to this draw's sequence so the
-            // presenter cannot sample it before the GPU write completes.
+            // after its single initial ordered flip, so retain live-target
+            // publication for that mode. Once a title such as GTA V submits
+            // a second ordered flip, publishing each
+            // intermediate draw exposes partially composed/cleared buffers
+            // between the immutable flip snapshots and visibly flickers.
             var displayTarget = targets.FirstOrDefault(
                 target => _knownDisplayBufferAddresses.Contains(target.Address));
-            if (displayTarget is not null && displayTarget.Address != 0)
+            if (displayTarget is not null &&
+                displayTarget.Address != 0 &&
+                ShouldPublishLiveDisplayTarget(_orderedGuestFlipVersionSequence))
             {
                 var sequence = (_latestPresentation?.Sequence ?? 0) + 1;
                 _latestPresentation = new Presentation(
@@ -2655,22 +2657,22 @@ internal static unsafe class VulkanVideoPresenter
     {
         Span<byte> sample = stackalloc byte[64];
         ulong hash = 14695981039346656037UL;
-        Span<ulong> offsets = stackalloc ulong[3];
-        var offsetCount = 0;
-        offsets[offsetCount++] = 0;
-        if (byteCount > 128)
-        {
-            offsets[offsetCount++] = byteCount / 2;
-        }
-
-        if (byteCount > 64)
-        {
-            offsets[offsetCount++] = byteCount - 64;
-        }
+        // Three samples (start/middle/end) missed updates across large planar
+        // 4K video surfaces. GTA V consequently reused an old Vulkan upload
+        // while most of a Y/U/V plane had changed, producing large rectangular
+        // holes in loading screens. Spread small cache-line samples throughout
+        // the allocation: this remains much cheaper than hashing 12+ MiB per
+        // frame but observes every broad decoder-written region.
+        var offsetCount = checked((int)Math.Min(
+            64UL,
+            Math.Max(1UL, (byteCount + 63) / 64)));
 
         for (var o = 0; o < offsetCount; o++)
         {
-            var offset = offsets[o];
+            var offset = GetSparseGuestContentProbeOffset(
+                byteCount,
+                o,
+                offsetCount);
             if (offset >= byteCount)
             {
                 continue;
@@ -2693,6 +2695,21 @@ internal static unsafe class VulkanVideoPresenter
         }
 
         return hash ^ byteCount;
+    }
+
+    internal static ulong GetSparseGuestContentProbeOffset(
+        ulong byteCount,
+        int sampleIndex,
+        int sampleCount)
+    {
+        if (byteCount <= 64 || sampleCount <= 1)
+        {
+            return 0;
+        }
+
+        var lastOffset = byteCount - 64;
+        return lastOffset * checked((ulong)sampleIndex) /
+            checked((ulong)(sampleCount - 1));
     }
 
     public static bool TrySubmitGuestImageBlit(
@@ -2880,6 +2897,11 @@ internal static unsafe class VulkanVideoPresenter
         (textureWriteGeneration > 0 &&
             (!hasUploadedGeneration || uploadedGeneration != textureWriteGeneration));
 
+    internal static bool ShouldApplyCpuTextureRefresh(
+        bool isCpuBacked,
+        bool payloadHasNonzeroBytes) =>
+        isCpuBacked || payloadHasNonzeroBytes;
+
     private static byte[] CreateBlackFrame(uint width, uint height)
     {
         if (width == 0 || height == 0 || width > 8192 || height > 8192)
@@ -3021,6 +3043,17 @@ internal static unsafe class VulkanVideoPresenter
                 return true;
             }
 
+            // Once the guest demonstrates a real repeating SetFlip stream,
+            // keep displaying the last immutable flip snapshot until its next
+            // snapshot is ready. _latestPresentation can be overwritten by
+            // targetless/fallback draws during that interval; presenting it
+            // exposes an incomplete frame and causes visible flicker.
+            if (!ShouldPublishLiveDisplayTarget(_orderedGuestFlipVersionSequence))
+            {
+                presentation = default;
+                return false;
+            }
+
             if (_latestPresentation is not { } latest ||
                 latest.Sequence == presentedSequence ||
                 !IsGuestWorkCompletedLocked(latest.RequiredGuestWorkSequence))
@@ -3059,7 +3092,11 @@ internal static unsafe class VulkanVideoPresenter
     /// </summary>
     private static void TryReplaceWithHostMovieFrame(ref Presentation presentation)
     {
-        if (!TryTakeHostMovieFrame(out var pixels, out var width, out var height))
+        if (!TryTakeHostMovieFrame(
+                out var pixels,
+                out var width,
+                out var height,
+                out _))
         {
             return;
         }
@@ -3086,7 +3123,12 @@ internal static unsafe class VulkanVideoPresenter
         long presentedSequence,
         out Presentation presentation)
     {
-        if (!TryTakeHostMovieFrame(out var pixels, out var width, out var height))
+        if (!TryTakeHostMovieFrame(
+                out var pixels,
+                out var width,
+                out var height,
+                out var advanced) ||
+            !ShouldPresentHostMovieOnlyFrame(advanced))
         {
             presentation = default;
             return false;
@@ -3107,7 +3149,8 @@ internal static unsafe class VulkanVideoPresenter
     private static bool TryTakeHostMovieFrame(
         out byte[] pixels,
         out uint width,
-        out uint height)
+        out uint height,
+        out bool advanced)
     {
         // Preserve Fran's Bink bridge while adopting upstream's render-loop
         // fallback, so host-decoded movies are not tied to slow guest flips.
@@ -3116,7 +3159,7 @@ internal static unsafe class VulkanVideoPresenter
                 out pixels,
                 out width,
                 out height,
-                out _,
+                out advanced,
                 out _,
                 out _))
         {
@@ -3129,12 +3172,14 @@ internal static unsafe class VulkanVideoPresenter
                 out height,
                 out var serial))
         {
+            advanced = false;
             return false;
         }
 
-        if (Interlocked.Exchange(
-                ref _tracedAvPlayerFallbackPresentationSerial,
-                serial) != serial)
+        advanced = Interlocked.Exchange(
+            ref _tracedAvPlayerFallbackPresentationSerial,
+            serial) != serial;
+        if (advanced)
         {
             var frameCount = Interlocked.Increment(
                 ref _avPlayerFallbackPresentationCount);
@@ -3147,6 +3192,30 @@ internal static unsafe class VulkanVideoPresenter
         }
 
         return true;
+    }
+
+    internal static bool ShouldPresentHostMovieOnlyFrame(bool advanced) => advanced;
+
+    internal static bool IsHostPresentationDue(
+        bool vsync,
+        int refreshRate,
+        long nowTicks,
+        long nextPresentTicks) =>
+        vsync ||
+        refreshRate <= 0 ||
+        nextPresentTicks == 0 ||
+        nowTicks >= nextPresentTicks;
+
+    internal static long NextHostPresentationDeadline(
+        int refreshRate,
+        long nowTicks,
+        long previousDeadlineTicks)
+    {
+        var interval = Stopwatch.Frequency / Math.Max(1, refreshRate);
+        var next = previousDeadlineTicks == 0
+            ? nowTicks + interval
+            : previousDeadlineTicks + interval;
+        return next <= nowTicks ? nowTicks + interval : next;
     }
 
     private static long _tracedAvPlayerFallbackPresentationSerial;
@@ -3415,6 +3484,7 @@ internal static unsafe class VulkanVideoPresenter
 
         return required;
     }
+
 
     private static void RecordGuestImageWritersLocked(object work, long sequence)
     {
@@ -3840,6 +3910,38 @@ internal static unsafe class VulkanVideoPresenter
                (Is10Bit(from) && to == Format.R8G8B8A8Unorm);
     }
 
+    internal static PresentModeKHR SelectPresentMode(
+        bool vsync,
+        ReadOnlySpan<PresentModeKHR> modes)
+    {
+        if (vsync)
+        {
+            return PresentModeKHR.FifoKhr;
+        }
+
+        foreach (var mode in modes)
+        {
+            if (mode == PresentModeKHR.ImmediateKhr)
+            {
+                return PresentModeKHR.ImmediateKhr;
+            }
+        }
+
+        foreach (var mode in modes)
+        {
+            if (mode == PresentModeKHR.MailboxKhr)
+            {
+                return PresentModeKHR.MailboxKhr;
+            }
+        }
+
+        return PresentModeKHR.FifoKhr;
+    }
+
+    internal static bool ShouldPublishLiveDisplayTarget(
+        long orderedFlipCount) =>
+        orderedFlipCount < 2;
+
     private readonly record struct Presentation(
         byte[]? Pixels,
         uint Width,
@@ -4057,6 +4159,7 @@ internal static unsafe class VulkanVideoPresenter
         private DeviceMemory[] _overlayStagingMemory = [];
         private nint[] _overlayStagingMapped = [];
         private long _presentedSequence;
+        private long _nextHostPresentTicks;
         private long _presentNotTakenLoggedSequence = long.MinValue;
         private bool _vulkanReady;
         private bool _firstFramePresented;
@@ -4119,6 +4222,8 @@ internal static unsafe class VulkanVideoPresenter
         private ulong _nextDepthOnlyColorAddress = 0xFFFF_FF00_0000_0000UL;
         private readonly HashSet<(ulong Address, uint Width, uint Height, Format Format)> _tracedTextureCacheHits = new();
         private readonly HashSet<(ulong Address, uint Width, uint Height, uint DstSelect)> _tracedDepthTextureAliases = new();
+        private readonly HashSet<(ulong Address, ulong ShaderAddress, uint DstSelect)>
+            _tracedGuestImageAliasMetadata = new();
         private readonly HashSet<(ulong Address, uint Width, uint Height)> _tracedDepthExtentFallbacks = new();
         private readonly HashSet<(ulong Address, uint Width, uint Height, Format Format)> _tracedTextureUploads = new();
         private readonly HashSet<(ulong Address, uint Width, uint Height, uint Format)> _dumpedTextures = new();
@@ -4560,7 +4665,9 @@ internal static unsafe class VulkanVideoPresenter
                 CreateGuestDrawResources();
                 _vulkanReady = true;
                 Console.Error.WriteLine(
-                    $"[LOADER][INFO] Vulkan VideoOut ready: {_extent.Width}x{_extent.Height}, format={_swapchainFormat}");
+                    $"[LOADER][INFO] Vulkan VideoOut ready: {_extent.Width}x{_extent.Height}, " +
+                    $"format={_swapchainFormat}, vsync={_videoOptions.VSync}, " +
+                    $"refresh={_videoOptions.RefreshRate}");
             }
             catch (Exception exception)
             {
@@ -5859,11 +5966,12 @@ internal static unsafe class VulkanVideoPresenter
 
         private PresentModeKHR ChoosePresentMode()
         {
-            // MAILBOX never blocks vkQueuePresentKHR on vblank, so a slow
-            // frame does not quantize the frame rate down to 30/20 fps the
-            // way FIFO does; the guest side is already paced by PaceFlip.
-            // FIFO is the only mode guaranteed by the spec and remains the
-            // fallback (MoltenVK typically exposes FIFO + IMMEDIATE only).
+            // FIFO is the only mode guaranteed by the spec and is the only
+            // mode used when VSync is requested.  MAILBOX still synchronizes
+            // presentation to vblank, but replaces queued images.  With a
+            // variable-rate guest producer that replacement pattern can make
+            // adjacent guest buffers alternate visibly (and can trigger VRR
+            // brightness flicker on high-refresh displays).
             uint modeCount = 0;
             if (_surfaceApi.GetPhysicalDeviceSurfacePresentModes(
                     _physicalDevice,
@@ -5885,26 +5993,9 @@ internal static unsafe class VulkanVideoPresenter
                 return PresentModeKHR.FifoKhr;
             }
 
-            if (!_videoOptions.VSync)
-            {
-                for (var index = 0u; index < modeCount; index++)
-                {
-                    if (modes[index] == PresentModeKHR.ImmediateKhr)
-                    {
-                        return PresentModeKHR.ImmediateKhr;
-                    }
-                }
-            }
-
-            for (var index = 0u; index < modeCount; index++)
-            {
-                if (modes[index] == PresentModeKHR.MailboxKhr)
-                {
-                    return PresentModeKHR.MailboxKhr;
-                }
-            }
-
-            return PresentModeKHR.FifoKhr;
+            return SelectPresentMode(
+                _videoOptions.VSync,
+                new ReadOnlySpan<PresentModeKHR>(modes, (int)modeCount));
         }
 
         private void CreateCommandResources()
@@ -8586,7 +8677,7 @@ internal static unsafe class VulkanVideoPresenter
                         ? CreateHostMovieTextureResource(texture, plane: 0)
                         : index == hostMovieTextures.Chroma
                             ? CreateHostMovieTextureResource(texture, plane: 1)
-                            : ResolveTextureResource(texture);
+                            : ResolveTextureResource(texture, shaderAddress);
                     var feedbackTarget = !texture.IsStorage
                         ? feedbackTargets?.FirstOrDefault(target =>
                             ReferenceEquals(resolved.GuestImage, target))
@@ -8748,7 +8839,9 @@ internal static unsafe class VulkanVideoPresenter
                 for (var index = 0; index < dispatch.Textures.Count; index++)
                 {
                     resources.Textures[index] =
-                        ResolveTextureResource(dispatch.Textures[index]);
+                        ResolveTextureResource(
+                            dispatch.Textures[index],
+                            dispatch.ShaderAddress);
                 }
 
                 if (traceResources)
@@ -9988,7 +10081,9 @@ internal static unsafe class VulkanVideoPresenter
         private static byte ClampByte(int value) => (byte)Math.Clamp(value, 0, 255);
 
         [MethodImpl(MethodImplOptions.NoInlining)]
-        private TextureResource ResolveTextureResource(GuestDrawTexture texture)
+        private TextureResource ResolveTextureResource(
+            GuestDrawTexture texture,
+            ulong shaderAddress = 0)
         {
             if (texture.IsStorage)
             {
@@ -10034,10 +10129,24 @@ internal static unsafe class VulkanVideoPresenter
                         $"tile={texture.TileMode} format={vkFormat}");
                 }
 
-                if (string.Equals(
-                        _traceGuestImagesMode,
-                        "alias",
-                        StringComparison.OrdinalIgnoreCase) &&
+                var traceAlias = string.Equals(
+                    _traceGuestImagesMode,
+                    "alias",
+                    StringComparison.OrdinalIgnoreCase) &&
+                    (!_traceGuestImageAddressFilterEnabled ||
+                        ShouldTraceGuestImageAddressForDiagnostics(guestImage.Address));
+                if (traceAlias &&
+                    _tracedGuestImageAliasMetadata.Add(
+                        (guestImage.Address, shaderAddress, texture.DstSelect)))
+                {
+                    TraceGuestImageAliasMetadata(
+                        texture,
+                        guestImage,
+                        vkFormat,
+                        shaderAddress);
+                }
+
+                if (traceAlias &&
                     _tracedGuestImageContents.Add(guestImage.Address))
                 {
                     // Deferred: reading back here would clobber the command
@@ -10165,6 +10274,27 @@ internal static unsafe class VulkanVideoPresenter
             var pixels = texture.RgbaPixels.Length == (int)expectedSize
                 ? texture.RgbaPixels
                 : CreateFallbackTexturePixels(texture.Format, rowLength, texture.Height, expectedSize);
+            // A GPU render target can share pages with CPU allocations that
+            // trigger the coarse write tracker.  Do not let an all-zero CPU
+            // snapshot erase valid compute/render output merely because an
+            // overlapping page changed.  Once a surface is genuinely known
+            // CPU-backed, zero remains meaningful (for example an atlas clear).
+            if (!ShouldApplyCpuTextureRefresh(
+                    guestImage.IsCpuBacked,
+                    pixels.AsSpan().IndexOfAnyExcept((byte)0) >= 0))
+            {
+                if (texture.WriteGeneration >= 0)
+                {
+                    lock (_gate)
+                    {
+                        _cpuBackedUploadGenerations[texture.Address] =
+                            texture.WriteGeneration;
+                    }
+                }
+
+                return false;
+            }
+
             var fingerprint = ComputeTextureContentFingerprint(pixels);
             if ((guestImage.Initialized || guestImage.InitialUploadPending) &&
                 guestImage.CpuContentFingerprint == fingerprint)
@@ -18271,6 +18401,20 @@ internal static unsafe class VulkanVideoPresenter
                 return;
             }
 
+            // IMMEDIATE presentation does not wait for vblank. Respect an
+            // explicitly selected host refresh without sleeping this render
+            // thread: guest GPU work continues to drain on intervening ticks,
+            // while completed presentations remain queued for the next slot.
+            var hostPresentNow = Stopwatch.GetTimestamp();
+            if (!IsHostPresentationDue(
+                    _videoOptions.VSync,
+                    _videoOptions.RefreshRate,
+                    hostPresentNow,
+                    _nextHostPresentTicks))
+            {
+                return;
+            }
+
             bool tookPresentation;
             using (RenderPhaseProfile.Measure(RenderPhaseProfile.Phase.TakePresentation))
             {
@@ -18621,6 +18765,13 @@ internal static unsafe class VulkanVideoPresenter
             recreateAfterPresent |= presentResult == Result.SuboptimalKhr;
             RenderDocCapture.OnPresent();
             VideoOutExports.ReportPresentedFrame();
+            if (!_videoOptions.VSync && _videoOptions.RefreshRate > 0)
+            {
+                _nextHostPresentTicks = NextHostPresentationDeadline(
+                    _videoOptions.RefreshRate,
+                    Stopwatch.GetTimestamp(),
+                    _nextHostPresentTicks);
+            }
             TraceGuestFlipQueueEvent(
                 "presented",
                 ref _guestFlipPresentedTraceCount,
@@ -18821,6 +18972,46 @@ internal static unsafe class VulkanVideoPresenter
             _frameGuestImageVersions[frameSlot] = null;
             _capturedGuestFlipVersions.Remove(presentedGuestImage.FlipVersion);
             DestroyGuestImage(presentedGuestImage);
+        }
+
+        private static void TraceGuestImageAliasMetadata(
+            GuestDrawTexture texture,
+            GuestImageResource image,
+            Format viewFormat,
+            ulong shaderAddress)
+        {
+            var dumpDirectory = Environment.GetEnvironmentVariable(
+                "SHARPEMU_GUEST_IMAGE_DUMP_DIR");
+            if (string.IsNullOrWhiteSpace(dumpDirectory))
+            {
+                return;
+            }
+
+            try
+            {
+                Directory.CreateDirectory(dumpDirectory);
+                File.AppendAllText(
+                    Path.Combine(
+                        dumpDirectory,
+                        $"alias-0x{image.Address:X16}.txt"),
+                    $"shader=0x{shaderAddress:X16}{Environment.NewLine}" +
+                    $"address=0x{texture.Address:X16}{Environment.NewLine}" +
+                    $"texture={texture.Width}x{texture.Height}{Environment.NewLine}" +
+                    $"image={image.Width}x{image.Height}{Environment.NewLine}" +
+                    $"guest_format={image.Format}{Environment.NewLine}" +
+                    $"view_format={viewFormat}{Environment.NewLine}" +
+                    $"guest_format_code={texture.Format}{Environment.NewLine}" +
+                    $"number_type={texture.NumberType}{Environment.NewLine}" +
+                    $"dst_select=0x{texture.DstSelect:X3}{Environment.NewLine}" +
+                    $"tile_mode={texture.TileMode}{Environment.NewLine}" +
+                    $"mip={texture.BaseMipLevel}/{texture.MipLevels}{Environment.NewLine}" +
+                    $"---{Environment.NewLine}");
+            }
+            catch (Exception exception)
+            {
+                Console.Error.WriteLine(
+                    $"[LOADER][WARN] Failed to write alias metadata: {exception.Message}");
+            }
         }
 
         private void TraceGuestImageContents(
