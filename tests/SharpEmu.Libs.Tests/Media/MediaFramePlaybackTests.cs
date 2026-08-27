@@ -9,6 +9,19 @@ namespace SharpEmu.Libs.Tests.Media;
 public sealed class MediaFramePlaybackTests
 {
     [Fact]
+    public void DecoderIsDisposedByItsDecodeThreadAfterNaturalEndOfStream()
+    {
+        var decoder = new DisposalTrackingDecoder();
+        var creatingThreadId = Environment.CurrentManagedThreadId;
+
+        using var playback = new MediaFramePlayback(decoder);
+
+        Assert.True(decoder.Disposed.Wait(TimeSpan.FromSeconds(2)));
+        Assert.Equal(1, decoder.DisposeCount);
+        Assert.NotEqual(creatingThreadId, decoder.DisposeThreadId);
+    }
+
+    [Fact]
     public void FramesAdvanceAccordingToMovieClock()
     {
         using var playback = new MediaFramePlayback(new SequenceDecoder(1, 2, 3));
@@ -102,6 +115,32 @@ public sealed class MediaFramePlaybackTests
 
         public void Dispose()
         {
+        }
+    }
+
+    private sealed class DisposalTrackingDecoder : IMediaFrameDecoder
+    {
+        public ManualResetEventSlim Disposed { get; } = new();
+
+        public int DisposeCount { get; private set; }
+
+        public int DisposeThreadId { get; private set; }
+
+        public uint Width => 1;
+
+        public uint Height => 1;
+
+        public uint FramesPerSecondNumerator => 30;
+
+        public uint FramesPerSecondDenominator => 1;
+
+        public bool TryDecodeNextFrame(Span<byte> destination) => false;
+
+        public void Dispose()
+        {
+            DisposeThreadId = Environment.CurrentManagedThreadId;
+            DisposeCount++;
+            Disposed.Set();
         }
     }
 }

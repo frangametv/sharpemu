@@ -69,6 +69,34 @@ public sealed class HeadPreservingQueueRetentionTests
     }
 
     [Fact]
+    public void ReadyTailSupersedesPermanentlyIncompleteHead()
+    {
+        var pending = new LinkedList<int>([1, 2, 3, 4]);
+        List<int> superseded = [];
+
+        var taken = HeadPreservingQueueRetention.TryTakeFirstReady(
+            pending,
+            value => value >= 3,
+            out var item,
+            superseded.Add);
+
+        Assert.True(taken);
+        Assert.Equal(3, item);
+        Assert.Equal([1, 2], superseded);
+        Assert.Equal([4], pending);
+    }
+
+    [Fact]
+    public void NoReadyItemPreservesQueue()
+    {
+        var pending = new LinkedList<int>([1, 2]);
+
+        Assert.False(HeadPreservingQueueRetention.TryTakeFirstReady(
+            pending, _ => false, out _));
+        Assert.Equal([1, 2], pending);
+    }
+
+    [Fact]
     public void OrderedFlipYieldsToPresenter()
     {
         var flip = new VulkanOrderedGuestFlip(

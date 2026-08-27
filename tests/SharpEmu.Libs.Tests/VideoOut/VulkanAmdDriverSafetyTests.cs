@@ -18,6 +18,14 @@ public sealed class VulkanAmdDriverSafetyTests
         "D17904BBF37B1B9C6E7CF6C8222AF540340A2BB1B4B5DB66EE477934DAB3C3AA";
     private const string SecondFaultingFragmentDigest =
         "C710C7055121A5C5E2821E6765EBEAE4E130AD17120D8986F14849534D57DC00";
+    private const string AstroFaultingVertexDigest =
+        "D46E13BF027B050D000000000000000000000000000000000000000000000000";
+    private const string AstroFaultingFragmentDigest =
+        "02B5BD96E82E762F000000000000000000000000000000000000000000000000";
+    private const string GtaFaultingVertexDigest =
+        "5CD1D345A0121A5E000000000000000000000000000000000000000000000000";
+    private const string GtaFaultingFragmentDigest =
+        "407058204AFB4080000000000000000000000000000000000000000000000000";
 
     [Theory]
     [InlineData(AmdVendorId, true, null, true)]
@@ -134,6 +142,22 @@ public sealed class VulkanAmdDriverSafetyTests
                 FaultingVertexDigest,
                 SecondFaultingFragmentDigest,
                 configuredValue));
+        Assert.Equal(
+            expected,
+            VulkanVideoPresenter.ShouldQuarantineAmdWindowsGraphicsPipeline(
+                vendorId,
+                isWindows,
+                AstroFaultingVertexDigest,
+                AstroFaultingFragmentDigest,
+                configuredValue));
+        Assert.Equal(
+            expected,
+            VulkanVideoPresenter.ShouldQuarantineAmdWindowsGraphicsPipeline(
+                vendorId,
+                isWindows,
+                GtaFaultingVertexDigest,
+                GtaFaultingFragmentDigest,
+                configuredValue));
         Assert.False(
             VulkanVideoPresenter.ShouldQuarantineAmdWindowsGraphicsPipeline(
                 vendorId,
@@ -147,6 +171,43 @@ public sealed class VulkanAmdDriverSafetyTests
                 isWindows,
                 FaultingVertexDigest,
                 "2" + FaultingFragmentDigest[1..],
+                configuredValue));
+    }
+
+    [Theory]
+    [InlineData(AmdVendorId, true, null, true)]
+    [InlineData(AmdVendorId, true, "1", true)]
+    [InlineData(AmdVendorId, true, "0", false)]
+    [InlineData(AmdVendorId, false, null, false)]
+    [InlineData(NvidiaVendorId, true, null, false)]
+    public void SolidFragmentFallbackIsLimitedToFieldConfirmedAmdWindowsPairs(
+        uint vendorId,
+        bool isWindows,
+        string? configuredValue,
+        bool expected)
+    {
+        Assert.Equal(
+            expected,
+            VulkanVideoPresenter.ShouldUseAmdWindowsSolidFragmentFallback(
+                vendorId,
+                isWindows,
+                AstroFaultingVertexDigest,
+                AstroFaultingFragmentDigest,
+                configuredValue));
+        Assert.Equal(
+            expected,
+            VulkanVideoPresenter.ShouldUseAmdWindowsSolidFragmentFallback(
+                vendorId,
+                isWindows,
+                GtaFaultingVertexDigest,
+                GtaFaultingFragmentDigest,
+                configuredValue));
+        Assert.False(
+            VulkanVideoPresenter.ShouldUseAmdWindowsSolidFragmentFallback(
+                vendorId,
+                isWindows,
+                AstroFaultingVertexDigest,
+                GtaFaultingFragmentDigest,
                 configuredValue));
     }
 
@@ -174,6 +235,26 @@ public sealed class VulkanAmdDriverSafetyTests
                 vendorId,
                 isWindows,
                 "2" + FaultingVertexDigest[1..],
+                configuredValue));
+    }
+
+    [Theory]
+    [InlineData(AmdVendorId, true, null, true)]
+    [InlineData(AmdVendorId, true, "1", true)]
+    [InlineData(AmdVendorId, true, "0", false)]
+    [InlineData(AmdVendorId, false, null, false)]
+    [InlineData(NvidiaVendorId, true, null, false)]
+    public void GlobalFullscreenVertexFallbackReproducesRun10OnlyOnAmdWindows(
+        uint vendorId,
+        bool isWindows,
+        string? configuredValue,
+        bool expected)
+    {
+        Assert.Equal(
+            expected,
+            VulkanVideoPresenter.ShouldUseAmdWindowsGlobalFullscreenVertexFallback(
+                vendorId,
+                isWindows,
                 configuredValue));
     }
 }

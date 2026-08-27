@@ -338,6 +338,14 @@ internal sealed class MediaFramePlayback : IDisposable
                 Monitor.PulseAll(_gate);
             }
         }
+        finally
+        {
+            // FFmpeg creates worker state while decoding and its teardown is
+            // safest on the same host thread after DecodeLoop has left every
+            // native call.  Disposing from the presentation thread at EOF can
+            // race native codec workers and intermittently read released pages.
+            _decoder.Dispose();
+        }
     }
 
     public void Dispose()
@@ -353,14 +361,13 @@ internal sealed class MediaFramePlayback : IDisposable
             Monitor.PulseAll(_gate);
         }
         if (Thread.CurrentThread != _decoderThread &&
-            !_decoderThread.Join(TimeSpan.FromMilliseconds(100)))
+            !_decoderThread.Join(TimeSpan.FromSeconds(2)))
         {
-            _decoder.Dispose();
-            _decoderThread.Join(TimeSpan.FromSeconds(2));
-        }
-        else
-        {
-            _decoder.Dispose();
+            // Never free a native decoder while its owning thread may still be
+            // inside it.  The thread is background-bound and its finally block
+            // will release the decoder when the current native call returns.
+            Console.Error.WriteLine(
+                "[LOADER][WARN] Bink decoder teardown deferred: decode thread is still active.");
         }
     }
 

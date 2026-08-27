@@ -31,6 +31,43 @@ internal static class HeadPreservingQueueRetention
 
         return coalescedCount;
     }
+
+    /// <summary>
+    /// Takes the oldest ready item and discards older items that it supersedes.
+    /// A permanently incomplete FIFO head must not hide newer completed frames.
+    /// </summary>
+    public static bool TryTakeFirstReady<T>(
+        LinkedList<T> pending,
+        Predicate<T> isReady,
+        out T item,
+        Action<T>? onSuperseded = null)
+    {
+        ArgumentNullException.ThrowIfNull(pending);
+        ArgumentNullException.ThrowIfNull(isReady);
+
+        var ready = pending.First;
+        while (ready is not null && !isReady(ready.Value))
+        {
+            ready = ready.Next;
+        }
+
+        if (ready is null)
+        {
+            item = default!;
+            return false;
+        }
+
+        while (pending.First != ready)
+        {
+            var superseded = pending.First!.Value;
+            pending.RemoveFirst();
+            onSuperseded?.Invoke(superseded);
+        }
+
+        item = ready.Value;
+        pending.Remove(ready);
+        return true;
+    }
 }
 
 internal static class GuestPresentationScheduling
