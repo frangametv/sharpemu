@@ -13040,9 +13040,9 @@ var renderTargets = GetRenderTargets(state.CxRegisters);
                     isStorage,
                     Gen5ShaderTranslator.IsImageWriteOperation(binding.Opcode),
                     binding.MipLevel ?? 0,
-                    binding.SamplerDescriptor,
-                    Gen5ShaderTranslator.IsArrayedImageBinding(binding),
-                    binding.Control.Dimension == 2));
+                NormalizeSamplerDescriptorForImageOperation(
+                    binding.SamplerDescriptor),
+                    Gen5ShaderTranslator.IsArrayedImageBinding(binding)));
         }
 
         error = string.Empty;
@@ -14768,7 +14768,6 @@ private static long _indirectDrawProbeCount;
                     ctx,
                     descriptor,
                     binding.IsStorage,
-                    binding.WritesImage,
                     binding.MipLevel,
                     binding.SamplerDescriptor,
                     binding.IsArrayed,
@@ -15296,8 +15295,9 @@ private static long _indirectDrawProbeCount;
         uint sourceWidth,
         int logicalByteCount,
         byte[] source,
-        int sourceX = 0,
-        int sourceY = 0)
+        bool baseMipInTail = false,
+        int tailElementX = 0,
+        int tailElementY = 0)
     {
         if (!GnmTiling.NeedsDetile(descriptor.TileMode) ||
             !TryGetTextureElementLayout(
@@ -15308,6 +15308,48 @@ private static long _indirectDrawProbeCount;
                 out var bytesPerElement))
         {
             return null;
+        }
+
+        if (baseMipInTail)
+        {
+            if (!GnmTiling.TryGetBlockElementDimensions(
+                    descriptor.TileMode,
+                    bytesPerElement,
+                    out var blockWidth,
+                    out var blockHeight))
+            {
+                return null;
+            }
+
+            var blockByteCount = (long)blockWidth * blockHeight * bytesPerElement;
+            if (source.Length < blockByteCount ||
+                (long)elementsWide * elementsHigh * bytesPerElement > logicalByteCount)
+            {
+                return null;
+            }
+
+            var blockLinear = new byte[blockByteCount];
+            if (!GnmTiling.TryDetile(
+                    source,
+                    blockLinear,
+                    descriptor.TileMode,
+                    blockWidth,
+                    blockHeight,
+                    bytesPerElement))
+            {
+                return null;
+            }
+
+            var tailLinear = new byte[logicalByteCount];
+            var rowBytes = elementsWide * bytesPerElement;
+            for (var y = 0; y < elementsHigh; y++)
+            {
+                var sourceOffset = (((long)tailElementY + y) * blockWidth + tailElementX) * bytesPerElement;
+                blockLinear.AsSpan((int)sourceOffset, rowBytes)
+                    .CopyTo(tailLinear.AsSpan(y * rowBytes, rowBytes));
+            }
+
+            return tailLinear;
         }
 
         var volumeDepth = checked((int)GetTextureVolumeDepth(
@@ -15330,9 +15372,7 @@ private static long _indirectDrawProbeCount;
                     descriptor.TileMode,
                     elementsWide,
                     elementsHigh,
-                    bytesPerElement,
-                    sourceX,
-                    sourceY))
+                    bytesPerElement))
             {
                 return null;
             }
@@ -15340,6 +15380,7 @@ private static long _indirectDrawProbeCount;
 
         return linear;
     }
+
 
     private static void TraceTextureFallback(TextureDescriptor descriptor, string reason)
     {
@@ -15364,11 +15405,11 @@ private static long _indirectDrawProbeCount;
         CpuContext ctx,
         TextureDescriptor descriptor,
         bool isStorage,
-        bool writesImage,
         uint mipLevel,
         IReadOnlyList<uint> samplerDescriptor,
         bool isArrayed,
-        out GuestDrawTexture texture)
+        out GuestDrawTexture texture,
+        int snapshotAttempt = 0)
     {
         texture = default!;
         var textureDepth = GetTextureVolumeDepth(
@@ -15388,7 +15429,6 @@ private static long _indirectDrawProbeCount;
             TraceTextureFallback(descriptor, "invalid-descriptor");
             texture = CreateFallbackGuestDrawTexture(
                 isStorage,
-                writesImage,
                 descriptor.Format,
                 descriptor.NumberType,
                 isArrayed,
@@ -15435,7 +15475,6 @@ private static long _indirectDrawProbeCount;
                 $"invalid-byte-count:{sourceByteCount}");
             texture = CreateFallbackGuestDrawTexture(
                 isStorage,
-                writesImage,
                 descriptor.Format,
                 descriptor.NumberType,
                 isArrayed,
@@ -15445,25 +15484,17 @@ private static long _indirectDrawProbeCount;
         }
 
         var physicalSourceByteCount = sourceSliceByteCount;
-        var guestAllocationByteCount = sourceSliceByteCount;
-        ulong sourceOffset = 0;
-        var resourceMipLevels = descriptor.HasExtendedDescriptor
-            ? descriptor.ResourceMipLevels
-            : 1u;
-        var chainSliceBytes = sourceSliceByteCount;
-        var sourceX = 0;
-        var sourceY = 0;
         var elementsWide = 0;
         var elementsHigh = 0;
         var bytesPerElement = 0;
-        var hasElementLayout = TryGetTextureElementLayout(
-            descriptor,
-            sourceWidth,
-            out elementsWide,
-            out elementsHigh,
-            out bytesPerElement);
-        if (GnmTiling.NeedsDetile(descriptor.TileMode) &&
-            hasElementLayout &&
+        var hasElementLayout = GnmTiling.NeedsDetile(descriptor.TileMode) &&
+            TryGetTextureElementLayout(
+                descriptor,
+                sourceWidth,
+                out elementsWide,
+                out elementsHigh,
+                out bytesPerElement);
+        if (hasElementLayout &&
             GnmTiling.TryGetTiledByteCount(
                 descriptor.TileMode,
                 elementsWide,
@@ -15472,92 +15503,30 @@ private static long _indirectDrawProbeCount;
                 out var tiledByteCount))
         {
             physicalSourceByteCount = tiledByteCount;
-            guestAllocationByteCount = tiledByteCount;
-            chainSliceBytes = tiledByteCount;
         }
 
-        // Thin 64 KiB standard mip chains reserve their first block for the
-        // mip tail and store larger levels in reverse order. Standalone CPU
-        // textures currently upload resource mip 0, so resolve its real byte
-        // range instead of interpreting the tail and smaller levels as mip 0.
-        GnmTiling.TiledMipLayout tiledMipLayout = default;
-        var hasStandard64KMipLayout = GnmTiling.NeedsDetile(descriptor.TileMode) &&
-            hasElementLayout &&
-            GnmTiling.TryGetStandard64KMipLayout(
+        var resourceMipLevels = descriptor.HasExtendedDescriptor
+            ? descriptor.ResourceMipLevels
+            : 1u;
+        var baseMipByteOffset = 0UL;
+        var baseMipInTail = false;
+        var mipTailElementX = 0;
+        var mipTailElementY = 0;
+        var chainSliceBytes = physicalSourceByteCount;
+        if (hasElementLayout && resourceMipLevels > 1 &&
+            GnmTiling.TryGetBaseMipPlacement(
                 descriptor.TileMode,
                 elementsWide,
                 elementsHigh,
                 bytesPerElement,
                 resourceMipLevels,
-                mipLevel: 0,
-                out tiledMipLayout);
-        if (hasStandard64KMipLayout)
+                out baseMipByteOffset,
+                out baseMipInTail,
+                out mipTailElementX,
+                out mipTailElementY,
+                out var placedChainSliceBytes))
         {
-            sourceOffset = tiledMipLayout.SourceOffset;
-            physicalSourceByteCount = tiledMipLayout.SourceByteCount;
-            guestAllocationByteCount = tiledMipLayout.AllocationByteCount;
-            chainSliceBytes = tiledMipLayout.AllocationByteCount;
-            sourceX = tiledMipLayout.SourceX;
-            sourceY = tiledMipLayout.SourceY;
-        }
-        else if (hasElementLayout &&
-                 resourceMipLevels > 1 &&
-                 GnmTiling.TryGetBaseMipPlacement(
-                     descriptor.TileMode,
-                     elementsWide,
-                     elementsHigh,
-                     bytesPerElement,
-                     resourceMipLevels,
-                     out var baseMipByteOffset,
-                     out var baseMipInTail,
-                     out var mipTailElementX,
-                     out var mipTailElementY,
-                     out var placedChainSliceBytes))
-        {
-            sourceOffset = baseMipByteOffset;
-            guestAllocationByteCount = placedChainSliceBytes;
             chainSliceBytes = placedChainSliceBytes;
-            if (baseMipInTail)
-            {
-                sourceX = mipTailElementX;
-                sourceY = mipTailElementY;
-            }
-        }
-
-        physicalSourceByteCount = checked(physicalSourceByteCount * textureDepth);
-        guestAllocationByteCount = checked(guestAllocationByteCount * textureDepth);
-        if (physicalSourceByteCount > MaxPresentedTextureBytes ||
-            physicalSourceByteCount > int.MaxValue ||
-            guestAllocationByteCount > MaxPresentedTextureBytes)
-        {
-            texture = CreateFallbackGuestDrawTexture(
-                isStorage,
-                writesImage,
-                descriptor.Format,
-                descriptor.NumberType,
-                isArrayed,
-                descriptor.Type,
-                textureDepth);
-            return true;
-        }
-
-        ulong physicalSourceAddress;
-        try
-        {
-            physicalSourceAddress = checked(descriptor.Address + sourceOffset);
-        }
-        catch (OverflowException)
-        {
-            TraceTextureFallback(descriptor, $"source-address-overflow:{sourceOffset}");
-            texture = CreateFallbackGuestDrawTexture(
-                isStorage,
-                writesImage,
-                descriptor.Format,
-                descriptor.NumberType,
-                isArrayed,
-                descriptor.Type,
-                textureDepth);
-            return true;
         }
 
         physicalSourceByteCount = checked(physicalSourceByteCount * textureDepth);
@@ -15566,7 +15535,6 @@ private static long _indirectDrawProbeCount;
         {
             texture = CreateFallbackGuestDrawTexture(
                 isStorage,
-                writesImage,
                 descriptor.Format,
                 descriptor.NumberType,
                 isArrayed,
@@ -15588,17 +15556,16 @@ private static long _indirectDrawProbeCount;
         // generation-stale when the guest CPU rewrites a CPU-backed image
         // (video planes, streamed font atlases), which routes this draw back
         // through the texel copy below so the refresh path re-uploads.
-        var guestImageAvailable = !isStorage &&
+        // With the write tracker off (Windows default), IsGuestImageUploadKnown
+        // uses a cheap guest-memory probe so static UI can still skip (Dead
+        // Cells menus) while changing CPU content (GTA Bink) forces a copy.
+        if (!isStorage &&
             !wantsArrayUpload &&
             descriptor.Address != 0 &&
             GuestGpu.Current.IsGuestImageUploadKnown(
                 descriptor.Address,
                 descriptor.Format,
-                descriptor.NumberType);
-        if (TryUseAvailableGuestImageWithoutSnapshot(
-                descriptor.Address,
-                guestImageAvailable,
-                out var dirtyGuestImageSnapshotClaimed))
+                descriptor.NumberType))
         {
             NoteSampledAddress(descriptor.Address, descriptor.Format, descriptor.NumberType);
             texture = new GuestDrawTexture(
@@ -15618,149 +15585,140 @@ private static long _indirectDrawProbeCount;
                 TileMode: descriptor.TileMode,
                 DstSelect: descriptor.DstSelect,
                 Sampler: ToGuestSampler(samplerDescriptor),
-                WritesImage: writesImage,
-                SourceOffset: sourceOffset,
-                PhysicalSourceByteCount: physicalSourceByteCount,
-                GuestAllocationByteCount: guestAllocationByteCount,
-                SourceX: sourceX,
-                SourceY: sourceY,
-                ElementsWide: elementsWide,
-                ElementsHigh: elementsHigh,
-                BytesPerElement: bytesPerElement,
                 ArrayedView: isArrayed,
-                ArrayLayers: arrayUploadLayers,
                 Type: descriptor.Type,
                 Depth: textureDepth);
             return true;
         }
 
-        var dirtyGuestImageSnapshotSucceeded = false;
-        try
+        if (isStorage)
         {
-            if (isStorage)
+            var initialPixels = Array.Empty<byte>();
+            var uploadKnown = descriptor.Address != 0 &&
+                GuestGpu.Current.IsGuestImageUploadKnown(
+                    descriptor.Address,
+                    descriptor.Format,
+                    descriptor.NumberType);
+            var readSucceeded = false;
+            var linearNonzero = false;
+            var storageSnapshot = default(SharpEmu.HLE.GuestImageWriteTracker.ReadSnapshot);
+            if (descriptor.Address != 0 && !uploadKnown)
             {
-                var initialPixels = Array.Empty<byte>();
-                var uploadKnown = descriptor.Address != 0 &&
-                    GuestGpu.Current.IsGuestImageUploadKnown(
-                        descriptor.Address,
-                        descriptor.Format,
-                        descriptor.NumberType);
-                var readSucceeded = false;
-                var linearNonzero = false;
-                if (descriptor.Address != 0 && !uploadKnown)
+                // Storage images can be pre-populated in tiled guest memory
+                // just like sampled images. Reading only the logical linear
+                // byte count both truncates 64 KiB swizzle blocks and uploads
+                // tiled bytes as scanlines. Read the full physical footprint
+                // and run the same AddrLib-derived detile path used below for
+                // sampled textures before seeding the Vulkan image.
+                storageSnapshot = SharpEmu.HLE.GuestImageWriteTracker.BeginReadSnapshot(
+                    descriptor.Address,
+                    checked(baseMipByteOffset + physicalSourceByteCount),
+                    source: "agc.storage-image-snapshot");
+                var storageSource = new byte[(int)physicalSourceByteCount];
+                if (ctx.Memory.TryRead(descriptor.Address + baseMipByteOffset, storageSource))
                 {
-                    // Storage images can be pre-populated in tiled guest memory
-                    // just like sampled images. Reading only the logical linear
-                    // byte count both truncates 64 KiB swizzle blocks and uploads
-                    // tiled bytes as scanlines. Read the full physical footprint
-                    // and run the same AddrLib-derived detile path used below for
-                    // sampled textures before seeding the Vulkan image.
-                    var storageSource = new byte[(int)physicalSourceByteCount];
-                    if (ctx.Memory.TryRead(physicalSourceAddress, storageSource))
+                    readSucceeded = true;
+                    var linearStorage = TryDetileTextureSource(
+                        descriptor,
+                        sourceWidth,
+                        checked((int)sourceByteCount),
+                        storageSource,
+                        baseMipInTail,
+                        mipTailElementX,
+                        mipTailElementY) ?? storageSource
+                            .AsSpan(0, checked((int)sourceByteCount))
+                            .ToArray();
+                    if (linearStorage.AsSpan().IndexOfAnyExcept((byte)0) >= 0)
                     {
-                        readSucceeded = true;
-                        var linearStorage = TryDetileTextureSource(
-                            descriptor,
-                            sourceWidth,
-                            checked((int)sourceByteCount),
-                            storageSource,
-                            sourceX,
-                            sourceY) ?? storageSource
-                                .AsSpan(0, checked((int)sourceByteCount))
-                                .ToArray();
-                        if (linearStorage.AsSpan().IndexOfAnyExcept((byte)0) >= 0)
-                        {
-                            linearNonzero = true;
-                            initialPixels = linearStorage;
-                        }
+                        linearNonzero = true;
+                        initialPixels = linearStorage;
                     }
                 }
 
-                if (_traceStorageImageInitAddress == descriptor.Address)
+                if (readSucceeded &&
+                    !SharpEmu.HLE.GuestImageWriteTracker.IsReadSnapshotStable(storageSnapshot))
                 {
-                    Console.Error.WriteLine(
-                        $"[LOADER][TRACE] agc.storage_initial_data " +
-                        $"addr=0x{descriptor.Address:X16} op_storage={isStorage} " +
-                        $"upload_known={uploadKnown} read={readSucceeded} " +
-                        $"nonzero={linearNonzero} initial_bytes={initialPixels.Length} " +
-                        $"logical_bytes={sourceByteCount} physical_bytes={physicalSourceByteCount} " +
-                        $"source_offset={sourceOffset} allocation_bytes={guestAllocationByteCount} " +
-                        $"size={descriptor.Width}x{descriptor.Height} pitch={sourceWidth} " +
-                        $"fmt={descriptor.Format} num={descriptor.NumberType} " +
-                        $"tile={descriptor.TileMode} mip={mipLevel}");
-                }
+                    if (snapshotAttempt < 2)
+                    {
+                        return TryCreateGuestDrawTexture(
+                            ctx,
+                            descriptor,
+                            isStorage,
+                            mipLevel,
+                            samplerDescriptor,
+                            isArrayed,
+                            out texture,
+                            snapshotAttempt + 1);
+                    }
 
-                texture = new GuestDrawTexture(
-                    descriptor.Address,
-                    descriptor.Width,
-                    descriptor.Height,
-                    descriptor.Format,
-                    descriptor.NumberType,
-                    initialPixels,
-                    IsFallback: descriptor.Address == 0,
-                    IsStorage: true,
-                    MipLevels: descriptor.MipLevels,
-                    MipLevel: mipLevel,
-                    BaseMipLevel: descriptor.ViewBaseLevel,
-                    ResourceMipLevels: descriptor.ResourceMipLevels,
-                    Pitch: sourceWidth,
-                    TileMode: descriptor.TileMode,
-                    DstSelect: descriptor.DstSelect,
-                    Sampler: ToGuestSampler(samplerDescriptor),
-                    WritesImage: writesImage,
-                    SourceOffset: sourceOffset,
-                    PhysicalSourceByteCount: physicalSourceByteCount,
-                    GuestAllocationByteCount: guestAllocationByteCount,
-                    SourceX: sourceX,
-                    SourceY: sourceY,
-                    ElementsWide: elementsWide,
-                    ElementsHigh: elementsHigh,
-                    BytesPerElement: bytesPerElement,
-                    ArrayedView: isArrayed,
-                    ArrayLayers: 1,
-                    Type: descriptor.Type,
-                    Depth: textureDepth);
-                return true;
+                    initialPixels = [];
+                }
             }
 
-            // When the presenter already holds this exact texture identity in
-            // its cache, the texel copy below would be discarded on arrival; for
-            // scenes that sample large textures every draw this copy dominated
-            // CPU time. The dirty peek closes the race with eviction: a texture
-            // the guest rewrote must ship fresh texels with this draw, because
-            // the render thread evicts the stale cache entry before executing it
-            // (skipping would leave the draw with no pixels and a fallback
-            // texture for the frame — visible flicker on animated textures).
-            var sampler = ToGuestSampler(samplerDescriptor);
-            var trackedByteCount = guestAllocationByteCount;
-            if (wantsArrayUpload)
+            if (ParseOptionalHexAddress(
+                    Environment.GetEnvironmentVariable(
+                        "SHARPEMU_TRACE_STORAGE_IMAGE_INIT_ADDRESS")) ==
+                descriptor.Address)
             {
-                try
-                {
-                    trackedByteCount = checked(chainSliceBytes * arrayUploadLayers);
-                }
-                catch (OverflowException)
-                {
-                    trackedByteCount = guestAllocationByteCount;
-                }
+                Console.Error.WriteLine(
+                    $"[LOADER][TRACE] agc.storage_initial_data " +
+                    $"addr=0x{descriptor.Address:X16} op_storage={isStorage} " +
+                    $"upload_known={uploadKnown} read={readSucceeded} " +
+                    $"nonzero={linearNonzero} initial_bytes={initialPixels.Length} " +
+                    $"logical_bytes={sourceByteCount} physical_bytes={physicalSourceByteCount} " +
+                    $"size={descriptor.Width}x{descriptor.Height} pitch={sourceWidth} " +
+                    $"fmt={descriptor.Format} num={descriptor.NumberType} " +
+                    $"tile={descriptor.TileMode} mip={mipLevel}");
             }
 
-            if (descriptor.Address != 0)
-            {
-                GuestImageWriteTracker.Track(
-                    descriptor.Address,
-                    trackedByteCount,
-                    source: "agc.decoded-texture");
-            }
+            NoteSampledAddress(descriptor.Address, descriptor.Format, descriptor.NumberType);
+            texture = new GuestDrawTexture(
+                descriptor.Address,
+                descriptor.Width,
+                descriptor.Height,
+                descriptor.Format,
+                descriptor.NumberType,
+                initialPixels,
+                IsFallback: descriptor.Address == 0,
+                IsStorage: true,
+                MipLevels: descriptor.MipLevels,
+                MipLevel: mipLevel,
+                BaseMipLevel: descriptor.ViewBaseLevel,
+                ResourceMipLevels: descriptor.ResourceMipLevels,
+                Pitch: sourceWidth,
+                TileMode: descriptor.TileMode,
+                DstSelect: descriptor.DstSelect,
+                Sampler: ToGuestSampler(samplerDescriptor),
+                WriteGeneration: storageSnapshot.Active ? storageSnapshot.Generation : -1,
+                Type: descriptor.Type,
+                Depth: textureDepth,
+                SourceByteCount: checked(baseMipByteOffset + physicalSourceByteCount),
+                CpuSnapshotStable:
+                    !readSucceeded ||
+                    SharpEmu.HLE.GuestImageWriteTracker.IsReadSnapshotStable(storageSnapshot));
+            return true;
+        }
 
-            var hasWriteGeneration = GuestImageWriteTracker.TryGetWriteGeneration(
+        // When the presenter already holds this exact texture identity in
+        // its cache, the texel copy below would be discarded on arrival; for
+        // scenes that sample large textures every draw this copy dominated
+        // CPU time (Dead Cells menus). The cache records the write generation
+        // that supplied its pixels. A later native or managed CPU write bumps
+        // the tracker generation and makes IsTextureContentCached return false.
+        // CPU-updated guest Bink planes are handled by the upload-known gate
+        // above when the tracker cannot observe native writes.
+        var sampler = ToGuestSampler(samplerDescriptor);
+        // Capture the generation associated with these texels. The presenter
+        // records it after upload, and a later tracked write makes the cache
+        // generation differ so the next bind sends fresh texels.
+        var hasWriteGeneration =
+            SharpEmu.HLE.GuestImageWriteTracker.TryGetWriteGeneration(
                 descriptor.Address,
                 out var writeGeneration);
-            if (!dirtyGuestImageSnapshotClaimed &&
-                !_textureCopySkipDisabled &&
-                descriptor.Address != 0 &&
-                !SharpEmu.HLE.GuestImageWriteTracker.PeekDirty(descriptor.Address) &&
-                GuestGpu.Current.IsTextureContentCached(
+        if (!_textureCopySkipDisabled &&
+            descriptor.Address != 0 &&
+            GuestGpu.Current.IsTextureContentCached(
+                new TextureCacheLookupIdentity(
                     new TextureContentIdentity(
                         descriptor.Address,
                         descriptor.Width,
@@ -15770,95 +15728,123 @@ private static long _indirectDrawProbeCount;
                         descriptor.DstSelect,
                         descriptor.TileMode,
                         sourceWidth,
-                        sourceOffset,
-                        sampler,
                         isArrayed,
                         arrayUploadLayers,
-                        Type: descriptor.Type,
-                        Depth: textureDepth)))
+                        descriptor.Type,
+                        textureDepth,
+                        descriptor.ResourceMipLevels),
+                    sampler)))
+        {
+            NoteSampledAddress(descriptor.Address, descriptor.Format, descriptor.NumberType);
+            texture = new GuestDrawTexture(
+                descriptor.Address,
+                descriptor.Width,
+                descriptor.Height,
+                descriptor.Format,
+                descriptor.NumberType,
+                [],
+                IsFallback: false,
+                IsStorage: false,
+                MipLevels: descriptor.MipLevels,
+                MipLevel: mipLevel,
+                BaseMipLevel: descriptor.ViewBaseLevel,
+                ResourceMipLevels: descriptor.ResourceMipLevels,
+                Pitch: sourceWidth,
+                TileMode: descriptor.TileMode,
+                DstSelect: descriptor.DstSelect,
+                Sampler: sampler,
+                ArrayedView: isArrayed,
+                ArrayLayers: arrayUploadLayers,
+                Type: descriptor.Type,
+                Depth: textureDepth);
+            return true;
+        }
+
+        var trackedSourceByteCount = wantsArrayUpload
+            ? checked(chainSliceBytes * arrayUploadLayers)
+            : checked(baseMipByteOffset + physicalSourceByteCount);
+        var readSnapshot = SharpEmu.HLE.GuestImageWriteTracker.BeginReadSnapshot(
+            descriptor.Address,
+            trackedSourceByteCount,
+            source: "agc.sampled-texture-snapshot");
+        if (readSnapshot.Active)
+        {
+            hasWriteGeneration = true;
+            writeGeneration = readSnapshot.Generation;
+        }
+
+        if (wantsArrayUpload)
+        {
+            var arrayLayers = arrayUploadLayers;
+            var layerBytes = checked((int)sourceSliceByteCount);
+            var totalBytes = (long)layerBytes * arrayLayers;
+
+            if (hasElementLayout && resourceMipLevels > 1 &&
+                TryCreateTiledArrayMipChain(
+                    ctx,
+                    descriptor,
+                    sampler,
+                    arrayLayers,
+                    elementsWide,
+                    elementsHigh,
+                    bytesPerElement,
+                    hasWriteGeneration ? writeGeneration : -1,
+                    out texture))
             {
-                texture = new GuestDrawTexture(
-                    descriptor.Address,
-                    descriptor.Width,
-                    descriptor.Height,
-                    descriptor.Format,
-                    descriptor.NumberType,
-                    [],
-                    IsFallback: false,
-                    IsStorage: false,
-                    MipLevels: descriptor.MipLevels,
-                    MipLevel: mipLevel,
-                    BaseMipLevel: descriptor.ViewBaseLevel,
-                    ResourceMipLevels: descriptor.ResourceMipLevels,
-                    Pitch: sourceWidth,
-                    TileMode: descriptor.TileMode,
-                    DstSelect: descriptor.DstSelect,
-                    Sampler: sampler,
-                    WritesImage: writesImage,
-                    SourceOffset: sourceOffset,
-                    PhysicalSourceByteCount: physicalSourceByteCount,
-                    GuestAllocationByteCount: guestAllocationByteCount,
-                    SourceX: sourceX,
-                    SourceY: sourceY,
-                    ElementsWide: elementsWide,
-                    ElementsHigh: elementsHigh,
-                    BytesPerElement: bytesPerElement,
-                    ArrayedView: isArrayed,
-                    ArrayLayers: arrayUploadLayers,
-                    Type: descriptor.Type,
-                    Depth: textureDepth);
-                return true;
+                NoteSampledAddress(descriptor.Address, descriptor.Format, descriptor.NumberType);
+                return FinalizeGuestTextureSnapshot(
+                    ctx,
+                    descriptor,
+                    isStorage,
+                    mipLevel,
+                    samplerDescriptor,
+                    isArrayed,
+                    readSnapshot,
+                    snapshotAttempt,
+                    texture,
+                    out texture);
             }
 
-            if (wantsArrayUpload)
+            // GPU detile for arrayed exact-XOR/4bpp textures: pack the tiled array
+            // slices contiguously and hand them to the GPU pass (one dispatch-Z
+            // layer per slice), mirroring the single-layer gate above. The backend
+            // deswizzles every layer on the GPU; only unsupported cases fall to the
+            // CPU per-layer detile below. Font/text atlases uploaded as 2D arrays
+            // take this path.
+            if (_gpuDetileEnabled && hasElementLayout && !baseMipInTail &&
+                IsGpuDetileBytesPerElement(bytesPerElement) &&
+                IsGpuDetileTextureType(descriptor.Type) &&
+                (long)physicalSourceByteCount * arrayLayers <= int.MaxValue)
             {
-                var arrayLayers = arrayUploadLayers;
-                var layerBytes = checked((int)sourceByteCount);
-                var totalBytes = (long)layerBytes * arrayLayers;
-                if (totalBytes <= int.MaxValue)
+                var gpuArrayParams = GnmTiling.GetDetileParams(
+                    descriptor.TileMode, bytesPerElement, elementsWide, elementsHigh);
+                if (IsGpuDetileEquation(gpuArrayParams.Equation) &&
+                    (long)elementsWide * elementsHigh * bytesPerElement <= (long)physicalSourceByteCount)
                 {
-                    var layered = new byte[totalBytes];
-                    var uploadedLayers = 0u;
+                    var sliceBytes = checked((int)physicalSourceByteCount);
+                    var tiledLayers = new byte[(long)sliceBytes * arrayLayers];
+                    var readAllLayers = true;
                     for (var layer = 0u; layer < arrayLayers; layer++)
                     {
-                        var sliceSource = new byte[(int)physicalSourceByteCount];
-                        ulong sliceAddress;
-                        try
+                        if (!ctx.Memory.TryRead(
+                                descriptor.Address + layer * chainSliceBytes + baseMipByteOffset,
+                                tiledLayers.AsSpan(checked((int)(layer * (uint)sliceBytes)), sliceBytes)))
                         {
-                            sliceAddress = checked(
-                                descriptor.Address + layer * chainSliceBytes + sourceOffset);
-                        }
-                        catch (OverflowException)
-                        {
+                            readAllLayers = false;
                             break;
                         }
-
-                        if (!ctx.Memory.TryRead(sliceAddress, sliceSource))
-                        {
-                            break;
-                        }
-
-                        var sliceLinear = TryDetileTextureSource(
-                            descriptor,
-                            sourceWidth,
-                            layerBytes,
-                            sliceSource,
-                            sourceX,
-                            sourceY) ?? sliceSource.AsSpan(0, layerBytes).ToArray();
-                        sliceLinear.AsSpan(0, layerBytes)
-                            .CopyTo(layered.AsSpan(checked((int)(layer * layerBytes))));
-                        uploadedLayers++;
                     }
 
-                    if (uploadedLayers == arrayLayers)
+                    if (readAllLayers)
                     {
-                        texture = new GuestDrawTexture(
+                        NoteSampledAddress(descriptor.Address, descriptor.Format, descriptor.NumberType);
+            texture = new GuestDrawTexture(
                             descriptor.Address,
                             descriptor.Width,
                             descriptor.Height,
                             descriptor.Format,
                             descriptor.NumberType,
-                            layered,
+                            [],
                             IsFallback: false,
                             IsStorage: false,
                             MipLevels: descriptor.MipLevels,
@@ -15869,122 +15855,474 @@ private static long _indirectDrawProbeCount;
                             TileMode: descriptor.TileMode,
                             DstSelect: descriptor.DstSelect,
                             Sampler: sampler,
-                            WritesImage: writesImage,
-                            SourceOffset: sourceOffset,
-                            PhysicalSourceByteCount: physicalSourceByteCount,
-                            GuestAllocationByteCount: trackedByteCount,
-                            SourceX: sourceX,
-                            SourceY: sourceY,
-                            ElementsWide: elementsWide,
-                            ElementsHigh: elementsHigh,
-                            BytesPerElement: bytesPerElement,
                             WriteGeneration: hasWriteGeneration ? writeGeneration : -1,
                             ArrayedView: true,
                             ArrayLayers: arrayLayers,
+                            // Must match the identity the CPU path below ships, or
+                            // the presenter caches this texture under a different
+                            // key than IsTextureContentCached queries above and the
+                            // texel-copy skip never hits for non-2D descriptors.
                             Type: descriptor.Type,
-                            Depth: textureDepth);
-                        dirtyGuestImageSnapshotSucceeded = true;
-                        return true;
+                            Depth: textureDepth,
+                            TiledSource: tiledLayers,
+                            Detile: gpuArrayParams,
+                            SourceByteCount: trackedSourceByteCount);
+                        return FinalizeGuestTextureSnapshot(
+                            ctx,
+                            descriptor,
+                            isStorage,
+                            mipLevel,
+                            samplerDescriptor,
+                            isArrayed,
+                            readSnapshot,
+                            snapshotAttempt,
+                            texture,
+                            out texture);
                     }
                 }
-
-                _arrayUploadUnsupported.TryAdd(descriptor.Address, 0);
-                arrayUploadLayers = 1;
             }
 
-            var source = new byte[(int)physicalSourceByteCount];
-            if (!ctx.Memory.TryRead(physicalSourceAddress, source))
+            if (totalBytes <= int.MaxValue)
             {
-                TraceTextureFallback(
-                    descriptor,
-                    $"guest-read-failed:{sourceByteCount}");
-                texture = CreateFallbackGuestDrawTexture(
-                    isStorage,
-                    writesImage,
-                    descriptor.Format,
-                    descriptor.NumberType,
-                    isArrayed,
-                    descriptor.Type,
-                    textureDepth);
-                return true;
-            }
-
-            if (_traceAgcShader)
-            {
-                var nonZero = 0;
-                for (var i = 0; i < source.Length; i++)
+                var layered = new byte[totalBytes];
+                var uploadedLayers = 0u;
+                for (var layer = 0u; layer < arrayLayers; layer++)
                 {
-                    if (source[i] != 0)
+                    var sliceSource = new byte[(int)chainSliceBytes];
+                    if (!ctx.Memory.TryRead(
+                            descriptor.Address + layer * chainSliceBytes + baseMipByteOffset,
+                            sliceSource))
                     {
-                        nonZero++;
-                        if (nonZero >= 64)
-                        {
-                            break;
-                        }
+                        break;
                     }
+
+                    var sliceLinear = TryDetileTextureSource(
+                        descriptor,
+                        sourceWidth,
+                        layerBytes,
+                        sliceSource,
+                        baseMipInTail,
+                        mipTailElementX,
+                        mipTailElementY) ?? sliceSource.AsSpan(0, layerBytes).ToArray();
+                    sliceLinear.AsSpan(0, layerBytes)
+                        .CopyTo(layered.AsSpan(checked((int)(layer * layerBytes))));
+                    uploadedLayers++;
                 }
 
-                TraceAgcShader(
-                    $"agc.texture_source addr=0x{descriptor.Address:X16} " +
-                    $"fmt={descriptor.Format} num={descriptor.NumberType} tile={descriptor.TileMode} " +
-                    $"size={descriptor.Width}x{descriptor.Height} pitch={descriptor.Pitch} " +
-                    $"dst=0x{descriptor.DstSelect:X3} " +
-                    $"bytes={source.Length} logical_bytes={sourceByteCount} nonzero64={nonZero} " +
-                    $"source_offset={sourceOffset} allocation_bytes={guestAllocationByteCount}");
-            }
-            DumpTextureSourceIfRequested(descriptor, sourceWidth, source);
-
-            var rgba = TryDetileTextureSource(
-                descriptor,
-                sourceWidth,
-                checked((int)sourceByteCount),
-                source,
-                sourceX,
-                sourceY) ?? source.AsSpan(0, checked((int)sourceByteCount)).ToArray();
-            DumpLinearTextureIfRequested(descriptor, sourceWidth, rgba);
+                if (uploadedLayers == arrayLayers)
+                {
+                    NoteSampledAddress(descriptor.Address, descriptor.Format, descriptor.NumberType);
             texture = new GuestDrawTexture(
-                descriptor.Address,
-                descriptor.Width,
-                descriptor.Height,
+                        descriptor.Address,
+                        descriptor.Width,
+                        descriptor.Height,
+                        descriptor.Format,
+                        descriptor.NumberType,
+                        layered,
+                        IsFallback: false,
+                        IsStorage: false,
+                        MipLevels: descriptor.MipLevels,
+                        MipLevel: mipLevel,
+                        BaseMipLevel: descriptor.ViewBaseLevel,
+                        ResourceMipLevels: descriptor.ResourceMipLevels,
+                        Pitch: sourceWidth,
+                        TileMode: descriptor.TileMode,
+                        DstSelect: descriptor.DstSelect,
+                        Sampler: sampler,
+                        WriteGeneration: hasWriteGeneration ? writeGeneration : -1,
+                        ArrayedView: true,
+                        ArrayLayers: arrayLayers,
+                        Type: descriptor.Type,
+                        Depth: textureDepth,
+                        SourceByteCount: checked(chainSliceBytes * arrayLayers));
+                    return FinalizeGuestTextureSnapshot(
+                        ctx,
+                        descriptor,
+                        isStorage,
+                        mipLevel,
+                        samplerDescriptor,
+                        isArrayed,
+                        readSnapshot,
+                        snapshotAttempt,
+                        texture,
+                        out texture);
+                }
+            }
+
+            _arrayUploadUnsupported.TryAdd(descriptor.Address, 0);
+        }
+
+        var source = new byte[(int)physicalSourceByteCount];
+        if (!ctx.Memory.TryRead(descriptor.Address + baseMipByteOffset, source))
+        {
+            TraceTextureFallback(
+                descriptor,
+                $"guest-read-failed:{sourceByteCount}");
+            texture = CreateFallbackGuestDrawTexture(
+                isStorage,
                 descriptor.Format,
                 descriptor.NumberType,
-                rgba,
-                IsFallback: false,
-                IsStorage: isStorage,
-                MipLevels: descriptor.MipLevels,
-                MipLevel: mipLevel,
-                BaseMipLevel: descriptor.ViewBaseLevel,
-                ResourceMipLevels: descriptor.ResourceMipLevels,
-                Pitch: sourceWidth,
-                TileMode: descriptor.TileMode,
-                DstSelect: descriptor.DstSelect,
-                Sampler: ToGuestSampler(samplerDescriptor),
-                WritesImage: writesImage,
-                SourceOffset: sourceOffset,
-                PhysicalSourceByteCount: physicalSourceByteCount,
-                GuestAllocationByteCount: guestAllocationByteCount,
-                SourceX: sourceX,
-                SourceY: sourceY,
-                ElementsWide: elementsWide,
-                ElementsHigh: elementsHigh,
-                BytesPerElement: bytesPerElement,
-                WriteGeneration: hasWriteGeneration ? writeGeneration : -1,
-                ArrayedView: isArrayed,
-                ArrayLayers: arrayUploadLayers,
-                Type: descriptor.Type,
-                Depth: textureDepth);
-            dirtyGuestImageSnapshotSucceeded = true;
+                isArrayed,
+                descriptor.Type,
+                textureDepth);
             return true;
         }
-        finally
+
+        if (_traceAgcShader)
         {
-            if (dirtyGuestImageSnapshotClaimed)
+            var nonZero = 0;
+            for (var i = 0; i < source.Length; i++)
             {
-                CompleteGuestImageSnapshot(
-                    descriptor.Address,
-                    dirtyGuestImageSnapshotSucceeded);
+                if (source[i] != 0)
+                {
+                    nonZero++;
+                    if (nonZero >= 64)
+                    {
+                        break;
+                    }
+                }
+            }
+
+            TraceAgcShader(
+                $"agc.texture_source addr=0x{descriptor.Address:X16} " +
+                $"fmt={descriptor.Format} num={descriptor.NumberType} tile={descriptor.TileMode} " +
+                $"size={descriptor.Width}x{descriptor.Height} pitch={descriptor.Pitch} " +
+                $"dst=0x{descriptor.DstSelect:X3} " +
+                $"bytes={source.Length} logical_bytes={sourceByteCount} nonzero64={nonZero}");
+        }
+        DumpTextureSourceIfRequested(descriptor, sourceWidth, source);
+
+        if (_gpuDetileLog && descriptor.TileMode != 0)
+        {
+            lock (_gpuDetileGateDiag)
+            {
+                if (_gpuDetileGateDiag.Add(descriptor.TileMode))
+                {
+                    var eq = hasElementLayout
+                        ? GnmTiling.GetDetileParams(
+                            descriptor.TileMode, bytesPerElement, elementsWide, elementsHigh).Equation
+                        : DetileEquation.None;
+                    Console.Error.WriteLine(
+                        $"[GPU-DETILE] gate mode={descriptor.TileMode} fmt={descriptor.Format} " +
+                        $"bpp={bytesPerElement} hasLayout={hasElementLayout} mipTail={baseMipInTail} " +
+                        $"storage={isStorage} arrayed={isArrayed} eq={eq} -> " +
+                        $"{(hasElementLayout && !baseMipInTail && IsGpuDetileBytesPerElement(bytesPerElement) && IsGpuDetileEquation(eq) ? "GPU" : "CPU")}");
+                }
             }
         }
+
+        // GPU detile: for the 4/8/16-bytes/element base-mip case the backend can
+        // deswizzle on the GPU (exact-XOR and block-table equations, including
+        // block-compressed formats), so ship the raw tiled bytes + params rather
+        // than paying the CPU detile. Everything else keeps the CPU path below.
+        //
+        // Arrayed textures are handled by the arrayed branch above (they package
+        // every layer's tiled slice); this branch is the single-layer case.
+        if (_gpuDetileEnabled && hasElementLayout && !baseMipInTail &&
+            IsGpuDetileBytesPerElement(bytesPerElement) && !isArrayed &&
+            IsGpuDetileTextureType(descriptor.Type))
+        {
+            var gpuDetileParams = GnmTiling.GetDetileParams(
+                descriptor.TileMode, bytesPerElement, elementsWide, elementsHigh);
+            if (IsGpuDetileEquation(gpuDetileParams.Equation) &&
+                (long)elementsWide * elementsHigh * bytesPerElement <= source.Length)
+            {
+                NoteSampledAddress(descriptor.Address, descriptor.Format, descriptor.NumberType);
+            texture = new GuestDrawTexture(
+                    descriptor.Address,
+                    descriptor.Width,
+                    descriptor.Height,
+                    descriptor.Format,
+                    descriptor.NumberType,
+                    [],
+                    IsFallback: false,
+                    IsStorage: isStorage,
+                    MipLevels: descriptor.MipLevels,
+                    MipLevel: mipLevel,
+                    BaseMipLevel: descriptor.ViewBaseLevel,
+                    ResourceMipLevels: descriptor.ResourceMipLevels,
+                    Pitch: sourceWidth,
+                    TileMode: descriptor.TileMode,
+                    DstSelect: descriptor.DstSelect,
+                    Sampler: ToGuestSampler(samplerDescriptor),
+                    WriteGeneration: hasWriteGeneration ? writeGeneration : -1,
+                    ArrayedView: isArrayed,
+                    Type: descriptor.Type,
+                    Depth: textureDepth,
+                    TiledSource: source,
+                    Detile: gpuDetileParams,
+                    SourceByteCount: (ulong)source.Length);
+                return FinalizeGuestTextureSnapshot(
+                    ctx,
+                    descriptor,
+                    isStorage,
+                    mipLevel,
+                    samplerDescriptor,
+                    isArrayed,
+                    readSnapshot,
+                    snapshotAttempt,
+                    texture,
+                    out texture);
+            }
+        }
+
+        var rgba = TryDetileTextureSource(
+            descriptor,
+            sourceWidth,
+            checked((int)sourceByteCount),
+            source,
+            baseMipInTail,
+            mipTailElementX,
+            mipTailElementY) ?? source.AsSpan(0, checked((int)sourceByteCount)).ToArray();
+        DumpLinearTextureIfRequested(descriptor, sourceWidth, rgba);
+        texture = new GuestDrawTexture(
+            descriptor.Address,
+            descriptor.Width,
+            descriptor.Height,
+            descriptor.Format,
+            descriptor.NumberType,
+            rgba,
+            IsFallback: false,
+            IsStorage: isStorage,
+            MipLevels: descriptor.MipLevels,
+            MipLevel: mipLevel,
+            BaseMipLevel: descriptor.ViewBaseLevel,
+            ResourceMipLevels: descriptor.ResourceMipLevels,
+            Pitch: sourceWidth,
+            TileMode: descriptor.TileMode,
+            DstSelect: descriptor.DstSelect,
+            Sampler: ToGuestSampler(samplerDescriptor),
+            WriteGeneration: hasWriteGeneration ? writeGeneration : -1,
+            ArrayedView: isArrayed,
+            Type: descriptor.Type,
+            Depth: textureDepth,
+            SourceByteCount: physicalSourceByteCount);
+        return FinalizeGuestTextureSnapshot(
+            ctx,
+            descriptor,
+            isStorage,
+            mipLevel,
+            samplerDescriptor,
+            isArrayed,
+            readSnapshot,
+            snapshotAttempt,
+            texture,
+            out texture);
+    }
+
+
+    private static bool FinalizeGuestTextureSnapshot(
+        CpuContext ctx,
+        TextureDescriptor descriptor,
+        bool isStorage,
+        uint mipLevel,
+        IReadOnlyList<uint> samplerDescriptor,
+        bool isArrayed,
+        SharpEmu.HLE.GuestImageWriteTracker.ReadSnapshot snapshot,
+        int snapshotAttempt,
+        GuestDrawTexture candidate,
+        out GuestDrawTexture texture)
+    {
+        if (SharpEmu.HLE.GuestImageWriteTracker.IsReadSnapshotStable(snapshot))
+        {
+            texture = snapshot.Active
+                ? candidate with
+                {
+                    WriteGeneration = snapshot.Generation,
+                    CpuSnapshotStable = true,
+                }
+                : candidate;
+            return true;
+        }
+
+        if (snapshotAttempt < 2)
+        {
+            return TryCreateGuestDrawTexture(
+                ctx,
+                descriptor,
+                isStorage,
+                mipLevel,
+                samplerDescriptor,
+                isArrayed,
+                out texture,
+                snapshotAttempt + 1);
+        }
+
+        // Keep the descriptor but withhold bytes that crossed a guest write.
+        // The backend can retain an older cached image and retry on a later
+        // bind without publishing a torn atlas or video plane.
+        texture = candidate with
+        {
+            RgbaPixels = [],
+            TiledSource = null,
+            MipUploads = null,
+            WriteGeneration = -1,
+            CpuSnapshotStable = false,
+        };
+        return true;
+    }
+
+    private static bool TryCreateTiledArrayMipChain(
+        CpuContext ctx,
+        TextureDescriptor descriptor,
+        GuestSampler sampler,
+        uint arrayLayers,
+        int elementsWide,
+        int elementsHigh,
+        int bytesPerElement,
+        long writeGeneration,
+        out GuestDrawTexture texture)
+    {
+        texture = default!;
+        if (!GnmTiling.TryGetMipChainPlacement(
+                descriptor.TileMode,
+                elementsWide,
+                elementsHigh,
+                bytesPerElement,
+                descriptor.ResourceMipLevels,
+                out var placements,
+                out var chainSliceBytes) ||
+            chainSliceBytes == 0 ||
+            chainSliceBytes > int.MaxValue)
+        {
+            return false;
+        }
+
+        var uploads = new GuestTextureMipUpload[placements.Length];
+        var mipByteCounts = new ulong[placements.Length];
+        ulong totalLinearBytes = 0;
+        for (var mip = 0; mip < placements.Length; mip++)
+        {
+            var width = Math.Max(descriptor.Width >> mip, 1u);
+            var height = Math.Max(descriptor.Height >> mip, 1u);
+            var mipBytes = GetTextureByteCount(descriptor.Format, width, height);
+            if (mipBytes == 0 || mipBytes > int.MaxValue)
+            {
+                return false;
+            }
+
+            uploads[mip] = new GuestTextureMipUpload(
+                totalLinearBytes,
+                (uint)mip,
+                width,
+                height,
+                width);
+            mipByteCounts[mip] = mipBytes;
+            try
+            {
+                totalLinearBytes = checked(totalLinearBytes + mipBytes * arrayLayers);
+            }
+            catch (OverflowException)
+            {
+                return false;
+            }
+        }
+
+        if (totalLinearBytes > int.MaxValue)
+        {
+            return false;
+        }
+
+        var linear = new byte[(int)totalLinearBytes];
+        var tiledSlice = new byte[(int)chainSliceBytes];
+        byte[]? tailLinear = null;
+        var tailBlockWidth = 0;
+        var tailBlockHeight = 0;
+        if (placements.Any(static placement => placement.InMipTail))
+        {
+            if (!GnmTiling.TryGetBlockElementDimensions(
+                    descriptor.TileMode,
+                    bytesPerElement,
+                    out tailBlockWidth,
+                    out tailBlockHeight))
+            {
+                return false;
+            }
+
+            tailLinear = new byte[checked(tailBlockWidth * tailBlockHeight * bytesPerElement)];
+        }
+
+        for (var layer = 0u; layer < arrayLayers; layer++)
+        {
+            if (!ctx.Memory.TryRead(
+                    descriptor.Address + layer * chainSliceBytes,
+                    tiledSlice))
+            {
+                return false;
+            }
+
+            if (tailLinear is not null &&
+                !GnmTiling.TryDetile(
+                    tiledSlice.AsSpan(0, (int)placements.First(static placement => placement.InMipTail).ByteCount),
+                    tailLinear,
+                    descriptor.TileMode,
+                    tailBlockWidth,
+                    tailBlockHeight,
+                    bytesPerElement))
+            {
+                return false;
+            }
+
+            for (var mip = 0; mip < placements.Length; mip++)
+            {
+                var placement = placements[mip];
+                var mipBytes = mipByteCounts[mip];
+                var destinationOffset = checked(
+                    uploads[mip].BufferOffset + mipBytes * layer);
+                var destination = linear.AsSpan((int)destinationOffset, (int)mipBytes);
+                if (!placement.InMipTail)
+                {
+                    if (!GnmTiling.TryDetile(
+                            tiledSlice.AsSpan((int)placement.ByteOffset, (int)placement.ByteCount),
+                            destination,
+                            descriptor.TileMode,
+                            placement.ElementsWide,
+                            placement.ElementsHigh,
+                            bytesPerElement))
+                    {
+                        return false;
+                    }
+
+                    continue;
+                }
+
+                var rowBytes = placement.ElementsWide * bytesPerElement;
+                for (var y = 0; y < placement.ElementsHigh; y++)
+                {
+                    var sourceOffset = checked(
+                        ((placement.TailElementY + y) * tailBlockWidth +
+                         placement.TailElementX) * bytesPerElement);
+                    tailLinear.AsSpan(sourceOffset, rowBytes)
+                        .CopyTo(destination.Slice(y * rowBytes, rowBytes));
+                }
+            }
+        }
+
+        texture = new GuestDrawTexture(
+            descriptor.Address,
+            descriptor.Width,
+            descriptor.Height,
+            descriptor.Format,
+            descriptor.NumberType,
+            linear,
+            IsFallback: false,
+            IsStorage: false,
+            MipLevels: descriptor.MipLevels,
+            MipLevel: 0,
+            BaseMipLevel: descriptor.ViewBaseLevel,
+            ResourceMipLevels: descriptor.ResourceMipLevels,
+            Pitch: descriptor.Width,
+            TileMode: descriptor.TileMode,
+            DstSelect: descriptor.DstSelect,
+            Sampler: sampler,
+            WriteGeneration: writeGeneration,
+            ArrayedView: true,
+            ArrayLayers: arrayLayers,
+            Type: descriptor.Type,
+            Depth: 1,
+            MipUploads: uploads,
+            SourceByteCount: checked(chainSliceBytes * arrayLayers));
+        return true;
     }
 
     /// <summary>
@@ -16319,9 +16657,30 @@ private static long _indirectDrawProbeCount;
     /// fog/overlay layers that way). Seed newly created Vulkan guest images
     /// with the current guest memory contents to preserve that base layer.
     /// </summary>
+    internal static IReadOnlyList<uint> NormalizeSamplerDescriptorForImageOperation(
+        IReadOnlyList<uint> descriptor)
+    {
+        const uint depthCompareMask = 0x7u << 12;
+        if (descriptor.Count < 4 ||
+            (descriptor[0] & depthCompareMask) == 0)
+        {
+            return descriptor;
+        }
+
+        // The shader translators perform guest depth comparisons after a
+        // normal sample. The native sampler must not compare the value first.
+        return
+        [
+            descriptor[0] & ~depthCompareMask,
+            descriptor[1],
+            descriptor[2],
+            descriptor[3],
+        ];
+    }
+
+
     private static GuestDrawTexture CreateFallbackGuestDrawTexture(
         bool isStorage,
-        bool writesImage,
         uint format,
         uint numberType,
         bool isArrayed = false,
@@ -16341,11 +16700,11 @@ private static long _indirectDrawProbeCount;
             IsStorage: isStorage,
             MipLevels: 1,
             MipLevel: 0,
-            WritesImage: writesImage,
             ArrayedView: isArrayed,
             Type: type,
             Depth: GetTextureVolumeDepth(type, depth));
     }
+
 
     private static GuestSampler ToGuestSampler(IReadOnlyList<uint> descriptor) =>
         descriptor.Count >= 4
@@ -16883,9 +17242,9 @@ private static long _indirectDrawProbeCount;
                     isStorage,
                     writesImage,
                     binding.MipLevel ?? 0,
-                    binding.SamplerDescriptor,
-                    Gen5ShaderTranslator.IsArrayedImageBinding(binding),
-                    binding.Control.Dimension == 2));
+                NormalizeSamplerDescriptorForImageOperation(
+                    binding.SamplerDescriptor),
+                    Gen5ShaderTranslator.IsArrayedImageBinding(binding)));
             hasStorageBinding |= isStorage;
 
             var descriptorState = descriptorValid ? string.Empty : "/invalid-desc";
@@ -17320,7 +17679,7 @@ private static long _indirectDrawProbeCount;
                     return;
                 }
 
-                GuestImageWriteTracker.Track(
+                GuestImageWriteTracker.TrackManagedWriter(
                     destinationAddress,
                     (ulong)output.Length,
                     GuestGpu.Current.CurrentGuestWorkSequenceForDiagnostics,

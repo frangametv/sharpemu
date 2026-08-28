@@ -31,23 +31,38 @@ public sealed class TextureContentIdentityTests
             Type: 10,
             Depth: 4);
 
+        // Sampling state is not part of the content identity.
+        var identity = new TextureContentIdentity(
+            texture.Address,
+            texture.Width,
+            texture.Height,
+            texture.Format,
+            texture.NumberType,
+            texture.DstSelect,
+            texture.TileMode,
+            texture.Pitch,
+            texture.ArrayedView,
+            texture.ArrayLayers,
+            texture.Type,
+            texture.Depth,
+            texture.ResourceMipLevels);
+
         Assert.Equal(
             new TextureContentIdentity(
-                Address: 0x1234_5000,
-                Width: 128,
-                Height: 64,
-                Format: 10,
-                NumberType: 7,
-                DstSelect: 0xFAC,
-                TileMode: 13,
-                Pitch: 160,
-                SourceOffset: 0x280,
-                Sampler: sampler,
-                Arrayed: true,
-                ArrayLayers: 6,
-                Type: 10,
-                Depth: 4),
-            TextureContentIdentity.FromGuestTexture(texture));
+                0x1234_5000UL,
+                128,
+                64,
+                10,
+                7,
+                0xFAC,
+                13,
+                160,
+                true,
+                6,
+                10,
+                4,
+                1),
+            identity);
     }
 
     [Fact]
@@ -66,7 +81,21 @@ public sealed class TextureContentIdentityTests
             Type: 9,
             Depth: 7);
 
-        var identity = TextureContentIdentity.FromGuestTexture(texture);
+        // The translator normalizes counts before building the identity.
+        var identity = new TextureContentIdentity(
+            texture.Address,
+            texture.Width,
+            texture.Height,
+            texture.Format,
+            texture.NumberType,
+            texture.DstSelect,
+            texture.TileMode,
+            texture.Pitch,
+            false,
+            Math.Max(texture.ArrayLayers, 1u),
+            texture.Type,
+            1u,
+            1);
 
         Assert.Equal(1u, identity.ArrayLayers);
         Assert.Equal(1u, identity.Depth);

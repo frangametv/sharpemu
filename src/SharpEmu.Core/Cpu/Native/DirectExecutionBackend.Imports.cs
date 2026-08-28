@@ -81,6 +81,7 @@ public sealed partial class DirectExecutionBackend
 		EXCEPTION_RECORD* exceptionRecord = ((EXCEPTION_POINTERS*)exceptionInfo)->ExceptionRecord;
 		if (exceptionRecord->ExceptionCode == 3221225477u &&
 			exceptionRecord->NumberParameters >= 2 &&
+			exceptionRecord->ExceptionInformation[0] == 1uL &&
 			SharpEmu.HLE.GuestImageWriteTracker.TryHandleWriteFault(
 				exceptionRecord->ExceptionInformation[1]))
 		{
