@@ -317,11 +317,18 @@ public static partial class Gen5MslTranslator
                 var x = Temp("int", $"as_type<int>({ImageIntegerAddress(image, 0)})");
                 var y = Temp("int", $"as_type<int>({ImageIntegerAddress(image, 1)})");
                 var components = new string[4];
-                uint sourceIndex = 0;
+                var dstSelect = Gen5ShaderTranslator.GetImageDescriptorDstSelect(
+                    _evaluation.ImageBindings[bindingIndex].ResourceDescriptor);
                 for (var component = 0; component < 4; component++)
                 {
-                    components[component] = (image.Dmask & (1u << component)) != 0
-                        ? ImageTexelComponent(kind, ImageStoreComponent(image, kind, sourceIndex++))
+                    var sourceIndex = Gen5ShaderTranslator.GetImageStoreSourceIndex(
+                        dstSelect,
+                        image.Dmask,
+                        component);
+                    components[component] = sourceIndex >= 0
+                        ? ImageTexelComponent(
+                            kind,
+                            ImageStoreComponent(image, kind, (uint)sourceIndex))
                         : kind == "float" ? "0.0f" : "0";
                 }
 
@@ -717,7 +724,19 @@ public static partial class Gen5MslTranslator
             {
                 if ((export.EnableMask & (1u << component)) == 0)
                 {
-                    values[component] = $"{field}[{component}]";
+                    var outputComponent = (uint)component;
+                    if (!binding.Value.ComponentMapping.IsIdentity)
+                    {
+                        for (var physical = 0u; physical < 4; physical++)
+                        {
+                            if (binding.Value.ComponentMapping.Map(physical) == component)
+                            {
+                                outputComponent = physical;
+                                break;
+                            }
+                        }
+                    }
+                    values[component] = $"{field}[{outputComponent}]";
                     continue;
                 }
 
@@ -741,6 +760,17 @@ public static partial class Gen5MslTranslator
                     Gen5PixelOutputKind.Sint => $"as_type<int>({raw})",
                     _ => $"as_type<float>({raw})",
                 };
+            }
+
+            if (!binding.Value.ComponentMapping.IsIdentity)
+            {
+                var mappedValues = new string[4];
+                for (var component = 0; component < mappedValues.Length; component++)
+                {
+                    mappedValues[component] = values[
+                        binding.Value.ComponentMapping.Map((uint)component)];
+                }
+                values = mappedValues;
             }
 
             // A lane removed from EXEC keeps the previous output value; killed

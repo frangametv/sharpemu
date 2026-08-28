@@ -20,7 +20,6 @@ public sealed partial class DirectExecutionBackend
 	private static int _guestAllocatorHoleRecoveries;
 	private static int _nullVirtualAllocatorRecoveries;
 	private static int _gtaNullAssetTableRecoveries;
-	private static int _gtaNullStorySingletonRecoveries;
 	private static int _auxiliaryThreadExecuteFaultRecoveries;
 	private static int _auxiliaryThreadExecuteFaultSkips;
 	private nint _workerAbortStack;
@@ -828,11 +827,6 @@ public sealed partial class DirectExecutionBackend
 		// path instead of fabricating an object with an unknown virtual table.
 		const ulong objectAbsentPathDelta = 0x23D;
 		WriteCtxU64(contextRecord, CTX_RIP, rip + objectAbsentPathDelta);
-		var recovery = Interlocked.Increment(ref _gtaNullStorySingletonRecoveries);
-		Console.Error.WriteLine(
-			$"[LOADER][WARN] Recovered GTA null Story singleton #{recovery}: " +
-			$"rip=0x{rip:X16} -> 0x{rip + objectAbsentPathDelta:X16}");
-		Console.Error.Flush();
 		return true;
 	}
 

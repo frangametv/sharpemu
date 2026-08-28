@@ -85,7 +85,8 @@ internal readonly record struct MetalTextureFormat(
 
 internal readonly record struct MetalRenderTargetFormat(
     MtlPixelFormat Format,
-    Gen5PixelOutputKind OutputKind)
+    Gen5PixelOutputKind OutputKind,
+    Gen5ColorComponentMapping ExportMapping = default)
 {
     public static uint GetBytesPerPixel(MtlPixelFormat format) =>
         format switch
@@ -214,6 +215,13 @@ internal static class MetalGuestFormats
     public static bool TryDecodeRenderTargetFormat(
         uint dataFormat,
         uint numberType,
+        out MetalRenderTargetFormat result) =>
+        TryDecodeRenderTargetFormat(dataFormat, numberType, 0, out result);
+
+    public static bool TryDecodeRenderTargetFormat(
+        uint dataFormat,
+        uint numberType,
+        uint componentSwap,
         out MetalRenderTargetFormat result)
     {
         var format = (dataFormat, numberType) switch
@@ -259,7 +267,10 @@ internal static class MetalGuestFormats
             _ => MtlPixelFormat.Invalid,
         };
 
-        if (format == MtlPixelFormat.Invalid)
+        if (format == MtlPixelFormat.Invalid ||
+            !TryGetRenderTargetComponentCount(dataFormat, out var componentCount) ||
+            !Gen5ColorComponentMapping.TryResolveRenderTarget(
+                componentSwap, componentCount, out var orderMapping))
         {
             result = default;
             return false;
@@ -275,7 +286,22 @@ internal static class MetalGuestFormats
                 Gen5PixelOutputKind.Sint,
             _ => Gen5PixelOutputKind.Float,
         };
-        result = new MetalRenderTargetFormat(format, outputKind);
+        result = new MetalRenderTargetFormat(format, outputKind, orderMapping);
         return true;
+    }
+
+    private static bool TryGetRenderTargetComponentCount(
+        uint dataFormat,
+        out uint componentCount)
+    {
+        componentCount = dataFormat switch
+        {
+            1 or 2 or 4 or 20 or 29 or 36 or 49 => 1,
+            3 or 5 or 11 or 75 => 2,
+            6 or 7 => 3,
+            9 or 10 or 12 or 13 or 14 or 22 or 56 or 62 or 64 or 71 => 4,
+            _ => 0,
+        };
+        return componentCount != 0;
     }
 }

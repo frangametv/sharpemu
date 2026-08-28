@@ -226,6 +226,8 @@ public static class Gen5ShaderScalarEvaluator
     private readonly record struct ScalarPathState(
         uint StartPc,
         uint[] ScalarRegisters,
+        Dictionary<uint, Dictionary<uint, uint>> VectorLaneValues,
+        HashSet<uint> LaneRestoredScalarRegisters,
         ulong ExecMask,
         bool ScalarConditionCode,
         bool Supplemental);
@@ -234,6 +236,8 @@ public static class Gen5ShaderScalarEvaluator
 
     private static ulong ComputeScalarStateHash(
         IReadOnlyList<uint> registers,
+        IReadOnlyDictionary<uint, Dictionary<uint, uint>> vectorLaneValues,
+        IReadOnlySet<uint> laneRestoredScalarRegisters,
         ulong execMask,
         bool scalarConditionCode)
     {
@@ -242,6 +246,21 @@ public static class Gen5ShaderScalarEvaluator
         foreach (var value in registers)
         {
             hash = (hash ^ value) * prime;
+        }
+
+        foreach (var registerLanes in vectorLaneValues.OrderBy(static pair => pair.Key))
+        {
+            hash = (hash ^ registerLanes.Key) * prime;
+            foreach (var laneValue in registerLanes.Value.OrderBy(static pair => pair.Key))
+            {
+                hash = (hash ^ laneValue.Key) * prime;
+                hash = (hash ^ laneValue.Value) * prime;
+            }
+        }
+
+        foreach (var register in laneRestoredScalarRegisters.Order())
+        {
+            hash = (hash ^ register) * prime;
         }
 
         hash = (hash ^ execMask) * prime;
@@ -323,6 +342,8 @@ public static class Gen5ShaderScalarEvaluator
         void QueuePath(
             uint pc,
             uint[] registers,
+            Dictionary<uint, Dictionary<uint, uint>> vectorLaneValues,
+            HashSet<uint> laneRestoredScalarRegisters,
             ulong pathExecMask,
             bool pathScc,
             bool supplemental)
@@ -339,12 +360,19 @@ public static class Gen5ShaderScalarEvaluator
 
             var key = new ScalarPathKey(
                 pc,
-                ComputeScalarStateHash(registers, pathExecMask, pathScc));
+                ComputeScalarStateHash(
+                    registers,
+                    vectorLaneValues,
+                    laneRestoredScalarRegisters,
+                    pathExecMask,
+                    pathScc));
             if (visitedPaths.Add(key))
             {
                 pendingPaths.Push(new ScalarPathState(
                     pc,
                     registers,
+                    vectorLaneValues,
+                    laneRestoredScalarRegisters,
                     pathExecMask,
                     pathScc,
                     supplemental));
@@ -356,6 +384,8 @@ public static class Gen5ShaderScalarEvaluator
             QueuePath(
                 state.Program.Instructions[0].Pc,
                 (uint[])scalarRegisters.Clone(),
+                [],
+                [],
                 execMask,
                 pathScc: false,
                 supplemental: false);
@@ -365,6 +395,8 @@ public static class Gen5ShaderScalarEvaluator
         {
             var path = pendingPaths.Pop();
             scalarRegisters = path.ScalarRegisters;
+            var vectorLaneValues = path.VectorLaneValues;
+            var laneRestoredScalarRegisters = path.LaneRestoredScalarRegisters;
             execMask = path.ExecMask;
             var scalarConditionCode = path.ScalarConditionCode;
             uint? skipUntilPc = path.StartPc;
@@ -408,6 +440,8 @@ public static class Gen5ShaderScalarEvaluator
                         QueuePath(
                             takeConditionalBranch ? fallthroughPc : targetPc,
                             (uint[])scalarRegisters.Clone(),
+                            CloneVectorLaneValues(vectorLaneValues),
+                            new HashSet<uint>(laneRestoredScalarRegisters),
                             execMask,
                             scalarConditionCode,
                             supplemental: true);
@@ -446,6 +480,8 @@ public static class Gen5ShaderScalarEvaluator
                             QueuePath(
                                 fallthroughPc,
                                 (uint[])scalarRegisters.Clone(),
+                                CloneVectorLaneValues(vectorLaneValues),
+                                new HashSet<uint>(laneRestoredScalarRegisters),
                                 execMask,
                                 scalarConditionCode,
                                 supplemental: true);
@@ -480,10 +516,27 @@ public static class Gen5ShaderScalarEvaluator
                     QueuePath(
                         targetPc,
                         (uint[])scalarRegisters.Clone(),
+                        CloneVectorLaneValues(vectorLaneValues),
+                        new HashSet<uint>(laneRestoredScalarRegisters),
                         execMask,
                         scalarConditionCode,
                         supplemental: true);
                 }
+
+                if (instruction.Encoding == Gen5ShaderEncoding.Vop3 &&
+                    TryExecuteVectorLaneTransfer(
+                        instruction,
+                        scalarRegisters,
+                        vectorLaneValues,
+                        laneRestoredScalarRegisters))
+                {
+                    continue;
+                }
+
+                InvalidateTrackedVectorLanes(instruction, vectorLaneValues);
+                InvalidateLaneRestoredScalarRegisters(
+                    instruction,
+                    laneRestoredScalarRegisters);
 
                 if (instruction.Encoding == Gen5ShaderEncoding.Sopc)
                 {
@@ -2389,6 +2442,132 @@ public static class Gen5ShaderScalarEvaluator
         }
 
         return true;
+    }
+
+    private static bool TryExecuteVectorLaneTransfer(
+        Gen5ShaderInstruction instruction,
+        uint[] scalarRegisters,
+        Dictionary<uint, Dictionary<uint, uint>> vectorLaneValues,
+        HashSet<uint> laneRestoredScalarRegisters)
+    {
+        if (instruction.Opcode == "VWritelaneB32")
+        {
+            if (instruction.Destinations.Count != 1 ||
+                instruction.Destinations[0] is not
+                {
+                    Kind: Gen5OperandKind.VectorRegister,
+                } vectorDestination ||
+                instruction.Sources.Count < 2)
+            {
+                return true;
+            }
+
+            if (!TryEvaluateScalarOperand(
+                    instruction.Sources[1], scalarRegisters, out var lane))
+            {
+                vectorLaneValues.Remove(vectorDestination.Value);
+                return true;
+            }
+
+            if (!vectorLaneValues.TryGetValue(
+                    vectorDestination.Value, out var trackedLanes))
+            {
+                trackedLanes = [];
+                vectorLaneValues.Add(vectorDestination.Value, trackedLanes);
+            }
+
+            if (TryEvaluateScalarOperand(
+                    instruction.Sources[0], scalarRegisters, out var value))
+            {
+                trackedLanes[lane] = value;
+            }
+            else
+            {
+                trackedLanes.Remove(lane);
+                if (trackedLanes.Count == 0)
+                {
+                    vectorLaneValues.Remove(vectorDestination.Value);
+                }
+            }
+
+            return true;
+        }
+
+        if (instruction.Opcode != "VReadlaneB32")
+        {
+            return false;
+        }
+
+        if (instruction.Destinations.Count != 1 ||
+            instruction.Destinations[0] is not
+            {
+                Kind: Gen5OperandKind.ScalarRegister,
+                Value: < ScalarRegisterCount,
+            } scalarDestination ||
+            instruction.Sources.Count < 2 ||
+            instruction.Sources[0] is not
+            {
+                Kind: Gen5OperandKind.VectorRegister,
+            } vectorSource ||
+            !TryEvaluateScalarOperand(
+                instruction.Sources[1], scalarRegisters, out var sourceLane) ||
+            !vectorLaneValues.TryGetValue(vectorSource.Value, out var sourceLanes) ||
+            !sourceLanes.TryGetValue(sourceLane, out var restoredValue))
+        {
+            if (instruction.Destinations.Count == 1 &&
+                instruction.Destinations[0] is
+                {
+                    Kind: Gen5OperandKind.ScalarRegister,
+                    Value: < ScalarRegisterCount,
+                } unresolvedDestination)
+            {
+                laneRestoredScalarRegisters.Remove(unresolvedDestination.Value);
+            }
+
+            return true;
+        }
+
+        scalarRegisters[scalarDestination.Value] = restoredValue;
+        laneRestoredScalarRegisters.Add(scalarDestination.Value);
+        return true;
+    }
+
+    private static void InvalidateTrackedVectorLanes(
+        Gen5ShaderInstruction instruction,
+        Dictionary<uint, Dictionary<uint, uint>> vectorLaneValues)
+    {
+        foreach (var destination in instruction.Destinations)
+        {
+            if (destination.Kind == Gen5OperandKind.VectorRegister)
+            {
+                vectorLaneValues.Remove(destination.Value);
+            }
+        }
+    }
+
+    private static Dictionary<uint, Dictionary<uint, uint>> CloneVectorLaneValues(
+        IReadOnlyDictionary<uint, Dictionary<uint, uint>> vectorLaneValues) =>
+        vectorLaneValues.ToDictionary(
+            static pair => pair.Key,
+            static pair => new Dictionary<uint, uint>(pair.Value));
+
+    private static void InvalidateLaneRestoredScalarRegisters(
+        Gen5ShaderInstruction instruction,
+        HashSet<uint> laneRestoredScalarRegisters)
+    {
+        foreach (var destination in instruction.Destinations)
+        {
+            if (destination.Kind == Gen5OperandKind.ScalarRegister)
+            {
+                laneRestoredScalarRegisters.Remove(destination.Value);
+            }
+        }
+
+        if (Ir.Gen5ScalarSsa.WritesVccImplicitly(instruction))
+        {
+            laneRestoredScalarRegisters.Remove(Ir.Gen5ScalarSsa.VccLo);
+            laneRestoredScalarRegisters.Remove(Ir.Gen5ScalarSsa.VccHi);
+        }
     }
 
     private static bool TryExecuteScalarLoad(

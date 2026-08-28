@@ -456,7 +456,8 @@ public static partial class Gen5SpirvTranslator
             uint Variable,
             uint Type,
             Gen5PixelOutputKind Kind,
-            uint WriteMask);
+            uint WriteMask,
+            Gen5ColorComponentMapping ComponentMapping);
 
         public CompilationContext(
             Gen5SpirvStage stage,
@@ -1547,14 +1548,19 @@ public static partial class Gen5SpirvTranslator
                             variable,
                             outputType,
                             binding.Kind,
-                            0);
+                            0,
+                            binding.ComponentMapping);
                         hostPixelOutputs.Add(binding.HostLocation, hostOutput);
                         _interfaces.Add(variable);
                     }
 
                     _pixelOutputs.Add(
                         binding.GuestSlot,
-                        hostOutput with { WriteMask = binding.WriteMask & 0xFu });
+                        hostOutput with
+                        {
+                            WriteMask = binding.WriteMask & 0xFu,
+                            ComponentMapping = binding.ComponentMapping,
+                        });
                 }
             }
             else
@@ -2118,16 +2124,6 @@ public static partial class Gen5SpirvTranslator
                         $"address=0x{_state.Program.Address:X16} " +
                         $"pc=0x{terminator.Pc:X} opcode={terminator.Opcode} " +
                         $"target=0x{targetPc:X} forced=fallthrough");
-                }
-
-                if (ForcePixelBranchTaken(terminator))
-                {
-                    condition = _module.ConstantBool(true);
-                    Console.Error.WriteLine(
-                        $"[AGC][PIXEL-BRANCH-PROBE] " +
-                        $"address=0x{_state.Program.Address:X16} " +
-                        $"pc=0x{terminator.Pc:X} opcode={terminator.Opcode} " +
-                        $"target=0x{targetPc:X} forced=taken");
                 }
 
                 var takenBlock = targetExits ? uint.MaxValue : (uint)targetBlock;
@@ -4430,15 +4426,20 @@ public static partial class Gen5SpirvTranslator
                     0,
                     coordinateComponentCount);
                 var components = new uint[4];
-                uint sourceIndex = 0;
+                var dstSelect = Gen5ShaderTranslator.GetImageDescriptorDstSelect(
+                    _evaluation.ImageBindings[bindingIndex].ResourceDescriptor);
                 for (var component = 0; component < components.Length; component++)
                 {
-                    if ((image.Dmask & (1u << component)) != 0)
+                    var sourceIndex = Gen5ShaderTranslator.GetImageStoreSourceIndex(
+                        dstSelect,
+                        image.Dmask,
+                        component);
+                    if (sourceIndex >= 0)
                     {
                         var raw = LoadImageStoreComponent(
                             image,
                             resource,
-                            sourceIndex++);
+                            (uint)sourceIndex);
                         components[component] =
                             ConvertGuestRawToImageStoreComponent(resource, raw);
                     }
@@ -5464,6 +5465,19 @@ public static partial class Gen5SpirvTranslator
                         (export.EnableMask & output.WriteMask & (1u << component)) != 0;
                     if (!enabled)
                     {
+                        var outputComponent = (uint)component;
+                        if (!output.ComponentMapping.IsIdentity)
+                        {
+                            for (var physical = 0u; physical < 4; physical++)
+                            {
+                                if (output.ComponentMapping.Map(physical) == component)
+                                {
+                                    outputComponent = physical;
+                                    break;
+                                }
+                            }
+                        }
+
                         values[component] = _module.AddInstruction(
                             SpirvOp.CompositeExtract,
                             output.Kind switch
@@ -5473,7 +5487,7 @@ public static partial class Gen5SpirvTranslator
                                 _ => _floatType,
                             },
                             Load(output.Type, output.Variable),
-                            (uint)component);
+                            outputComponent);
                         continue;
                     }
 
@@ -5510,6 +5524,18 @@ public static partial class Gen5SpirvTranslator
                     SpirvOp.CompositeConstruct,
                     output.Type,
                     values);
+                if (!output.ComponentMapping.IsIdentity)
+                {
+                    vector = _module.AddInstruction(
+                        SpirvOp.VectorShuffle,
+                        output.Type,
+                        vector,
+                        vector,
+                        output.ComponentMapping.Map(0),
+                        output.ComponentMapping.Map(1),
+                        output.ComponentMapping.Map(2),
+                        output.ComponentMapping.Map(3));
+                }
                 if (output.Kind == Gen5PixelOutputKind.Float &&
                     PixelExportVgprAddressMatches() &&
                     uint.TryParse(
@@ -5995,23 +6021,6 @@ public static partial class Gen5SpirvTranslator
                     out var address) ||
                 !TryParseEnvironmentUnsigned(
                     "SHARPEMU_FORCE_PIXEL_BRANCH_FALLTHROUGH_PC",
-                    out var pc))
-            {
-                return false;
-            }
-
-            return _state.Program.Address == address && instruction.Pc == pc;
-        }
-
-        private bool ForcePixelBranchTaken(
-            Gen5ShaderInstruction instruction)
-        {
-            if (_stage != Gen5SpirvStage.Pixel ||
-                !TryParseEnvironmentUnsigned(
-                    "SHARPEMU_FORCE_PIXEL_BRANCH_TAKEN_ADDRESS",
-                    out var address) ||
-                !TryParseEnvironmentUnsigned(
-                    "SHARPEMU_FORCE_PIXEL_BRANCH_TAKEN_PC",
                     out var pc))
             {
                 return false;

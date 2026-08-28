@@ -11,6 +11,45 @@ namespace SharpEmu.ShaderCompiler.Tests;
 
 public sealed class Gen5ImageTests
 {
+    [Theory]
+    [InlineData(0u, 4u, 0xE4)]
+    [InlineData(1u, 4u, 0xC6)]
+    [InlineData(2u, 4u, 0x1B)]
+    [InlineData(3u, 4u, 0x93)]
+    public void RenderTargetComponentSwapResolvesPhysicalOrder(
+        uint componentSwap,
+        uint componentCount,
+        byte expectedPacked)
+    {
+        Assert.True(Gen5ColorComponentMapping.TryResolveRenderTarget(
+            componentSwap,
+            componentCount,
+            out var mapping));
+        Assert.Equal(expectedPacked, mapping.Packed);
+    }
+
+    [Theory]
+    [InlineData(0xFACu, 0xFu, 0, 0)]
+    [InlineData(0xFACu, 0xFu, 3, 3)]
+    [InlineData(0x9F5u, 0xFu, 0, 3)]
+    [InlineData(0x9F5u, 0xFu, 1, 0)]
+    [InlineData(0xFA4u, 0xFu, 1, -1)]
+    [InlineData(0xFACu, 0x0u, 0, 0)]
+    [InlineData(0xFACu, 0x0u, 1, -1)]
+    public void ImageStoreMapsLogicalSourcesToPhysicalChannels(
+        uint dstSelect,
+        uint dmask,
+        int destinationComponent,
+        int expectedSourceIndex)
+    {
+        Assert.Equal(
+            expectedSourceIndex,
+            Gen5ShaderTranslator.GetImageStoreSourceIndex(
+                dstSelect,
+                dmask,
+                destinationComponent));
+    }
+
     private const ulong ShaderAddress = 0x1_0000_C000;
     private const uint SEndpgm = 0xBF810000;
 

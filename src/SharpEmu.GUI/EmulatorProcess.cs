@@ -353,33 +353,10 @@ internal sealed class EmulatorProcess : IDisposable
             using var safeHandle = new SafeFileHandle(handle, ownsHandle: true);
             using var stream = new FileStream(safeHandle, FileAccess.Read, 4096, isAsync: false);
             using var reader = new StreamReader(stream, Encoding.UTF8, detectEncodingFromByteOrderMarks: true);
-            StreamWriter? diagnosticWriter = null;
-            var diagnosticBase = Environment.GetEnvironmentVariable(
-                "SHARPEMU_CHILD_OUTPUT_LOG");
-            if (!string.IsNullOrWhiteSpace(diagnosticBase))
-            {
-                try
-                {
-                    var path = diagnosticBase + (isError ? ".stderr.log" : ".stdout.log");
-                    Directory.CreateDirectory(Path.GetDirectoryName(path) ?? ".");
-                    diagnosticWriter = new StreamWriter(path, append: false, Encoding.UTF8)
-                    {
-                        AutoFlush = true,
-                    };
-                }
-                catch (IOException)
-                {
-                    diagnosticWriter = null;
-                }
-            }
-
             while (reader.ReadLine() is { } line)
             {
-                diagnosticWriter?.WriteLine(line);
                 ForwardOutput(line, isError);
             }
-
-            diagnosticWriter?.Dispose();
         }, 256 * 1024)
         {
             IsBackground = true,

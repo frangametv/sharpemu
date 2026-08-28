@@ -1298,13 +1298,15 @@ public static partial class AgcExports
     // shares _submitTraceGate with tracing).
     private static readonly ConcurrentDictionary<
         (ulong Es, ulong EsState, uint EsRsrc1, ulong Ps, ulong PsState,
-         uint PsRsrc1, ulong OutputLayout, uint OutputMasks, uint OutputCount, uint Attributes,
+         uint PsRsrc1, ulong OutputLayout, uint OutputMasks, ulong OutputMappings,
+         uint OutputCount, uint Attributes,
          uint PsInputEna, uint PsInputAddr, ulong InputControls, bool UsesGds,
          ulong AliasAlignment),
         (IGuestCompiledShader Vertex, IGuestCompiledShader Pixel)> _graphicsShaderCache = new();
     private static readonly ConcurrentDictionary<
         (ulong Es, ulong EsState, uint EsRsrc1, ulong Ps, ulong PsState,
-         uint PsRsrc1, ulong OutputLayout, uint OutputMasks, uint OutputCount, uint Attributes,
+         uint PsRsrc1, ulong OutputLayout, uint OutputMasks, ulong OutputMappings,
+         uint OutputCount, uint Attributes,
          uint PsInputEna, uint PsInputAddr, ulong InputControls, bool UsesGds,
          uint NggParameters, ulong AliasAlignment),
         (IGuestCompiledShader Compute, IGuestCompiledShader Vertex,
@@ -10723,19 +10725,6 @@ var renderTargets = GetRenderTargets(state.CxRegisters);
             // Trace-only: broad shader tracing and the address-specific filters
             // share the same detailed draw summary. The latter must stay useful
             // without enabling the extremely noisy global shader trace.
-            if (pixelShaderAddress == 0x0000000142384800ul &&
-                vertexCount is 288 or 366 or 402 or 444)
-            {
-                TraceTranslatedGuestDraw(
-                    ctx,
-                    gpuState,
-                    state,
-                    translatedDraw,
-                    psInputEna,
-                    psInputAddr,
-                    force: true);
-            }
-
             var traceTargetedDraw =
                 Array.IndexOf(_tracePixelShaderAddresses, pixelShaderAddress) >= 0 ||
                 _traceVertexShaderAddress == exportShaderAddress ||
@@ -11290,10 +11279,15 @@ var renderTargets = GetRenderTargets(state.CxRegisters);
                 exportShaderHeader,
                 out var vertexTables))
         {
+            var resolvedVertexTables =
+                AgcVertexMetadata.AddUserDataScalarRegisterBase(
+                    vertexTables,
+                    exportState.UserDataScalarRegisterBase);
             var merged = AgcVertexMetadata.MergeVertexInputsFromMetadata(
                 ctx,
-                exportEvaluation.ScalarRegisters,
-                vertexTables,
+                exportEvaluation.InitialScalarRegisters,
+                resolvedVertexTables,
+                exportState.Program,
                 discoveredInputs);
             if (!ReferenceEquals(merged, discoveredInputs))
             {
@@ -11342,16 +11336,21 @@ var renderTargets = GetRenderTargets(state.CxRegisters);
         }
 
         var renderTargetOutputKinds = new Gen5PixelOutputKind[renderTargets.Length];
+        var renderTargetOutputMappings =
+            new Gen5ColorComponentMapping[renderTargets.Length];
         for (var index = 0; index < renderTargets.Length; index++)
         {
             var target = renderTargets[index];
-            if (!GuestGpu.Current.TryGetRenderTargetOutputKind(
+            if (!GuestGpu.Current.TryGetRenderTargetOutputInfo(
                     target.Format,
                     target.NumberType,
-                    out renderTargetOutputKinds[index]))
+                    target.ComponentSwap,
+                    out renderTargetOutputKinds[index],
+                    out renderTargetOutputMappings[index]))
             {
                 error =
-                    $"unsupported color target format={target.Format} number_type={target.NumberType}";
+                    $"unsupported color target format={target.Format} " +
+                    $"number_type={target.NumberType} component_swap={target.ComponentSwap}";
                 ReturnPooledEvaluationArrays(exportEvaluation);
                 ReturnPooledEvaluationArrays(pixelEvaluation);
                 return false;
@@ -11362,6 +11361,20 @@ var renderTargets = GetRenderTargets(state.CxRegisters);
             state.CxRegisters,
             renderTargets,
             pixelColorExportMasks);
+        var logicalOutputMasks = guestRenderState.Blends
+            .Select(static blend => blend.WriteMask)
+            .ToArray();
+        guestRenderState = guestRenderState with
+        {
+            Blends = guestRenderState.Blends
+                .Select((blend, index) => blend with
+                {
+                    WriteMask = index < renderTargetOutputMappings.Length
+                        ? renderTargetOutputMappings[index].ApplyMask(blend.WriteMask)
+                        : blend.WriteMask,
+                })
+                .ToArray(),
+        };
         var hostRenderTargets = BuildHostRenderTargets(
             renderTargets,
             guestRenderState,
@@ -11374,6 +11387,7 @@ var renderTargets = GetRenderTargets(state.CxRegisters);
         // attachment.
         var outputLayout = 0UL;
         var outputMasks = 0u;
+        var outputMappings = 0UL;
         for (var index = 0; index < renderTargets.Length; index++)
         {
             outputLayout |= (ulong)(
@@ -11382,6 +11396,8 @@ var renderTargets = GetRenderTargets(state.CxRegisters);
                 (uint)renderTargetOutputKinds[index]) << (index * 8);
             outputMasks |=
                 (guestRenderState.Blends[index].WriteMask & 0xFu) << (index * 4);
+            outputMappings |=
+                (ulong)renderTargetOutputMappings[index].Packed << (index * 8);
         }
 
         var attributeCount = GetInterpolatedAttributeCount(pixelState);
@@ -11448,7 +11464,8 @@ var renderTargets = GetRenderTargets(state.CxRegisters);
                 renderTargets[location].Slot,
                 hostOutputLocations[location],
                 renderTargetOutputKinds[location],
-                guestRenderState.Blends[location].WriteMask);
+                logicalOutputMasks[location],
+                renderTargetOutputMappings[location]);
         }
 
         (IGuestCompiledShader Vertex, IGuestCompiledShader Pixel) compiled = default;
@@ -11479,6 +11496,7 @@ var renderTargets = GetRenderTargets(state.CxRegisters);
                 pixelState.ProgramResource1,
                 outputLayout,
                 outputMasks,
+                outputMappings,
                 (uint)renderTargets.Length,
                 attributeCount,
                 psInputEna,
@@ -11589,6 +11607,7 @@ var renderTargets = GetRenderTargets(state.CxRegisters);
                 pixelState.ProgramResource1,
                 outputLayout,
                 outputMasks,
+                outputMappings,
                 (uint)renderTargets.Length,
                 attributeCount,
                 psInputEna,
@@ -13816,6 +13835,13 @@ var renderTargets = GetRenderTargets(state.CxRegisters);
                 Mix(binding.ResourceDescriptor[1] & 0x1FF0_0000u);
             }
 
+            if (binding.ResourceDescriptor.Count > 3 &&
+                binding.Opcode.StartsWith("ImageStore", StringComparison.Ordinal))
+            {
+                Mix(Gen5ShaderTranslator.GetImageDescriptorDstSelect(
+                    binding.ResourceDescriptor));
+            }
+
             Mix(binding.MipLevel ?? 0xFFFF_FFFFUL);
         }
 
@@ -13947,7 +13973,6 @@ var renderTargets = GetRenderTargets(state.CxRegisters);
     private static readonly object _renderTargetProbeGate = new();
     private static long _renderTargetSampleTraceCount;
 private static long _indirectDrawProbeCount;
-private static readonly ConcurrentDictionary<uint, byte> _gtaUiVertexDumped = new();
     private static long _indirectDrawEmitCount;
     private static long _indirectDrawEmitRejectCount;
     private static long _indirectMultiProbeCount;
@@ -14601,72 +14626,6 @@ private static readonly ConcurrentDictionary<uint, byte> _gtaUiVertexDumped = ne
         uint psInputAddr,
         bool force)
     {
-        if (draw.PixelShaderAddress == 0x0000000142384800ul &&
-            draw.VertexCount is 288 or 366 or 402 or 444 &&
-            _gtaUiVertexDumped.TryAdd(draw.VertexCount, 0) &&
-            draw.VertexInputs.FirstOrDefault() is { } tracedInput)
-        {
-            var tracedBinding = draw.GlobalMemoryBindings.FirstOrDefault(binding =>
-                tracedInput.BaseAddress >= binding.BaseAddress &&
-                tracedInput.BaseAddress - binding.BaseAddress < (ulong)binding.DataLength);
-            if (tracedBinding is not null)
-            {
-                var offset = checked((int)(tracedInput.BaseAddress - tracedBinding.BaseAddress));
-                var length = tracedBinding.DataLength - offset;
-                var path = Path.Combine(
-                    AppContext.BaseDirectory,
-                    "user",
-                    "logs",
-                    $"gta-ui-vertices-{draw.VertexCount}-current.bin");
-                Directory.CreateDirectory(Path.GetDirectoryName(path)!);
-                File.WriteAllBytes(path, tracedBinding.Data.AsSpan(offset, length).ToArray());
-                var indexPath = Path.Combine(
-                    AppContext.BaseDirectory,
-                    "user",
-                    "logs",
-                    $"gta-ui-indices-{draw.VertexCount}-current.bin");
-                if (draw.IndexBuffer is { } tracedIndices)
-                {
-                    File.WriteAllBytes(
-                        indexPath,
-                        tracedIndices.Data.AsSpan(0, tracedIndices.Length).ToArray());
-                }
-
-                File.WriteAllText(
-                    Path.ChangeExtension(path, ".txt"),
-                    $"baseVertex={draw.BaseVertex}\n" +
-                    $"vertexCount={draw.VertexCount}\n" +
-                    $"vertexAddress=0x{tracedInput.BaseAddress:X16}\n" +
-                    $"stride={tracedInput.Stride}\n" +
-                    $"index32={(draw.IndexBuffer?.Is32Bit == true ? 1 : 0)}\n" +
-                    $"indexBytes={draw.IndexBuffer?.Length ?? 0}\n" +
-                    $"targets={string.Join(',', draw.RenderTargets.Select(target => $"0x{target.Address:X16}:{target.Width}x{target.Height}:fmt{target.Format}:num{target.NumberType}:tile{target.TileMode}"))}\n" +
-                    $"textures={string.Join(',', draw.Textures.Select(texture => $"0x{texture.Descriptor.Address:X16}:{texture.Descriptor.Width}x{texture.Descriptor.Height}:fmt{texture.Descriptor.Format}:num{texture.Descriptor.NumberType}:tile{texture.Descriptor.TileMode}"))}\n" +
-                    $"scissor={(draw.RenderState.Scissor is { } s ? $"{s.X},{s.Y},{s.Width}x{s.Height}" : "full")}\n" +
-                    $"viewport={(draw.RenderState.Viewport is { } v ? $"{v.X},{v.Y},{v.Width}x{v.Height}:{v.MinDepth}-{v.MaxDepth}" : "full")}\n" +
-                    $"blend={draw.RenderState.Blend}\n" +
-                    $"raster={draw.RenderState.Raster}\n" +
-                    $"depth={draw.RenderState.Depth}\n");
-
-                for (var bindingIndex = 0;
-                     bindingIndex < draw.GlobalMemoryBindings.Count;
-                     bindingIndex++)
-                {
-                    var binding = draw.GlobalMemoryBindings[bindingIndex];
-                    File.WriteAllBytes(
-                        Path.Combine(
-                            Path.GetDirectoryName(path)!,
-                            $"gta-ui-{draw.VertexCount}-binding-{bindingIndex:D2}-" +
-                            $"0x{binding.BaseAddress:X16}-s{binding.ScalarAddress}.bin"),
-                        binding.Data.AsSpan(0, binding.DataLength).ToArray());
-                }
-
-                File.AppendAllText(
-                    Path.ChangeExtension(path, ".txt"),
-                    $"vertexScalars={string.Join(',', draw.VertexInitialScalars.Select((value, index) => $"s{index}=0x{value:X8}"))}\n");
-            }
-        }
-
         var targets = draw.RenderTargets.Count == 0
             ? "none"
             : string.Join(
@@ -14714,17 +14673,11 @@ private static readonly ConcurrentDictionary<uint, byte> _gtaUiVertexDumped = ne
                     $"fmt{texture.Format}/num{texture.NumberType}/tile{texture.TileMode}" +
                     $"/storage={binding.IsStorage}{target}/{probe}{writer}";
             }));
-        var traceDrawBufferBytes =
-            draw.PixelShaderAddress == 0x0000000142384800ul
-                ? 4096
-                : 256;
         var buffers = string.Join(
             ',',
             draw.GlobalMemoryBindings.Select((binding, index) =>
                 $"{index}:0x{binding.BaseAddress:X16}:{binding.DataLength}:" +
-                Convert.ToHexString(binding.Data.AsSpan(
-                    0,
-                    Math.Min(binding.DataLength, traceDrawBufferBytes)))));
+                Convert.ToHexString(binding.Data.AsSpan(0, Math.Min(binding.DataLength, 256)))));
         var indices = draw.IndexBuffer is { } indexBuffer
             ? $"{(indexBuffer.Is32Bit ? 32 : 16)}:" +
               Convert.ToHexString(indexBuffer.Data.AsSpan(0, Math.Min(indexBuffer.Length, 32)))

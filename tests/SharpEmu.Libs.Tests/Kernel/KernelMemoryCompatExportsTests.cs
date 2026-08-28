@@ -20,6 +20,25 @@ public sealed class KernelMemoryCompatStateCollection
 [Collection(KernelMemoryCompatStateCollection.Name)]
 public sealed class KernelMemoryCompatExportsTests
 {
+    [Fact]
+    public void PosixStat_GtaScaleformMemoryStreamReturnsNotFound()
+    {
+        const ulong memoryBase = 0x1_0000_0000;
+        const ulong pathAddress = memoryBase + 0x100;
+        const ulong streamAddress = memoryBase + 0x800;
+        const ulong statAddress = memoryBase + 0x400;
+        var memory = new FakeCpuMemory(memoryBase, 0x1000);
+        var context = new CpuContext(memory, Generation.Gen5);
+        memory.WriteCString(
+            pathAddress,
+            $"memory:$0x{streamAddress:X},288,0:00020_pause_menu_header.gfx");
+        context[CpuRegister.Rdi] = pathAddress;
+        context[CpuRegister.Rsi] = statAddress;
+
+        Assert.Equal(-1, KernelMemoryCompatExports.PosixStat(context));
+        Assert.Equal(ulong.MaxValue, context[CpuRegister.Rax]);
+    }
+
     private const ulong GuestMemoryBase = 0x1_0000_0000;
     private const ulong AllocationOutAddress = GuestMemoryBase + 0x100;
     private const ulong SpanStartOutAddress = GuestMemoryBase + 0x108;

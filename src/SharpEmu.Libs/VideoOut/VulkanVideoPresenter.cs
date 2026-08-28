@@ -32,7 +32,8 @@ namespace SharpEmu.Libs.VideoOut;
 
 internal readonly record struct VulkanRenderTargetFormat(
     Format Format,
-    Gen5PixelOutputKind OutputKind)
+    Gen5PixelOutputKind OutputKind,
+    Gen5ColorComponentMapping ExportMapping)
 {
     public bool IsInteger => OutputKind is Gen5PixelOutputKind.Uint or Gen5PixelOutputKind.Sint;
 }
@@ -2948,7 +2949,10 @@ internal static unsafe class VulkanVideoPresenter
             _ => Format.Undefined,
         };
 
-        if (format == Format.Undefined)
+        if (format == Format.Undefined ||
+            !TryGetRenderTargetComponentCount(dataFormat, out var componentCount) ||
+            !Gen5ColorComponentMapping.TryResolveRenderTarget(
+                componentSwap, componentCount, out var orderMapping))
         {
             result = default;
             return false;
@@ -2964,8 +2968,33 @@ internal static unsafe class VulkanVideoPresenter
                 Format.R16G16B16A16Sint => Gen5PixelOutputKind.Sint,
             _ => Gen5PixelOutputKind.Float,
         };
-        result = new VulkanRenderTargetFormat(format, outputKind);
+        var hostToStorage = dataFormat switch
+        {
+            9 when componentSwap == 1 => new Gen5ColorComponentMapping(0xC6),
+            10 when componentSwap == 1 && numberType is 0 or 6 or 9 =>
+                new Gen5ColorComponentMapping(0xC6),
+            _ => Gen5ColorComponentMapping.Identity,
+        };
+        result = new VulkanRenderTargetFormat(
+            format,
+            outputKind,
+            hostToStorage.Then(orderMapping));
         return true;
+    }
+
+    private static bool TryGetRenderTargetComponentCount(
+        uint dataFormat,
+        out uint componentCount)
+    {
+        componentCount = dataFormat switch
+        {
+            1 or 2 or 4 or 20 or 29 or 36 or 49 => 1,
+            3 or 5 or 11 or 75 => 2,
+            6 or 7 => 3,
+            9 or 10 or 12 or 13 or 14 or 22 or 56 or 62 or 64 or 71 => 4,
+            _ => 0,
+        };
+        return componentCount != 0;
     }
 
     private static bool IsKnownGuestTextureFormat(uint format) =>
@@ -4311,8 +4340,6 @@ internal static unsafe class VulkanVideoPresenter
         private ulong _nextDepthOnlyColorAddress = 0xFFFF_FF00_0000_0000UL;
         private readonly HashSet<(ulong Address, uint Width, uint Height, Format Format)> _tracedTextureCacheHits = new();
         private readonly HashSet<(ulong Address, uint Width, uint Height, uint DstSelect)> _tracedDepthTextureAliases = new();
-        private readonly HashSet<(ulong Address, ulong ShaderAddress, uint DstSelect)>
-            _tracedGuestImageAliasMetadata = new();
         private readonly HashSet<(ulong Address, uint Width, uint Height)> _tracedDepthExtentFallbacks = new();
         private readonly HashSet<(ulong Address, uint Width, uint Height, Format Format)> _tracedTextureUploads = new();
         private readonly HashSet<(ulong Address, uint Width, uint Height, uint Format)> _dumpedTextures = new();
@@ -8795,7 +8822,7 @@ internal static unsafe class VulkanVideoPresenter
                         ? CreateHostMovieTextureResource(texture, plane: 0)
                         : index == hostMovieTextures.Chroma
                             ? CreateHostMovieTextureResource(texture, plane: 1)
-                            : ResolveTextureResource(texture, shaderAddress);
+                            : ResolveTextureResource(texture);
                     var feedbackTarget = !texture.IsStorage
                         ? feedbackTargets?.FirstOrDefault(target =>
                             ReferenceEquals(resolved.GuestImage, target))
@@ -8957,9 +8984,7 @@ internal static unsafe class VulkanVideoPresenter
                 for (var index = 0; index < dispatch.Textures.Count; index++)
                 {
                     resources.Textures[index] =
-                        ResolveTextureResource(
-                            dispatch.Textures[index],
-                            dispatch.ShaderAddress);
+                        ResolveTextureResource(dispatch.Textures[index]);
                 }
 
                 if (traceResources)
@@ -10199,9 +10224,7 @@ internal static unsafe class VulkanVideoPresenter
         private static byte ClampByte(int value) => (byte)Math.Clamp(value, 0, 255);
 
         [MethodImpl(MethodImplOptions.NoInlining)]
-        private TextureResource ResolveTextureResource(
-            GuestDrawTexture texture,
-            ulong shaderAddress = 0)
+        private TextureResource ResolveTextureResource(GuestDrawTexture texture)
         {
             if (texture.IsStorage)
             {
@@ -10247,24 +10270,10 @@ internal static unsafe class VulkanVideoPresenter
                         $"tile={texture.TileMode} format={vkFormat}");
                 }
 
-                var traceAlias = string.Equals(
-                    _traceGuestImagesMode,
-                    "alias",
-                    StringComparison.OrdinalIgnoreCase) &&
-                    (!_traceGuestImageAddressFilterEnabled ||
-                        ShouldTraceGuestImageAddressForDiagnostics(guestImage.Address));
-                if (traceAlias &&
-                    _tracedGuestImageAliasMetadata.Add(
-                        (guestImage.Address, shaderAddress, texture.DstSelect)))
-                {
-                    TraceGuestImageAliasMetadata(
-                        texture,
-                        guestImage,
-                        vkFormat,
-                        shaderAddress);
-                }
-
-                if (traceAlias &&
+                if (string.Equals(
+                        _traceGuestImagesMode,
+                        "alias",
+                        StringComparison.OrdinalIgnoreCase) &&
                     _tracedGuestImageContents.Add(guestImage.Address))
                 {
                     // Deferred: reading back here would clobber the command
@@ -19095,46 +19104,6 @@ internal static unsafe class VulkanVideoPresenter
             _frameGuestImageVersions[frameSlot] = null;
             _capturedGuestFlipVersions.Remove(presentedGuestImage.FlipVersion);
             DestroyGuestImage(presentedGuestImage);
-        }
-
-        private static void TraceGuestImageAliasMetadata(
-            GuestDrawTexture texture,
-            GuestImageResource image,
-            Format viewFormat,
-            ulong shaderAddress)
-        {
-            var dumpDirectory = Environment.GetEnvironmentVariable(
-                "SHARPEMU_GUEST_IMAGE_DUMP_DIR");
-            if (string.IsNullOrWhiteSpace(dumpDirectory))
-            {
-                return;
-            }
-
-            try
-            {
-                Directory.CreateDirectory(dumpDirectory);
-                File.AppendAllText(
-                    Path.Combine(
-                        dumpDirectory,
-                        $"alias-0x{image.Address:X16}.txt"),
-                    $"shader=0x{shaderAddress:X16}{Environment.NewLine}" +
-                    $"address=0x{texture.Address:X16}{Environment.NewLine}" +
-                    $"texture={texture.Width}x{texture.Height}{Environment.NewLine}" +
-                    $"image={image.Width}x{image.Height}{Environment.NewLine}" +
-                    $"guest_format={image.Format}{Environment.NewLine}" +
-                    $"view_format={viewFormat}{Environment.NewLine}" +
-                    $"guest_format_code={texture.Format}{Environment.NewLine}" +
-                    $"number_type={texture.NumberType}{Environment.NewLine}" +
-                    $"dst_select=0x{texture.DstSelect:X3}{Environment.NewLine}" +
-                    $"tile_mode={texture.TileMode}{Environment.NewLine}" +
-                    $"mip={texture.BaseMipLevel}/{texture.MipLevels}{Environment.NewLine}" +
-                    $"---{Environment.NewLine}");
-            }
-            catch (Exception exception)
-            {
-                Console.Error.WriteLine(
-                    $"[LOADER][WARN] Failed to write alias metadata: {exception.Message}");
-            }
         }
 
         private void TraceGuestImageContents(

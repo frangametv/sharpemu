@@ -49,11 +49,70 @@ public enum Gen5PixelOutputKind
     Sint,
 }
 
+public readonly record struct Gen5ColorComponentMapping
+{
+    public const byte IdentityPacked = 0xE4;
+    private readonly byte _encoded;
+
+    public Gen5ColorComponentMapping(byte packed) =>
+        _encoded = (byte)(packed ^ IdentityPacked);
+
+    public byte Packed => (byte)(_encoded ^ IdentityPacked);
+    public static Gen5ColorComponentMapping Identity { get; } = new(IdentityPacked);
+    public bool IsIdentity => Packed == IdentityPacked;
+
+    public uint Map(uint physicalComponent) =>
+        physicalComponent < 4
+            ? (uint)(Packed >> checked((int)(physicalComponent * 2))) & 3u
+            : physicalComponent;
+
+    public uint ApplyMask(uint logicalMask)
+    {
+        var mappedMask = 0u;
+        for (var physical = 0u; physical < 4; physical++)
+        {
+            mappedMask |= ((logicalMask >> checked((int)Map(physical))) & 1u)
+                << checked((int)physical);
+        }
+        return mappedMask;
+    }
+
+    public Gen5ColorComponentMapping Then(Gen5ColorComponentMapping next)
+    {
+        var packed = 0u;
+        for (var physical = 0u; physical < 4; physical++)
+        {
+            packed |= next.Map(Map(physical)) << checked((int)(physical * 2));
+        }
+        return new Gen5ColorComponentMapping(checked((byte)packed));
+    }
+
+    public static bool TryResolveRenderTarget(
+        uint componentSwap,
+        uint componentCount,
+        out Gen5ColorComponentMapping mapping)
+    {
+        var packed = (componentSwap, componentCount) switch
+        {
+            (0, >= 1 and <= 4) => IdentityPacked,
+            (1, 1) => 0xE1, (1, 2) => 0x6C, (1, 3) => 0xB4, (1, 4) => 0xC6,
+            (2, 1) => 0xC6, (2, 2) => 0xE1, (2, 3) => 0xC6, (2, 4) => 0x1B,
+            (3, 1) => 0x27, (3, 2) => 0x63, (3, 3) => 0x87, (3, 4) => 0x93,
+            _ => -1,
+        };
+        mapping = packed >= 0
+            ? new Gen5ColorComponentMapping(checked((byte)packed))
+            : default;
+        return packed >= 0;
+    }
+}
+
 public readonly record struct Gen5PixelOutputBinding(
     uint GuestSlot,
     uint HostLocation,
     Gen5PixelOutputKind Kind,
-    uint WriteMask = 0xFu);
+    uint WriteMask = 0xFu,
+    Gen5ColorComponentMapping ComponentMapping = default);
 
 public readonly record struct Gen5ShaderResourceMapping(
     Gen5ShaderResourceKind Kind,

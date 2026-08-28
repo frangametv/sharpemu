@@ -46,7 +46,6 @@ public static class NpAuthLleExports
                 var id = RequestIdOffset + index;
                 if (Requests.TryAdd(id, new Request()))
                 {
-                    Trace($"create request=0x{id:X8}");
                     return ctx.SetReturn(id);
                 }
             }
@@ -97,7 +96,6 @@ public static class NpAuthLleExports
             request.State = RequestState.Complete;
             request.Result = 0;
         }
-        Trace($"authorization complete request=0x{id:X8} result=LOCAL_OK");
         return ctx.SetReturn(0);
     }
 
@@ -116,7 +114,6 @@ public static class NpAuthLleExports
         }
         if (!ctx.TryWriteUInt32(resultAddress, unchecked((uint)result)))
             return ctx.SetReturn(OrbisGen2Result.ORBIS_GEN2_ERROR_MEMORY_FAULT);
-        Trace($"poll request=0x{id:X8} result=0x{result:X8}");
         return ctx.SetReturn(0);
     }
 
@@ -144,18 +141,11 @@ public static class NpAuthLleExports
         {
             if (!Requests.Remove(id)) return ctx.SetReturn(ErrorRequestNotFound);
         }
-        Trace($"delete request=0x{id:X8}");
         return ctx.SetReturn(0);
     }
 
     internal static void ResetForTests()
     {
         lock (Gate) Requests.Clear();
-    }
-
-    private static void Trace(string message)
-    {
-        if (string.Equals(Environment.GetEnvironmentVariable("SHARPEMU_LOG_IMPORTS"), "1", StringComparison.Ordinal))
-            Console.Error.WriteLine($"[NP_AUTH][HLE] {message}");
     }
 }

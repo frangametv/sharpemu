@@ -2110,6 +2110,58 @@ public static class Gen5ShaderTranslator
         name.StartsWith("ImageStore", StringComparison.Ordinal) ||
         name.StartsWith("ImageAtomic", StringComparison.Ordinal);
 
+    public const uint IdentityImageDstSelect = 0xFACu;
+
+    public static uint GetImageDescriptorDstSelect(
+        IReadOnlyList<uint> resourceDescriptor) =>
+        resourceDescriptor.Count > 3
+            ? resourceDescriptor[3] & 0xFFFu
+            : IdentityImageDstSelect;
+
+    public static int GetImageStoreSourceIndex(
+        uint dstSelect,
+        uint dmask,
+        int destinationComponent)
+    {
+        ArgumentOutOfRangeException.ThrowIfNegative(destinationComponent);
+        ArgumentOutOfRangeException.ThrowIfGreaterThan(destinationComponent, 3);
+
+        var logicalComponent = -1;
+        var physicalSelector = 4u + (uint)destinationComponent;
+        for (var component = 0; component < 4; component++)
+        {
+            if (((dstSelect >> (component * 3)) & 0x7u) == physicalSelector)
+            {
+                logicalComponent = component;
+                break;
+            }
+        }
+
+        if (logicalComponent < 0)
+        {
+            return -1;
+        }
+
+        var effectiveDmask = dmask & 0xFu;
+        if (effectiveDmask == 0)
+        {
+            effectiveDmask = 1;
+        }
+
+        if ((effectiveDmask & (1u << logicalComponent)) == 0)
+        {
+            return -1;
+        }
+
+        var sourceIndex = 0;
+        for (var component = 0; component < logicalComponent; component++)
+        {
+            sourceIndex += (int)((effectiveDmask >> component) & 1u);
+        }
+
+        return sourceIndex;
+    }
+
     // GFX10 image descriptors use word 5 bits 22:20 for operation/cache policy.
     // AGC emits 0x00700000 on writable views, so an IMAGE_LOAD and IMAGE_STORE
     // targeting the same image can legitimately differ only in these bits.

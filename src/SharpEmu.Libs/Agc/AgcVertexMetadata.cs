@@ -1,6 +1,7 @@
 // Copyright (C) 2026 SharpEmu Emulator Project
 // SPDX-License-Identifier: GPL-2.0-or-later
 
+using System.Collections.Concurrent;
 using SharpEmu.HLE;
 using SharpEmu.ShaderCompiler;
 
@@ -17,6 +18,7 @@ internal static class AgcVertexMetadata
     private const ulong ShaderUserDataOffset = 0x08;
     private const ulong ShaderInputSemanticsOffset = 0x30;
     private const ulong ShaderNumInputSemanticsOffset = 0x50;
+    private static readonly ConcurrentDictionary<uint, byte> _reportedUnknownFormats = new();
 
     internal enum AgcDirectResourceType : uint
     {
@@ -30,6 +32,21 @@ internal static class AgcVertexMetadata
         int VertexAttribReg,
         uint InputSemanticsCount,
         ulong InputSemanticsAddress);
+
+    /// <summary>
+    /// AGC direct-resource offsets are relative to the stage user-data block.
+    /// Convert them to the logical SGPR indices used by the evaluator.
+    /// </summary>
+    internal static VertexTableRegisters AddUserDataScalarRegisterBase(
+        VertexTableRegisters registers,
+        uint userDataScalarRegisterBase) =>
+        registers with
+        {
+            VertexBufferReg = checked(
+                registers.VertexBufferReg + (int)userDataScalarRegisterBase),
+            VertexAttribReg = checked(
+                registers.VertexAttribReg + (int)userDataScalarRegisterBase),
+        };
 
     /// <summary>
     /// One AGC attrib-table resource.
@@ -49,7 +66,15 @@ internal static class AgcVertexMetadata
         uint DataFormat,
         uint NumberFormat,
         uint ComponentCount,
-        bool PerInstance);
+        bool PerInstance,
+        MetadataFormatState FormatState = MetadataFormatState.Known);
+
+    internal enum MetadataFormatState
+    {
+        NoOverride,
+        Known,
+        Unknown,
+    }
 
     /// <summary>
     /// Reads AGC user-data direct-resource offsets for the ES header mapped to
@@ -212,8 +237,22 @@ internal static class AgcVertexMetadata
             }
 
             var fallbackComponents = sizeInElements != 0 ? sizeInElements : 4u;
-            var (dataFormat, numberFormat, components) =
-                MapAttribFormat(format, fallbackComponents);
+            var formatState = TryMapAttribFormat(
+                format,
+                fallbackComponents,
+                out var dataFormat,
+                out var numberFormat,
+                out var components);
+            if (formatState == MetadataFormatState.Unknown &&
+                _reportedUnknownFormats.TryAdd(format, 0))
+            {
+                Console.Error.WriteLine(
+                    "[LOADER][WARN] agc.vertex_metadata_format_unknown " +
+                    $"semantic={semantic} hardware_mapping={hardwareMapping} " +
+                    $"attrib_word=0x{attribWord:X8} format={format} " +
+                    "— preserving the format discovered from the shader.");
+            }
+
             built.Add(new MetadataVertexResource(
                 Location: i,
                 Semantic: semantic,
@@ -225,7 +264,8 @@ internal static class AgcVertexMetadata
                 DataFormat: dataFormat,
                 NumberFormat: numberFormat,
                 ComponentCount: components,
-                PerInstance: fetchIndex != 0));
+                PerInstance: fetchIndex != 0,
+                FormatState: formatState));
         }
 
         if (built.Count == 0)
@@ -249,7 +289,33 @@ internal static class AgcVertexMetadata
         CpuContext ctx,
         IReadOnlyList<uint> scalarRegisters,
         VertexTableRegisters tables,
+        Gen5ShaderProgram program,
+        IReadOnlyList<Gen5VertexInputBinding> discovered) =>
+        MergeVertexInputsFromMetadata(
+            ctx,
+            scalarRegisters,
+            tables,
+            discovered,
+            program);
+
+    internal static IReadOnlyList<Gen5VertexInputBinding> MergeVertexInputsFromMetadata(
+        CpuContext ctx,
+        IReadOnlyList<uint> scalarRegisters,
+        VertexTableRegisters tables,
         IReadOnlyList<Gen5VertexInputBinding> discovered)
+        => MergeVertexInputsFromMetadata(
+            ctx,
+            scalarRegisters,
+            tables,
+            discovered,
+            program: null);
+
+    private static IReadOnlyList<Gen5VertexInputBinding> MergeVertexInputsFromMetadata(
+        CpuContext ctx,
+        IReadOnlyList<uint> scalarRegisters,
+        VertexTableRegisters tables,
+        IReadOnlyList<Gen5VertexInputBinding> discovered,
+        Gen5ShaderProgram? program)
     {
         if (discovered.Count == 0 ||
             !TryBuildVertexResourcesFromMetadata(
@@ -261,23 +327,66 @@ internal static class AgcVertexMetadata
             return discovered;
         }
 
-        if (TryMergeByLocationPairing(discovered, resources, out var paired))
+        // Metadata may only refine a binding when the association is validated.
+        // A known format can replace the discovered format. The kInvalid
+        // sentinel preserves the discovered format but can still refine the
+        // offset and input rate. An unknown nonzero format preserves the complete
+        // discovered binding.
+        //
+        // The association key is hardware_mapping matched against the fetch
+        // destination VGPR, which is the same key Kyty uses. The resolved byte
+        // offset is a second, independent key. When the two disagree there is
+        // no basis for preferring either, so the pair is ambiguous and the
+        // discovered binding stands: a wrong overlay silently rewrites the
+        // attribute's format and offset, which is worse than leaving the
+        // shader-derived values alone.
+        var hardwareAssignments = program is null
+            ? null
+            : BuildHardwareMappingAssignments(
+                program,
+                discovered,
+                resources);
+        if (hardwareAssignments is null)
         {
-            return paired;
+            // Without the program there is no destination VGPR to associate
+            // against, so no assignment can be validated.
+            return discovered;
         }
 
+        var locationAssignments = TryBuildCompleteNoOverrideAddressAssignments(
+            discovered,
+            resources,
+            out var completeLocationAssignments)
+            ? completeLocationAssignments
+            : null;
+
         var merged = new List<Gen5VertexInputBinding>(discovered.Count);
-        var usedResources = new bool[resources.Count];
         var changed = false;
-        foreach (var input in discovered)
+        for (var inputIndex = 0; inputIndex < discovered.Count; inputIndex++)
         {
-            if (!TryMatchMetadataResource(input, resources, usedResources, out var resource))
+            var input = discovered[inputIndex];
+            var refined = input;
+            var resourceIndex = hardwareAssignments[inputIndex];
+            if (resourceIndex >= 0)
             {
-                merged.Add(input);
-                continue;
+                var resource = resources[resourceIndex];
+                if (resource.FormatState != MetadataFormatState.Unknown &&
+                    TryValidateMetadataOffset(input, resource))
+                {
+                    refined = ApplyMetadata(input, resource);
+                }
             }
 
-            var refined = ApplyMetadataFormat(input, resource);
+            if (locationAssignments is not null)
+            {
+                var locationResource = resources[locationAssignments[inputIndex]];
+                refined = refined with
+                {
+                    Location = locationResource.Location,
+                    PerInstance = locationResource.PerInstance,
+                };
+            }
+
             changed |= refined != input;
             merged.Add(refined);
         }
@@ -286,66 +395,195 @@ internal static class AgcVertexMetadata
     }
 
     /// <summary>
-    /// When discovery and metadata describe the same interleaved stream with
-    /// equal attribute counts, pair by sorted Location (semantic order).
-    /// Keeps each binding's Pc/Location/address for SPIR-V and overlays layout.
+    /// Matches AGC hardware_mapping to the VGPR written by each discovered
+    /// fetch. A binding can represent more than one fetch PC, so aliases take
+    /// part in the match. Stream identity still has to agree. An assignment is
+    /// accepted only when it is unique in both directions.
     /// </summary>
-    private static bool TryMergeByLocationPairing(
+    private static int[] BuildHardwareMappingAssignments(
+        Gen5ShaderProgram program,
         IReadOnlyList<Gen5VertexInputBinding> discovered,
-        IReadOnlyList<MetadataVertexResource> resources,
-        out IReadOnlyList<Gen5VertexInputBinding> merged)
+        IReadOnlyList<MetadataVertexResource> resources)
     {
-        merged = discovered;
-        if (discovered.Count != resources.Count || discovered.Count == 0)
+        var fetchVectorDataByPc = new Dictionary<uint, uint>();
+        foreach (var instruction in program.Instructions)
         {
-            return false;
+            if (instruction.Control is Gen5BufferMemoryControl { IndexEnabled: true } control &&
+                (instruction.Opcode.StartsWith("BufferLoadFormat", StringComparison.Ordinal) ||
+                 instruction.Opcode.StartsWith("TBufferLoadFormat", StringComparison.Ordinal)))
+            {
+                fetchVectorDataByPc[instruction.Pc] = control.VectorData;
+            }
         }
 
-        var orderedInputs = discovered
-            .Select(static (input, originalIndex) => (Input: input, OriginalIndex: originalIndex))
-            .OrderBy(static entry => entry.Input.Location)
-            .ThenBy(static entry => entry.OriginalIndex)
-            .ToArray();
-        var orderedResources = resources.OrderBy(static resource => resource.Location).ToArray();
-        var streamBase = orderedResources[0].SharpBase;
-        var streamStride = orderedResources[0].Stride;
-        for (var index = 0; index < orderedResources.Length; index++)
+        var assignments = new int[discovered.Count];
+        Array.Fill(assignments, -1);
+        var resourceUseCounts = new int[resources.Count];
+        for (var inputIndex = 0; inputIndex < discovered.Count; inputIndex++)
         {
-            var resource = orderedResources[index];
-            var input = orderedInputs[index].Input;
-            if (resource.SharpBase != streamBase ||
-                resource.Stride != streamStride ||
-                !TryGetMetadataOffset(input, resource, out var resolvedOffset) ||
-                resolvedOffset != input.OffsetBytes)
+            var input = discovered[inputIndex];
+            var vectorDestinations = new HashSet<uint>();
+            if (fetchVectorDataByPc.TryGetValue(input.Pc, out var vectorData))
+            {
+                vectorDestinations.Add(vectorData);
+            }
+
+            foreach (var aliasPc in input.AliasPcs ?? [])
+            {
+                if (fetchVectorDataByPc.TryGetValue(aliasPc, out vectorData))
+                {
+                    vectorDestinations.Add(vectorData);
+                }
+            }
+
+            if (vectorDestinations.Count == 0)
+            {
+                continue;
+            }
+
+            var candidateIndex = -1;
+            for (var resourceIndex = 0; resourceIndex < resources.Count; resourceIndex++)
+            {
+                var candidate = resources[resourceIndex];
+                if (!vectorDestinations.Contains(candidate.HardwareMapping) ||
+                    !IsCompatibleVertexStream(input, candidate))
+                {
+                    continue;
+                }
+
+                if (candidateIndex >= 0)
+                {
+                    candidateIndex = -1;
+                    break;
+                }
+
+                candidateIndex = resourceIndex;
+            }
+
+            if (candidateIndex >= 0)
+            {
+                assignments[inputIndex] = candidateIndex;
+                resourceUseCounts[candidateIndex]++;
+            }
+        }
+
+        for (var inputIndex = 0; inputIndex < assignments.Length; inputIndex++)
+        {
+            var resourceIndex = assignments[inputIndex];
+            if (resourceIndex >= 0 && resourceUseCounts[resourceIndex] != 1)
+            {
+                assignments[inputIndex] = -1;
+            }
+        }
+
+        return assignments;
+    }
+
+    /// <summary>
+    /// Associates a complete format-0 table by exact byte address. Format 0
+    /// does not override the evaluated format. The locations can be used only
+    /// when every input and every output location is unique.
+    /// </summary>
+    private static bool TryBuildCompleteNoOverrideAddressAssignments(
+        IReadOnlyList<Gen5VertexInputBinding> discovered,
+        IReadOnlyList<MetadataVertexResource> resources,
+        out int[] assignments)
+    {
+        assignments = new int[discovered.Count];
+        Array.Fill(assignments, -1);
+        var resourceUseCounts = new int[resources.Count];
+        for (var inputIndex = 0; inputIndex < discovered.Count; inputIndex++)
+        {
+            var candidateIndex = -1;
+            for (var resourceIndex = 0; resourceIndex < resources.Count; resourceIndex++)
+            {
+                var candidate = resources[resourceIndex];
+                if (candidate.FormatState != MetadataFormatState.NoOverride ||
+                    !IsCompatibleVertexStream(discovered[inputIndex], candidate) ||
+                    !TryValidateMetadataOffset(discovered[inputIndex], candidate))
+                {
+                    continue;
+                }
+
+                if (candidateIndex >= 0)
+                {
+                    return false;
+                }
+
+                candidateIndex = resourceIndex;
+            }
+
+            if (candidateIndex < 0)
+            {
+                return false;
+            }
+
+            assignments[inputIndex] = candidateIndex;
+            resourceUseCounts[candidateIndex]++;
+        }
+
+        var locations = new HashSet<uint>();
+        for (var inputIndex = 0; inputIndex < assignments.Length; inputIndex++)
+        {
+            var resourceIndex = assignments[inputIndex];
+            if (resourceUseCounts[resourceIndex] != 1 ||
+                !locations.Add(resources[resourceIndex].Location))
             {
                 return false;
             }
         }
 
-        var result = discovered.ToArray();
-        var changed = false;
-        for (var index = 0; index < orderedInputs.Length; index++)
+        return true;
+    }
+
+    private static bool IsCompatibleVertexStream(
+        Gen5VertexInputBinding input,
+        MetadataVertexResource resource) =>
+        (resource.Stride == 0 || resource.OffsetBytes < resource.Stride) &&
+        IsSameVertexStream(input, resource);
+
+    private static bool IsSameVertexStream(
+        Gen5VertexInputBinding input,
+        MetadataVertexResource resource)
+    {
+        if (input.BaseAddress == resource.SharpBase ||
+            input.BaseAddress == resource.SharpBase + resource.OffsetBytes)
         {
-            var input = orderedInputs[index].Input;
-            var resource = orderedResources[index];
-            var refined = ApplyMetadataFormat(input, resource);
-            changed |= refined != input;
-            result[orderedInputs[index].OriginalIndex] = refined;
+            return true;
         }
 
-        if (!changed)
+        return IsAddressInsideCapturedSpan(input, resource.SharpBase);
+    }
+
+    /// <summary>
+    /// Second, independent check on a hardware-mapping association: the byte
+    /// offset the metadata resolves to must agree with what discovery found.
+    /// </summary>
+    private static bool TryValidateMetadataOffset(
+        Gen5VertexInputBinding input,
+        MetadataVertexResource resource)
+    {
+        if (!TryGetMetadataOffset(input, resource, out var resolved))
         {
             return false;
         }
 
-        merged = result;
-        return true;
+        return resolved == input.OffsetBytes;
     }
 
-    private static Gen5VertexInputBinding ApplyMetadataFormat(
+    private static Gen5VertexInputBinding ApplyMetadata(
         Gen5VertexInputBinding input,
         MetadataVertexResource resource)
     {
+        if (resource.FormatState == MetadataFormatState.NoOverride)
+        {
+            return input with
+            {
+                Stride = resource.Stride,
+                PerInstance = resource.PerInstance,
+            };
+        }
+
         var components = input.ComponentCount != 0 &&
                          input.ComponentCount < resource.ComponentCount
             ? input.ComponentCount
@@ -426,59 +664,6 @@ internal static class AgcVertexMetadata
         }
 
         return pcs;
-    }
-
-    private static bool TryMatchMetadataResource(
-        Gen5VertexInputBinding input,
-        IReadOnlyList<MetadataVertexResource> resources,
-        bool[] usedResources,
-        out MetadataVertexResource resource)
-    {
-        resource = default;
-        var bestScore = int.MinValue;
-        var bestIndex = -1;
-        for (var index = 0; index < resources.Count; index++)
-        {
-            if (usedResources[index])
-            {
-                continue;
-            }
-
-            var candidate = resources[index];
-            if (!TryGetMetadataOffset(input, candidate, out var resolvedOffset) ||
-                resolvedOffset != input.OffsetBytes)
-            {
-                continue;
-            }
-
-            // The effective captured offset (including any base rebasing done
-            // while coalescing adjacent vertex streams) is the primary key.
-            var score = 400;
-
-            // Discovery can carry a stale inferred stride (notably 32 for a
-            // real stride-40 interleaved layout). Prefer a matching stride
-            // when candidates are otherwise equivalent, but do not reject an
-            // unambiguous metadata match: the V# descriptor is authoritative.
-            if (input.Stride == candidate.Stride)
-            {
-                score += 25;
-            }
-
-            if (score > bestScore)
-            {
-                bestScore = score;
-                bestIndex = index;
-            }
-        }
-
-        if (bestIndex < 0)
-        {
-            return false;
-        }
-
-        usedResources[bestIndex] = true;
-        resource = resources[bestIndex];
-        return true;
     }
 
     private static bool TryGetMetadataOffset(
@@ -602,30 +787,39 @@ internal static class AgcVertexMetadata
         };
 
     /// <summary>
-    /// Maps Prospero attrib-table formats onto GNM (DataFormat, NumberFormat,
-    /// Components) for <c>ToVkVertexFormat</c>. Accepts VertexAttribFormat
-    /// or BufferFormat (pass-through). NumberFormat: 0 Unorm, 1 SNorm,
-    /// 2 UScaled, 3 SScaled, 4 UInt, 5 SInt, 7 Float.
+    /// Maps an attrib-table format onto GNM (DataFormat, NumberFormat,
+    /// Components). Returns false when the value is neither a
+    /// VertexAttribFormat nor a BufferFormat, in which case the caller must
+    /// keep the format discovered from the shader. Synthesizing a format here
+    /// is never safe: an unrecognised value used to fall through to
+    /// R32G32B32A32_SFLOAT, which silently widened float3 attributes to float4
+    /// and read past the end of every one of them.
     /// </summary>
-    private static (uint DataFormat, uint NumberFormat, uint Components) MapAttribFormat(
+    private static MetadataFormatState TryMapAttribFormat(
         uint attribFormat,
-        uint fallbackComponents)
+        uint fallbackComponents,
+        out uint dataFormat,
+        out uint numberFormat,
+        out uint components)
     {
-        // Prospero VertexAttribFormat quirks before BufferFormat conversion.
-        if (attribFormat == 113)
+        // kInvalid means this metadata entry does not override the format.
+        // Association, offset, and input-rate data remain valid.
+        if (attribFormat == 0)
         {
-            return (14, 7, 4); // R32G32B32A32_SFLOAT
+            dataFormat = 0;
+            numberFormat = 0;
+            components = Math.Clamp(fallbackComponents, 1u, 4u);
+            return MetadataFormatState.NoOverride;
         }
 
-        if (attribFormat == 121)
-        {
-            return (5, 7, 2); // R16G16_SFLOAT
-        }
-
+        // No VertexAttribFormat overrides live here. The two that used to
+        // (113, 121) contradicted the SDK: sce::Agc::Core::VertexAttribute
+        // defines k16_16SInt = 113 and k16_16Float = 117, and both are already
+        // handled correctly by the conversion table below.
         var bufferFormat = VertexAttribFormatToBufferFormat(attribFormat);
 
         // Prospero::BufferFormat numeric values (gpu_defs.h).
-        return bufferFormat switch
+        (uint DataFormat, uint NumberFormat, uint Components)? mapped = bufferFormat switch
         {
             1 => (1, 0, 1),   // k8UNorm
             2 => (1, 1, 1),   // k8SNorm
@@ -680,8 +874,22 @@ internal static class AgcVertexMetadata
             75 => (14, 4, 4), // k32_32_32_32UInt
             76 => (14, 5, 4), // k32_32_32_32SInt
             77 => (14, 7, 4), // k32_32_32_32Float
-            _ => (14, 7, Math.Clamp(fallbackComponents, 1u, 4u)),
+            _ => null,
         };
+
+        if (mapped is not { } resolved)
+        {
+            dataFormat = 0;
+            numberFormat = 0;
+            // m_sizeInElements is a separate field from the format and is
+            // corroborated by the contiguous hardware_mapping VGPR allocation,
+            // so it stays usable even when the format does not resolve.
+            components = Math.Clamp(fallbackComponents, 1u, 4u);
+            return MetadataFormatState.Unknown;
+        }
+
+        (dataFormat, numberFormat, components) = resolved;
+        return MetadataFormatState.Known;
     }
 
     private static bool TryReadUInt16(CpuContext ctx, ulong address, out ushort value)
