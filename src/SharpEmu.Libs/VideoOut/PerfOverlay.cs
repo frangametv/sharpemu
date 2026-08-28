@@ -42,6 +42,7 @@ public static class PerfOverlay
     private static long _submittedInWindow;
     private static long _drawsInWindow;
     private static long _guestBufferCacheBytes;
+    private static long _videoFramesPerSecondBits;
 
     // Refreshed once per second so per-frame fills never allocate.
     private static long _statsWindowStart = Stopwatch.GetTimestamp();
@@ -52,6 +53,7 @@ public static class PerfOverlay
     private static double _presentFps;
     private static double _drawsPerSecond;
     private static double _averageFrameMs;
+    private static double _displayVideoFramesPerSecond;
     private static double _allocatedMbPerSecond;
     private static long _lastAllocatedBytes = GC.GetTotalAllocatedBytes(precise: false);
     private static int _lastGen0 = GC.CollectionCount(0);
@@ -63,6 +65,7 @@ public static class PerfOverlay
     private static double _cpuPercent;
     private static TimeSpan _lastCpuTime = GetProcessCpuTime();
     private static string _line1 = string.Empty;
+    private static string _normalLine1 = string.Empty;
     private static string _line2 = string.Empty;
     private static string _line3 = string.Empty;
     private static string _line4 = string.Empty;
@@ -103,12 +106,22 @@ public static class PerfOverlay
         Interlocked.Exchange(ref _guestBufferCacheBytes, checked((long)bytes));
 
     /// <summary>
+    /// Overrides the headline cadence while a host-decoded movie owns the
+    /// presentation surface. Pass zero when normal guest flips own it again.
+    /// </summary>
+    public static void SetVideoFramesPerSecond(double framesPerSecond) =>
+        Interlocked.Exchange(
+            ref _videoFramesPerSecondBits,
+            BitConverter.DoubleToInt64Bits(Math.Max(0, framesPerSecond)));
+
+    /// <summary>
     /// Rasterizes the panel into a BGRA byte span of PanelWidth x PanelHeight.
     /// Runs on the render thread.
     /// </summary>
     public static void Fill(Span<byte> bgra, int pendingWork, int inFlightSubmissions)
     {
         RefreshStatsIfDue(pendingWork, inFlightSubmissions);
+        RefreshVideoCadenceDisplay();
 
         // Background: opaque dark slate.
         for (var i = 0; i < bgra.Length; i += 4)
@@ -144,7 +157,6 @@ public static class PerfOverlay
             _fps = Interlocked.Exchange(ref _submittedInWindow, 0) / seconds;
             _presentFps = Interlocked.Exchange(ref _presentedInWindow, 0) / seconds;
             _drawsPerSecond = Interlocked.Exchange(ref _drawsInWindow, 0) / seconds;
-
             var allocated = GC.GetTotalAllocatedBytes(precise: false);
             _allocatedMbPerSecond = (allocated - _lastAllocatedBytes) / seconds / (1024.0 * 1024.0);
             _lastAllocatedBytes = allocated;
@@ -207,7 +219,7 @@ public static class PerfOverlay
             var elapsedHours = elapsedSeconds / 3600;
             var elapsedMinutes = elapsedSeconds / 60 % 60;
             var elapsedRemainingSeconds = elapsedSeconds % 60;
-            _line1 = $"FPS {_fps:0.0}  PRES {_presentFps:0.0}  {msLabel}";
+            _normalLine1 = $"FPS {_fps:0.0}  PRES {_presentFps:0.0}  {msLabel}";
             _line2 = $"DRAWS {_drawsPerSecond:0}/S  {drawsPerFrame:0}/F  Q {pendingWork}+{inFlightSubmissions}";
             _line3 = $"ALLOC {_allocatedMbPerSecond:0.0} MB/S  GC {_gen0PerWindow}/{_gen1PerWindow}/{_gen2PerWindow}";
             var heapMb = GC.GetTotalMemory(false) / (1024 * 1024);
@@ -215,6 +227,29 @@ public static class PerfOverlay
             _line4 = $"MEM {heapMb}M BUF {guestBufferMb}M CPU {_cpuPercent:0}%";
             _line5 = $"TIME {elapsedHours:00}:{elapsedMinutes:00}:{elapsedRemainingSeconds:00}";
         }
+    }
+
+    /// <summary>
+    /// Video ownership can change between two one-second statistics windows.
+    /// Apply that presentation-only state on every overlay frame so the HUD
+    /// switches together with the first/last AVPlayer image.
+    /// </summary>
+    private static void RefreshVideoCadenceDisplay()
+    {
+        var videoFramesPerSecond = BitConverter.Int64BitsToDouble(
+            Interlocked.Read(ref _videoFramesPerSecondBits));
+        _displayVideoFramesPerSecond = videoFramesPerSecond;
+        if (videoFramesPerSecond <= 0)
+        {
+            _line1 = _normalLine1;
+            return;
+        }
+
+        var videoFrameMilliseconds = 1000.0 / videoFramesPerSecond;
+        _line1 =
+            $"FPS {videoFramesPerSecond:0.0}  " +
+            $"PRES {videoFramesPerSecond:0.0}  " +
+            $"{videoFrameMilliseconds:0.0} MS";
     }
 
     private static TimeSpan GetProcessCpuTime()
@@ -235,10 +270,18 @@ public static class PerfOverlay
         DrawHorizontalLine(bgra, x, y + height - (int)(16.7 / maxMs * height), width, 0x30, 0x60, 0x30);
         DrawHorizontalLine(bgra, x, y + height - (int)(33.3 / maxMs * height), width, 0x30, 0x30, 0x60);
 
+        // AVPlayer presents independently from guest SetFlip. While it owns the
+        // surface, draw the movie cadence instead of the stale guest history.
+        var videoFrameMilliseconds = _displayVideoFramesPerSecond > 0
+            ? 1000.0 / _displayVideoFramesPerSecond
+            : 0;
+
         var barWidth = Math.Max(1, width / FrameHistorySize);
         for (var i = 0; i < FrameHistorySize; i++)
         {
-            var ms = _frameMilliseconds[(_frameHistoryIndex + i) % FrameHistorySize];
+            var ms = videoFrameMilliseconds > 0
+                ? videoFrameMilliseconds
+                : _frameMilliseconds[(_frameHistoryIndex + i) % FrameHistorySize];
             if (ms <= 0)
             {
                 continue;

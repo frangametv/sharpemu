@@ -292,7 +292,8 @@ public static class Gen5ShaderScalarEvaluator
         out Gen5ShaderEvaluation evaluation,
         out string error,
         bool resolveVertexInputs = false,
-        uint? requiredVertexRecordCount = null)
+        uint? requiredVertexRecordCount = null,
+        bool captureVertexInputData = true)
     {
         evaluation = default!;
         error = string.Empty;
@@ -1043,16 +1044,21 @@ public static class Gen5ShaderScalarEvaluator
             }
 
             TraceVertexInputShape(vertexInputBindings);
-            if (!TryCaptureVertexInputData(
+            List<Gen5VertexInputBinding>? capturedVertexInputs = null;
+            if (captureVertexInputData &&
+                !TryCaptureVertexInputData(
                     ctx,
                     vertexInputBindings,
-                    out var capturedVertexInputs,
+                    out capturedVertexInputs,
                     out error))
             {
                 return false;
             }
 
-            vertexInputBindings = capturedVertexInputs;
+            if (captureVertexInputData)
+            {
+                vertexInputBindings = capturedVertexInputs!;
+            }
         }
 
         // Like image instructions, read-only buffer loads can remain in the
@@ -1312,9 +1318,20 @@ public static class Gen5ShaderScalarEvaluator
                     }
                 }
 
+                // Keep the failing fetch identities in the compatibility log.
+                // The address alone is not enough to distinguish a genuinely
+                // unmapped guest buffer from a stale/overwritten V# descriptor.
+                // In particular UI command buffers are often consumed after the
+                // game has reused their scalar tables.
+                var fetches = string.Join(
+                    ',',
+                    ordered[first..last].Select(static binding =>
+                        $"pc=0x{binding.Pc:X}/loc={binding.Location}/" +
+                        $"off={binding.OffsetBytes}/fmt={binding.DataFormat}:" +
+                        $"{binding.NumberFormat}/components={binding.ComponentCount}"));
                 error =
                     $"vertex-buffer-read-failed address=0x{start:X16} " +
-                    $"bytes={byteCount} stride={stride}";
+                    $"bytes={byteCount} stride={stride} fetches=[{fetches}]";
                 captured.Clear();
                 return false;
             }

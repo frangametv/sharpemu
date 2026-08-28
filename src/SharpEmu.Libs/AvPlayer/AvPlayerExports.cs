@@ -51,7 +51,8 @@ public static class AvPlayerExports
         out byte[] pixels,
         out uint width,
         out uint height,
-        out long serial)
+        out long serial,
+        out double framesPerSecond)
     {
         lock (StateGate)
         {
@@ -137,6 +138,7 @@ public static class AvPlayerExports
                 width = 0;
                 height = 0;
                 serial = 0;
+                framesPerSecond = 0;
                 return false;
             }
 
@@ -144,6 +146,10 @@ public static class AvPlayerExports
             width = latest.FallbackPresentationWidth;
             height = latest.FallbackPresentationHeight;
             serial = latest.FallbackPresentationSerial;
+            framesPerSecond = latest.FallbackPlayback is { } activePlayback
+                ? (double)activePlayback.FramesPerSecondNumerator /
+                  activePlayback.FramesPerSecondDenominator
+                : latest.FramesPerSecond;
             return IsValidBgraFrame(pixels, width, height);
         }
     }

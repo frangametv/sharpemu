@@ -1262,6 +1262,8 @@ public static partial class AgcExports
     private static readonly ConcurrentDictionary<
         (ulong Ps, ulong Address, uint Width, uint Height, uint Format, uint NumberType,
          uint TileMode, uint Pitch, uint DstSelect), byte> _tracedAddressedTextureBindings = new();
+    private static readonly ConcurrentDictionary<(ulong Es, ulong Ps), byte>
+        _tracedSubmittedVertexPixelPaths = new();
     private static readonly ConcurrentDictionary<
         (string Stage, ulong Shader, ulong Address, int Length, bool Writable), byte>
         _tracedAvPlayerGlobalBindings = new();
@@ -1805,7 +1807,8 @@ public static partial class AgcExports
             ulong CommandAddress,
             uint DwordCount,
             ulong SubmissionId,
-            bool TracePackets);
+            bool TracePackets,
+            Dictionary<ulong, SubmittedVertexSnapshot>? VertexSnapshots = null);
 
         public Dictionary<uint, uint> CxRegisters { get; } = new();
         public Dictionary<uint, uint> ShRegisters { get; } = new();
@@ -1831,6 +1834,8 @@ public static partial class AgcExports
         // sceAgcDriverAddEqEvent.
         public ulong CompletionEventId { get; set; }
         public ulong ActiveSubmissionId { get; set; }
+        public Dictionary<ulong, SubmittedVertexSnapshot>? ActiveVertexSnapshots { get; set; }
+        public SubmittedVertexSnapshot? CurrentVertexSnapshot { get; set; }
         public Queue<PendingSubmission> PendingSubmissions { get; } = new();
         public bool HasActiveSubmission { get; set; }
         public bool IsSuspended { get; set; }
@@ -1871,6 +1876,8 @@ public static partial class AgcExports
     private sealed class SubmittedGpuState
     {
         public object Gate { get; } = new();
+        public Dictionary<ulong, SubmittedVertexSnapshot> VertexSnapshotsByPacket { get; } = new();
+        public Dictionary<ulong, SubmittedVertexSnapshot> VertexSnapshotTemplatesByShader { get; } = new();
         public SubmittedDcbState Graphics { get; } = new();
         // Adapted from foufouadi/sharpemu@aba206f.
         // A flip can be built in a persistent ACB arena that is not reachable
@@ -6245,11 +6252,30 @@ public static partial class AgcExports
         ulong submissionId,
         bool tracePackets)
     {
+        var vertexSnapshots = CaptureSubmittedVertexPackets(
+            ctx,
+            commandAddress,
+            dwordCount,
+            state.IndexSize);
+        if (vertexSnapshots is not null)
+        {
+            if (gpuState.VertexSnapshotsByPacket.Count > 16_384)
+            {
+                gpuState.VertexSnapshotsByPacket.Clear();
+            }
+
+            foreach (var (packetAddress, snapshot) in vertexSnapshots)
+            {
+                gpuState.VertexSnapshotsByPacket[packetAddress] = snapshot;
+                gpuState.VertexSnapshotTemplatesByShader[snapshot.ExportShaderAddress] = snapshot;
+            }
+        }
         state.PendingSubmissions.Enqueue(new SubmittedDcbState.PendingSubmission(
             commandAddress,
             dwordCount,
             submissionId,
-            tracePackets));
+            tracePackets,
+            vertexSnapshots));
         PumpSubmittedQueue(ctx, gpuState, state);
     }
 
@@ -6283,6 +6309,8 @@ public static partial class AgcExports
             state.RingTailParkAddress = 0;
             state.IsSuspended = false;
             state.HasActiveSubmission = false;
+            state.ActiveVertexSnapshots = null;
+            state.CurrentVertexSnapshot = null;
             NotifySubmittedDcbCompleted(gpuState, state, state.ActiveSubmissionId);
         }
 
@@ -6291,6 +6319,7 @@ public static partial class AgcExports
         {
             state.HasActiveSubmission = true;
             state.ActiveSubmissionId = submission.SubmissionId;
+            state.ActiveVertexSnapshots = submission.VertexSnapshots;
             state.RingChunkBase = state.IsForceSubmittedRing ? 0 : submission.CommandAddress;
             state.FollowedChunkAdvance = false;
             state.IsSuspended = ParseSubmittedDcb(
@@ -6306,6 +6335,8 @@ public static partial class AgcExports
             }
 
             state.HasActiveSubmission = false;
+            state.ActiveVertexSnapshots = null;
+            state.CurrentVertexSnapshot = null;
             NotifySubmittedDcbCompleted(gpuState, state, submission.SubmissionId);
         }
     }
@@ -6899,7 +6930,41 @@ public static partial class AgcExports
                     ItDrawIndexIndirect or
                     ItDrawIndexIndirectMulti;
                 state.SawIndexedDraw |= indexed;
-                TryTranslateGuestDraw(ctx, gpuState, state, indexCount, indexed);
+                state.CurrentVertexSnapshot =
+                    state.ActiveVertexSnapshots is { } activeSnapshots &&
+                    activeSnapshots.TryGetValue(currentAddress, out var vertexSnapshot)
+                        ? vertexSnapshot
+                        : gpuState.VertexSnapshotsByPacket.TryGetValue(
+                            currentAddress,
+                            out vertexSnapshot)
+                                ? vertexSnapshot
+                                : null;
+                if (state.CurrentVertexSnapshot is null &&
+                    TryGetShaderAddress(
+                        state.ShRegisters,
+                        SpiShaderPgmLoEs,
+                        SpiShaderPgmHiEs,
+                        out var currentExportShader) &&
+                    gpuState.VertexSnapshotTemplatesByShader.TryGetValue(
+                        currentExportShader,
+                        out var templateSnapshot))
+                {
+                    state.CurrentVertexSnapshot = TryRebuildSubmittedVertexSnapshot(
+                        ctx,
+                        state,
+                        templateSnapshot,
+                        indexCount,
+                        indexed);
+                }
+                TraceMissingSubmittedVertexSnapshot(state, currentAddress, op);
+                try
+                {
+                    TryTranslateGuestDraw(ctx, gpuState, state, indexCount, indexed);
+                }
+                finally
+                {
+                    state.CurrentVertexSnapshot = null;
+                }
             }
 
             if (op == ItNop &&
@@ -6909,12 +6974,46 @@ public static partial class AgcExports
                 autoIndexCount != 0)
             {
                 state.FrameDrawCount++;
-                TryTranslateGuestDraw(
-                    ctx,
-                    gpuState,
-                    state,
-                    autoIndexCount,
-                    indexed: false);
+                state.CurrentVertexSnapshot =
+                    state.ActiveVertexSnapshots is { } activeSnapshots &&
+                    activeSnapshots.TryGetValue(currentAddress, out var vertexSnapshot)
+                        ? vertexSnapshot
+                        : gpuState.VertexSnapshotsByPacket.TryGetValue(
+                            currentAddress,
+                            out vertexSnapshot)
+                                ? vertexSnapshot
+                                : null;
+                if (state.CurrentVertexSnapshot is null &&
+                    TryGetShaderAddress(
+                        state.ShRegisters,
+                        SpiShaderPgmLoEs,
+                        SpiShaderPgmHiEs,
+                        out var currentExportShader) &&
+                    gpuState.VertexSnapshotTemplatesByShader.TryGetValue(
+                        currentExportShader,
+                        out var templateSnapshot))
+                {
+                    state.CurrentVertexSnapshot = TryRebuildSubmittedVertexSnapshot(
+                        ctx,
+                        state,
+                        templateSnapshot,
+                        autoIndexCount,
+                        indexed: false);
+                }
+                TraceMissingSubmittedVertexSnapshot(state, currentAddress, op);
+                try
+                {
+                    TryTranslateGuestDraw(
+                        ctx,
+                        gpuState,
+                        state,
+                        autoIndexCount,
+                        indexed: false);
+                }
+                finally
+                {
+                    state.CurrentVertexSnapshot = null;
+                }
             }
 
             if (op is ItDispatchDirect or ItDispatchIndirect)
@@ -9607,6 +9706,8 @@ public static partial class AgcExports
         {
             state.IsSuspended = false;
             state.HasActiveSubmission = false;
+            state.ActiveVertexSnapshots = null;
+            state.CurrentVertexSnapshot = null;
             NotifySubmittedDcbCompleted(gpuState, state, waiter.SubmissionId);
             PumpSubmittedQueue(ctx, gpuState, state);
             return;
@@ -9637,6 +9738,8 @@ public static partial class AgcExports
         }
 
         state.HasActiveSubmission = false;
+        state.ActiveVertexSnapshots = null;
+        state.CurrentVertexSnapshot = null;
         NotifySubmittedDcbCompleted(gpuState, state, waiter.SubmissionId);
         PumpSubmittedQueue(ctx, gpuState, state);
     }
@@ -11102,8 +11205,20 @@ var renderTargets = GetRenderTargets(state.CxRegisters);
                     indexed,
                     out var vertexRecords)
                         ? vertexRecords
-                        : null))
+                        : null,
+                captureVertexInputData: state.CurrentVertexSnapshot is null))
         {
+            return false;
+        }
+
+        if (state.CurrentVertexSnapshot is not null &&
+            !ApplySubmittedVertexSnapshot(
+                state,
+                exportShaderAddress,
+                ref exportEvaluation))
+        {
+            ReturnPooledEvaluationArrays(exportEvaluation);
+            error = $"submitted-vertex-snapshot-mismatch es=0x{exportShaderAddress:X16}";
             return false;
         }
 
@@ -11705,6 +11820,41 @@ var renderTargets = GetRenderTargets(state.CxRegisters);
             ReturnPooledEvaluationArrays(exportEvaluation);
             ReturnPooledEvaluationArrays(pixelEvaluation);
             return false;
+        }
+
+        // GTA's Scaleform draws can retain valid geometry while still becoming
+        // solid-colour quads when the paired pixel shader sees the wrong atlas
+        // or interpolation path.  Trace each snapshot-protected ES/PS pair once
+        // so the normal log identifies that second-stage failure without the
+        // extremely noisy all-draw/all-texture diagnostics.
+        if (state.CurrentVertexSnapshot is not null &&
+            _tracedSubmittedVertexPixelPaths.TryAdd(
+                (exportShaderAddress, pixelShaderAddress),
+                0))
+        {
+            var interpolation = string.Join(
+                ',',
+                pixelState.Program.Instructions
+                    .Where(static instruction =>
+                        instruction.Opcode.StartsWith("VInterp", StringComparison.Ordinal))
+                    .Select(static instruction =>
+                    {
+                        var control = (Gen5InterpolationControl)instruction.Control!;
+                        return $"0x{instruction.Pc:X}:{instruction.Opcode}:" +
+                            $"a{control.Attribute}.c{control.Channel}";
+                    }));
+            var sampledImages = string.Join(
+                ';',
+                textures.Select(static texture =>
+                    $"0x{texture.Descriptor.Address:X16}:" +
+                    $"{texture.Descriptor.Width}x{texture.Descriptor.Height}:" +
+                    $"fmt{texture.Descriptor.Format}/num{texture.Descriptor.NumberType}/" +
+                    $"tile{texture.Descriptor.TileMode}/dst0x{texture.Descriptor.DstSelect:X}"));
+            Console.Error.WriteLine(
+                "[LOADER][WARN] agc.snapshot_pixel_path " +
+                $"es=0x{exportShaderAddress:X16} ps=0x{pixelShaderAddress:X16} " +
+                $"ps_ena=0x{psInputEna:X8} ps_addr=0x{psInputAddr:X8} " +
+                $"interpolation=[{interpolation}] textures=[{sampledImages}]");
         }
 
         var globalMemoryBindings = new Gen5GlobalMemoryBinding[

@@ -3510,6 +3510,7 @@ internal static unsafe class VulkanVideoPresenter
                 out _,
                 out _))
         {
+            PerfOverlay.SetVideoFramesPerSecond(0);
             return true;
         }
 
@@ -3517,11 +3518,15 @@ internal static unsafe class VulkanVideoPresenter
                 out pixels,
                 out width,
                 out height,
-                out var serial))
+                out var serial,
+                out var framesPerSecond))
         {
+            PerfOverlay.SetVideoFramesPerSecond(0);
             advanced = false;
             return false;
         }
+
+        PerfOverlay.SetVideoFramesPerSecond(framesPerSecond);
 
         advanced = Interlocked.Exchange(
             ref _tracedAvPlayerFallbackPresentationSerial,
