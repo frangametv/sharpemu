@@ -20,7 +20,6 @@ public sealed partial class DirectExecutionBackend
 	private static int _guestAllocatorHoleRecoveries;
 	private static int _nullVirtualAllocatorRecoveries;
 	private static int _gtaNullAssetTableRecoveries;
-	private static int _gtaNullStorySingletonRecoveries;
 	private static int _gtaNullStoryProgressRecoveries;
 	private static int _gtaNullStoryStateCompareRecoveries;
 	private static int _gtaNullStoryServiceCallRecoveries;

@@ -71,7 +71,7 @@ public sealed class ProviderLleExportsTests
     private static readonly IReadOnlyDictionary<string, int> ExpectedCounts =
         new Dictionary<string, int>(StringComparer.Ordinal)
         {
-            ["libSceAgc"] = 111,
+            ["libSceAgc"] = 109,
             ["libSceAgcDriver"] = 25,
             ["libSceAjm"] = 3,
             ["libSceAmpr"] = 46,
@@ -121,14 +121,14 @@ public sealed class ProviderLleExportsTests
         };
 
     [Fact]
-    public void GtaProviderCatalogs_RegisterAll382FallbackNidsAnd19SemanticHleReplacements()
+    public void GtaProviderCatalogs_RegisterAll380FallbackNidsAndSemanticHleReplacements()
     {
         var exports = SharpEmu.Generated.SysAbiExportRegistry.CreateExports(Generation.Gen5)
             .Where(IsProviderCatalogExport)
             .ToArray();
 
-        Assert.Equal(382, exports.Length);
-        Assert.Equal(382, exports.Select(export => export.Nid).Distinct(StringComparer.Ordinal).Count());
+        Assert.Equal(380, exports.Length);
+        Assert.Equal(380, exports.Select(export => export.Nid).Distinct(StringComparer.Ordinal).Count());
         Assert.All(exports, export =>
         {
             Assert.NotEqual(Generation.None, export.Target & Generation.Gen5);
