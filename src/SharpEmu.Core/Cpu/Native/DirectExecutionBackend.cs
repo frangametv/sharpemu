@@ -1749,7 +1749,13 @@ public sealed unsafe partial class DirectExecutionBackend : INativeCpuBackend, I
 	private static bool IsHlePreferredNid(string nid)
 	{
 		return string.Equals(nid, "QrZZdJ8XsX0", StringComparison.Ordinal) ||
-			string.Equals(nid, "Q3VBxCXhUHs", StringComparison.Ordinal);
+			string.Equals(nid, "Q3VBxCXhUHs", StringComparison.Ordinal) ||
+			// GTA V reaches these AGC control-flow exports through the loaded
+			// provider, whose fail-closed path returns NOT_IMPLEMENTED and then
+			// feeds that error value back as a packet pointer. Keep them on the
+			// implemented HLE path so REWIND packets can make forward progress.
+			string.Equals(nid, "zfcxg-ewMK8", StringComparison.Ordinal) ||
+			string.Equals(nid, "ziVA3whp3p4", StringComparison.Ordinal);
 	}
 
 	private static bool IsLibcLibrary(string libraryName)
@@ -6751,6 +6757,11 @@ public sealed unsafe partial class DirectExecutionBackend : INativeCpuBackend, I
 		{
 			VirtualFree((void*)_workerAbortStack, 0u, 32768u);
 			_workerAbortStack = 0;
+		}
+		if (_gtaNullStoryFallbackObject != 0)
+		{
+			VirtualFree((void*)_gtaNullStoryFallbackObject, 0u, 32768u);
+			_gtaNullStoryFallbackObject = 0;
 		}
 		if (_guestTlsBaseTlsIndex != uint.MaxValue)
 		{

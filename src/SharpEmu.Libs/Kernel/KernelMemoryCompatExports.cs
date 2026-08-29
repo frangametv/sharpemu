@@ -2892,6 +2892,7 @@ public static partial class KernelMemoryCompatExports
         return (int)OrbisGen2Result.ORBIS_GEN2_OK;
     }
 
+
     // Translates a failed raw Orbis kernel result into the libc/POSIX ABI:
     // return -1 with errno set. The raw sceKernel* implementations report the
     // 0x8002xxxx sentinel through the return value, but the POSIX-named exports

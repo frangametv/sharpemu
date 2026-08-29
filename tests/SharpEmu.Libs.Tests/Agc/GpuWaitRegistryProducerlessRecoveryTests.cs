@@ -66,7 +66,34 @@ public sealed class GpuWaitRegistryProducerlessRecoveryTests : IDisposable
         Assert.Equal(1, GpuWaitRegistry.CountForMemory(_memory));
     }
 
-    private void Register(bool isStandard, bool is64Bit, ulong mask, ulong reference)
+    [Theory]
+    [InlineData(0x939UL)]
+    [InlineData(0xB6AUL)]
+    public void RecoversExpiredGtaVProducerlessComputeProgressWait(ulong reference)
+    {
+        Register(
+            isStandard: false,
+            is64Bit: false,
+            mask: uint.MaxValue,
+            reference: reference,
+            compareFunction: 5);
+
+        var recovered = GpuWaitRegistry.SnapshotExpiredProducerlessAgcWaitCandidates(
+            _memory,
+            nowTicks: 10_000,
+            minAgeTicks: 5_000);
+
+        var waiter = Assert.Single(recovered!);
+        Assert.True(GpuWaitRegistry.TryRecoverProducerless(waiter));
+        Assert.True(GpuWaitRegistry.ShouldBypassRecoveredProducerless(waiter));
+    }
+
+    private void Register(
+        bool isStandard,
+        bool is64Bit,
+        ulong mask,
+        ulong reference,
+        uint compareFunction = 3)
     {
         GpuWaitRegistry.Register(0x4020_2D00, new GpuWaitRegistry.WaitingDcb
         {
@@ -74,7 +101,7 @@ public sealed class GpuWaitRegistryProducerlessRecoveryTests : IDisposable
             WaitAddress = 0x4020_2D00,
             IsStandard = isStandard,
             Is64Bit = is64Bit,
-            CompareFunction = 3,
+            CompareFunction = compareFunction,
             Mask = mask,
             ReferenceValue = reference,
             RegisteredTicks = 0,

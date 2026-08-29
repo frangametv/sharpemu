@@ -722,6 +722,15 @@ public sealed class AgcRecoveredExportsTests
             manager,
             "fd5Bp5tGTgo",
             "unknown_fd5Bp5tGTgo");
+
+        var memory = new FakeCpuMemory(BaseAddress, 0x1000);
+        var ctx = new CpuContext(memory, Generation.Gen5);
+        Assert.Equal(
+            OrbisGen2Result.ORBIS_GEN2_OK,
+            manager.Dispatch("zfcxg-ewMK8", ctx));
+        Assert.Equal(
+            OrbisGen2Result.ORBIS_GEN2_ERROR_INVALID_ARGUMENT,
+            manager.Dispatch("ziVA3whp3p4", ctx));
     }
 
     [Fact]

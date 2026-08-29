@@ -509,6 +509,27 @@ public static class Gen5ShaderScalarEvaluator
                     }
                 }
 
+                if (_cfgResourceDiscovery &&
+                    instruction.Opcode.StartsWith(
+                        "SCbranch",
+                        StringComparison.Ordinal) &&
+                    TryGetSoppBranchTargetPc(instruction, out targetPc) &&
+                    targetPc > instruction.Pc)
+                {
+                    // EXEC/VCC branches cannot be selected by this scalar
+                    // evaluator, but both arms remain in the translated CFG.
+                    // Continue through the fall-through arm and discover the
+                    // forward target once as a bounded supplemental path.
+                    QueuePath(
+                        targetPc,
+                        (uint[])scalarRegisters.Clone(),
+                        CloneVectorLaneValues(vectorLaneValues),
+                        new HashSet<uint>(laneRestoredScalarRegisters),
+                        execMask,
+                        scalarConditionCode,
+                     supplemental: true);
+                 }
+
                 if (instruction.Encoding == Gen5ShaderEncoding.Vop3 &&
                     TryExecuteVectorLaneTransfer(
                         instruction,
@@ -1072,7 +1093,8 @@ public static class Gen5ShaderScalarEvaluator
             .Where(instruction =>
                 instruction.Control is Gen5BufferMemoryControl &&
                 !IsBufferMemoryWrite(instruction.Opcode) &&
-                !HasGlobalMemoryBindingForPc(globalMemoryBindings, instruction.Pc))
+                !HasGlobalMemoryBindingForPc(globalMemoryBindings, instruction.Pc) &&
+                !HasVertexInputBindingForPc(vertexInputBindings, instruction.Pc))
             .ToArray();
         if (state.ComputeSystemRegisters is null &&
             missingStaticReadBuffers.Length <= MaxNeutralStaticBufferBindings)
@@ -1228,10 +1250,18 @@ public static class Gen5ShaderScalarEvaluator
         opcode.StartsWith("BufferAtomic", StringComparison.Ordinal) ||
         opcode.StartsWith("TBufferAtomic", StringComparison.Ordinal);
 
+
     private static bool HasGlobalMemoryBindingForPc(
         IReadOnlyList<Gen5GlobalMemoryBinding> bindings,
         uint pc) =>
         bindings.Any(binding => binding.InstructionPcs.Contains(pc));
+
+    private static bool HasVertexInputBindingForPc(
+        IReadOnlyList<Gen5VertexInputBinding> bindings,
+        uint pc) =>
+        bindings.Any(binding =>
+            binding.Pc == pc ||
+            (binding.AliasPcs?.Contains(pc) ?? false));
 
     private static bool TryCreateVertexInputBinding(
         Gen5ShaderInstruction instruction,

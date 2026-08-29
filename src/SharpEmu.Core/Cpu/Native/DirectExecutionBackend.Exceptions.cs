@@ -20,10 +20,16 @@ public sealed partial class DirectExecutionBackend
 	private static int _guestAllocatorHoleRecoveries;
 	private static int _nullVirtualAllocatorRecoveries;
 	private static int _gtaNullAssetTableRecoveries;
+	private static int _gtaNullStorySingletonRecoveries;
+	private static int _gtaNullStoryProgressRecoveries;
+	private static int _gtaNullStoryStateCompareRecoveries;
+	private static int _gtaNullStoryServiceCallRecoveries;
 	private static int _auxiliaryThreadExecuteFaultRecoveries;
 	private static int _auxiliaryThreadExecuteFaultSkips;
 	private nint _workerAbortStack;
+	private nint _gtaNullStoryFallbackObject;
 	private const uint WorkerAbortStackSize = 0x10000u;
+	private const int GtaNullStoryFallbackSize = 0x10000;
 
 	private unsafe void SetupExceptionHandler()
 	{
@@ -31,6 +37,24 @@ public sealed partial class DirectExecutionBackend
 		{
 			SetupPosixExceptionHandler();
 			return;
+		}
+
+		// Some GTA V Story paths observe a temporarily absent state object through
+		// scalar reads. Keep a minimally coherent page ready before guest code
+		// starts so the exception handler never allocates memory itself. In
+		// particular, the prologue gate compares +0x9c against 0x3fff and waits
+		// while it is lower; leaving the page entirely zero stalls forever on the
+		// "Ludendorff" title card.
+		_gtaNullStoryFallbackObject = (nint)VirtualAlloc(null, GtaNullStoryFallbackSize, 12288u, 4u);
+		if (_gtaNullStoryFallbackObject == 0)
+		{
+			Console.Error.WriteLine("[LOADER][WARN] Could not allocate GTA Story fallback state page");
+		}
+		else
+		{
+			InitializeGtaStoryFallbackState(
+				new Span<byte>((void*)_gtaNullStoryFallbackObject, GtaNullStoryFallbackSize),
+				(ulong)_gtaNullStoryFallbackObject);
 		}
 
 		if (!string.Equals(Environment.GetEnvironmentVariable("SHARPEMU_DISABLE_RAW_HANDLER"), "1", StringComparison.Ordinal))
@@ -162,6 +186,21 @@ public sealed partial class DirectExecutionBackend
 			}
 			if (exceptionCode == 3221225477u &&
 				TryRecoverGtaNullStorySingleton(exceptionRecord, contextRecord, rip))
+			{
+				return -1;
+			}
+			if (exceptionCode == 3221225477u &&
+				TryRecoverGtaNullStoryProgress(exceptionRecord, contextRecord, rip))
+			{
+				return -1;
+			}
+			if (exceptionCode == 3221225477u &&
+				TryRecoverGtaNullStoryStateCompare(exceptionRecord, contextRecord, rip))
+			{
+				return -1;
+			}
+			if (exceptionCode == 3221225477u &&
+				TryRecoverGtaNullStoryServiceCall(exceptionRecord, contextRecord, rip))
 			{
 				return -1;
 			}
@@ -795,6 +834,24 @@ public sealed partial class DirectExecutionBackend
 			current.SequenceEqual(expectedCurrent);
 	}
 
+	internal static void InitializeGtaStoryFallbackState(Span<byte> state, ulong stateAddress)
+	{
+		if (state.Length < 0xD0)
+		{
+			throw new ArgumentException("GTA Story fallback state is too small.", nameof(state));
+		}
+
+		state.Clear();
+		// The progress scan treats +0x40 and +0x48 as optional byte tables. Point
+		// both at this zero-filled allocation so its indexed probes safely report
+		// "not present" instead of dereferencing null.
+		BinaryPrimitives.WriteUInt64LittleEndian(state.Slice(0x40, sizeof(ulong)), stateAddress);
+		BinaryPrimitives.WriteUInt64LittleEndian(state.Slice(0x48, sizeof(ulong)), stateAddress);
+		BinaryPrimitives.WriteUInt32LittleEndian(state.Slice(0x9C, sizeof(uint)), 0x4000);
+		BinaryPrimitives.WriteUInt64LittleEndian(state.Slice(0xA8, sizeof(ulong)), stateAddress);
+		BinaryPrimitives.WriteUInt32LittleEndian(state.Slice(0xC8, sizeof(uint)), 1);
+	}
+
 	private unsafe bool TryRecoverGtaNullStorySingleton(
 		EXCEPTION_RECORD* exceptionRecord,
 		void* contextRecord,
@@ -853,6 +910,256 @@ public sealed partial class DirectExecutionBackend
 		return rbx == 0 &&
 			accessType == 1 &&
 			accessTarget == 0xFC &&
+			before.SequenceEqual(expectedBefore) &&
+			current.SequenceEqual(expectedCurrent);
+	}
+
+	private unsafe bool TryRecoverGtaNullStoryProgress(
+		EXCEPTION_RECORD* exceptionRecord,
+		void* contextRecord,
+		ulong rip)
+	{
+		if (exceptionRecord->NumberParameters < 2 || rip < 16)
+		{
+			return false;
+		}
+
+		var accessType = exceptionRecord->ExceptionInformation[0];
+		var accessTarget = exceptionRecord->ExceptionInformation[1];
+		var rax = ReadCtxU64(contextRecord, CTX_RAX);
+		Span<byte> before = stackalloc byte[16];
+		Span<byte> current = stackalloc byte[18];
+		if (!TryReadHostBytes(rip - (ulong)before.Length, before) ||
+			!TryReadHostBytes(rip, current) ||
+			!IsGtaNullStoryProgressPattern(
+				before,
+				current,
+				rax,
+				accessType,
+				accessTarget))
+		{
+			return false;
+		}
+
+		if (_gtaNullStoryFallbackObject == 0)
+		{
+			return false;
+		}
+
+		// Retry the faulting read against a stable zero-filled state object. The
+		// routine reads several fields from this same pointer, so repairing RAX
+		// is safer than redirecting it to another block that dereferences it.
+		WriteCtxU64(contextRecord, CTX_RAX, (ulong)_gtaNullStoryFallbackObject);
+		var recovery = Interlocked.Increment(ref _gtaNullStoryProgressRecoveries);
+		Console.Error.WriteLine(
+			$"[LOADER][WARN] Recovered GTA null Story progress #{recovery}: " +
+			$"rip=0x{rip:X16}, fallback=0x{(ulong)_gtaNullStoryFallbackObject:X16}");
+		Console.Error.Flush();
+		return true;
+	}
+
+	internal static bool IsGtaNullStoryProgressPattern(
+		ReadOnlySpan<byte> before,
+		ReadOnlySpan<byte> current,
+		ulong rax,
+		ulong accessType,
+		ulong accessTarget)
+	{
+		ReadOnlySpan<byte> expectedBefore = new byte[]
+		{
+			0x5E, 0xC8,
+			0xC4, 0xE3, 0x71, 0x0A, 0xC9, 0x09,
+			0xC5, 0xFA, 0x5B, 0xC9,
+			0xC5, 0xF8, 0x5B, 0xD1,
+		};
+		ReadOnlySpan<byte> expectedCurrent = new byte[]
+		{
+			0xC5, 0xD2, 0x2A, 0x88, 0xC8, 0x00, 0x00, 0x00,
+			0xC5, 0xEA, 0x5E, 0xD1,
+			0xC5, 0xFA, 0x2C, 0xD2,
+			0x85, 0xD2,
+		};
+
+		return rax == 0 &&
+			accessType == 0 &&
+			accessTarget == 0xC8 &&
+			before.SequenceEqual(expectedBefore) &&
+			current.SequenceEqual(expectedCurrent);
+	}
+
+	private unsafe bool TryRecoverGtaNullStoryStateCompare(
+		EXCEPTION_RECORD* exceptionRecord,
+		void* contextRecord,
+		ulong rip)
+	{
+		if (exceptionRecord->NumberParameters < 2 || rip < 16 ||
+			_gtaNullStoryFallbackObject == 0)
+		{
+			return false;
+		}
+
+		Span<byte> before = stackalloc byte[16];
+		Span<byte> current = stackalloc byte[16];
+		if (!TryReadHostBytes(rip - 16, before) ||
+			!TryReadHostBytes(rip, current) ||
+			!IsGtaNullStoryStateComparePattern(
+				before,
+				current,
+				ReadCtxU64(contextRecord, CTX_RCX),
+				exceptionRecord->ExceptionInformation[0],
+				exceptionRecord->ExceptionInformation[1]))
+		{
+			return false;
+		}
+
+		// Both matched variants end their prefix with
+		// `mov rcx,[rip+disp32]`; RIP points at the following CMP. Publish the
+		// fallback into that global slot so subsequent Story code observes one
+		// stable, writable object instead of faulting again every frame.
+		var singletonDisplacement = BinaryPrimitives.ReadInt32LittleEndian(before.Slice(12, sizeof(int)));
+		var singletonSlot = unchecked((ulong)((long)rip + singletonDisplacement));
+		if (!TryWriteUInt64Compat(singletonSlot, (ulong)_gtaNullStoryFallbackObject))
+		{
+			return false;
+		}
+
+		WriteCtxU64(contextRecord, CTX_RCX, (ulong)_gtaNullStoryFallbackObject);
+		var recovery = Interlocked.Increment(ref _gtaNullStoryStateCompareRecoveries);
+		Console.Error.WriteLine(
+			$"[LOADER][WARN] Recovered GTA null Story state compare #{recovery}: " +
+			$"rip=0x{rip:X16}, slot=0x{singletonSlot:X16}, " +
+			$"fallback=0x{(ulong)_gtaNullStoryFallbackObject:X16}");
+		Console.Error.Flush();
+		return true;
+	}
+
+	internal static bool IsGtaNullStoryStateComparePattern(
+		ReadOnlySpan<byte> before,
+		ReadOnlySpan<byte> current,
+		ulong rcx,
+		ulong accessType,
+		ulong accessTarget)
+	{
+		ReadOnlySpan<byte> expectedBefore = new byte[]
+		{
+			0x70, 0x86, 0xFF, 0xFF,
+			0xB8, 0xFF, 0x3F, 0x00, 0x00,
+			0x48, 0x8B, 0x0D, 0x5E, 0xF8, 0x80, 0x04,
+		};
+		ReadOnlySpan<byte> expectedCurrent = new byte[]
+		{
+			0x39, 0x81, 0x9C, 0x00, 0x00, 0x00,
+			0x76, 0x5E,
+			0xC5, 0xF8, 0x28, 0x9D, 0x00, 0x87, 0xFF, 0xFF,
+		};
+		ReadOnlySpan<byte> expectedLaterBefore = new byte[]
+		{
+			0x58, 0xC1, 0x75, 0xD1, 0xE9, 0x7C, 0xEE, 0xFF,
+			0xFF, 0x48, 0x8B, 0x0D, 0x4D, 0xEB, 0x80, 0x04,
+		};
+		ReadOnlySpan<byte> expectedLaterCurrent = new byte[]
+		{
+			0x39, 0x81, 0x9C, 0x00, 0x00, 0x00,
+			0x76, 0x49,
+			0x48, 0x8B, 0x91, 0xA8, 0x00, 0x00, 0x00, 0x48,
+		};
+
+		return rcx == 0 &&
+			accessType == 0 &&
+			accessTarget == 0x9C &&
+			((before.SequenceEqual(expectedBefore) &&
+			  current.SequenceEqual(expectedCurrent)) ||
+			 (before.SequenceEqual(expectedLaterBefore) &&
+			  current.SequenceEqual(expectedLaterCurrent)));
+	}
+
+	private unsafe bool TryRecoverGtaNullStoryServiceCall(
+		EXCEPTION_RECORD* exceptionRecord,
+		void* contextRecord,
+		ulong rip)
+	{
+		if (exceptionRecord->NumberParameters < 2 || rip < 16)
+		{
+			return false;
+		}
+
+		Span<byte> before = stackalloc byte[16];
+		Span<byte> current = stackalloc byte[16];
+		if (!TryReadHostBytes(rip - 16, before) ||
+			!TryReadHostBytes(rip, current))
+		{
+			return false;
+		}
+
+		var rdi = ReadCtxU64(contextRecord, CTX_RDI);
+		var accessType = exceptionRecord->ExceptionInformation[0];
+		var accessTarget = exceptionRecord->ExceptionInformation[1];
+		var fallbackVirtualCall =
+			_gtaNullStoryFallbackObject != 0 &&
+			rdi == (ulong)_gtaNullStoryFallbackObject &&
+			IsGtaFallbackStoryServiceCallPattern(before, current, accessType, accessTarget);
+		if (!fallbackVirtualCall &&
+			!IsGtaNullStoryServiceCallPattern(
+				before,
+				current,
+				rdi,
+				accessType,
+				accessTarget))
+		{
+			return false;
+		}
+
+		var callLength = fallbackVirtualCall ? 6UL : 9UL;
+		WriteCtxU64(contextRecord, CTX_RIP, rip + callLength);
+		var recovery = Interlocked.Increment(ref _gtaNullStoryServiceCallRecoveries);
+		Console.Error.WriteLine(
+			$"[LOADER][WARN] Recovered GTA null Story service call #{recovery}: " +
+			$"rip=0x{rip:X16} -> 0x{rip + callLength:X16}");
+		Console.Error.Flush();
+		return true;
+	}
+
+	internal static bool IsGtaFallbackStoryServiceCallPattern(
+		ReadOnlySpan<byte> before,
+		ReadOnlySpan<byte> current,
+		ulong accessType,
+		ulong accessTarget)
+	{
+		ReadOnlySpan<byte> expectedBefore = new byte[]
+		{
+			0x8D, 0x35, 0xAD, 0x8E, 0x13, 0x03, 0x48, 0x8D,
+			0x15, 0x6E, 0xFD, 0xFF, 0xFF, 0x48, 0x8B, 0x07,
+		};
+		ReadOnlySpan<byte> expectedCurrentPrefix = new byte[]
+		{
+			0xFF, 0x90, 0x88, 0x01, 0x00, 0x00,
+		};
+
+		return accessType == 0 && accessTarget == 0x188 &&
+			before.SequenceEqual(expectedBefore) &&
+			current.StartsWith(expectedCurrentPrefix);
+	}
+
+	internal static bool IsGtaNullStoryServiceCallPattern(
+		ReadOnlySpan<byte> before,
+		ReadOnlySpan<byte> current,
+		ulong rdi,
+		ulong accessType,
+		ulong accessTarget)
+	{
+		ReadOnlySpan<byte> expectedBefore = new byte[]
+		{
+			0xD8, 0x04, 0x48, 0x8D, 0x35, 0xAD, 0x8E, 0x13,
+			0x03, 0x48, 0x8D, 0x15, 0x6E, 0xFD, 0xFF, 0xFF,
+		};
+		ReadOnlySpan<byte> expectedCurrent = new byte[]
+		{
+			0x48, 0x8B, 0x07,
+			0xFF, 0x90, 0x88, 0x01, 0x00, 0x00,
+			0x80, 0x3D, 0x36, 0x96, 0xD8, 0x04, 0x00,
+		};
+
+		return rdi == 0 && accessType == 0 && accessTarget == 0 &&
 			before.SequenceEqual(expectedBefore) &&
 			current.SequenceEqual(expectedCurrent);
 	}

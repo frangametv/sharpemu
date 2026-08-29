@@ -598,11 +598,7 @@ internal static class GpuWaitRegistry
                 {
                     var waiter = list[i];
                     if (!ReferenceEquals(waiter.Memory, memory) ||
-                        waiter.IsStandard ||
-                        !waiter.Is64Bit ||
-                        waiter.CompareFunction != 3 ||
-                        waiter.Mask != uint.MaxValue ||
-                        (waiter.ReferenceValue & waiter.Mask) != 1 ||
+                        !IsRecoverableProducerlessAgcWait(waiter) ||
                         nowTicks - waiter.RegisteredTicks < minAgeTicks)
                     {
                         continue;
@@ -660,12 +656,7 @@ internal static class GpuWaitRegistry
     public static bool ShouldBypassRecoveredProducerless(in WaitingDcb waiter)
     {
         var memory = Canonicalize(waiter.Memory);
-        if (memory is null ||
-            waiter.IsStandard ||
-            !waiter.Is64Bit ||
-            waiter.CompareFunction != 3 ||
-            waiter.Mask != uint.MaxValue ||
-            (waiter.ReferenceValue & waiter.Mask) != 1)
+        if (memory is null || !IsRecoverableProducerlessAgcWait(waiter))
         {
             return false;
         }
@@ -674,6 +665,25 @@ internal static class GpuWaitRegistry
         {
             return _recoveredProducerless.Contains((memory, waiter.WaitAddress));
         }
+    }
+
+    private static bool IsRecoverableProducerlessAgcWait(in WaitingDcb waiter)
+    {
+        if (waiter.IsStandard || waiter.Mask != uint.MaxValue)
+        {
+            return false;
+        }
+
+        // Known Gen5 bookkeeping forms whose producer packet is not currently
+        // decoded: the original 64-bit equality fence and GTA V's 32-bit AGC
+        // compute-queue progress fence. Real producers are checked by the
+        // caller before recovery and clear the remembered bypass state.
+        return (waiter.Is64Bit &&
+                waiter.CompareFunction == 3 &&
+                (waiter.ReferenceValue & waiter.Mask) == 1) ||
+               (!waiter.Is64Bit &&
+                waiter.CompareFunction == 5 &&
+                (waiter.ReferenceValue & waiter.Mask) != 0);
     }
 
     public static List<WaitingDcb>? CollectAllForMemory(object memory)

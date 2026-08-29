@@ -38,6 +38,25 @@ public sealed class ModuleManager : IModuleManager
                         $"NID '{export.Nid}' ({export.Name}) is already registered as a data symbol.");
                 }
 
+                var forceImplementedAgcControlFlow =
+                    (string.Equals(export.Nid, "zfcxg-ewMK8", StringComparison.Ordinal) ||
+                     string.Equals(export.Nid, "ziVA3whp3p4", StringComparison.Ordinal)) &&
+                    !export.PreferLle;
+                if (forceImplementedAgcControlFlow)
+                {
+                    // The generated AGC LLE table can register its shared
+                    // fail-closed fallback before the implemented HLE export.
+                    // Replace that one collision deterministically; otherwise
+                    // REWIND returns NOT_IMPLEMENTED and the result is reused as
+                    // a packet pointer by the title.
+                    _dispatchTable[export.Nid] = export.Function;
+                    _exportTable[export.Nid] = export;
+                    _exportNameTable[export.Name] = export;
+                    _warmupAssemblies.Add(export.Function.Method.Module.Assembly);
+                    registeredCount++;
+                    continue;
+                }
+
                 if (!_dispatchTable.TryAdd(export.Nid, export.Function))
                 {
                     Console.Error.WriteLine($"[HLE] Duplicate NID '{export.Nid}' ({export.Name}) — already registered, skipping.");

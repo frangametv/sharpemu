@@ -707,24 +707,10 @@ public static class AgcLleExports
         Target = Generation.Gen5,
         LibraryName = "libSceAgc",
         PreferLle = true)]
-    // Ghidra entry 0x6990; body bytes 136.
-    [SysAbiExport(
-        Nid = "zfcxg-ewMK8",
-        ExportName = "sceAgcDcbRewind",
-        Target = Generation.Gen5,
-        LibraryName = "libSceAgc",
-        PreferLle = true)]
     // Ghidra entry 0xcf00; body bytes 6.
     [SysAbiExport(
         Nid = "zg6u-N6Otxs",
         ExportName = "sceAgcDcbQueueEndOfShaderActionGetSize",
-        Target = Generation.Gen5,
-        LibraryName = "libSceAgc",
-        PreferLle = true)]
-    // Ghidra entry 0xc6d0; body bytes 43.
-    [SysAbiExport(
-        Nid = "ziVA3whp3p4",
-        ExportName = "sceAgcRewindPatchSetRewindState",
         Target = Generation.Gen5,
         LibraryName = "libSceAgc",
         PreferLle = true)]
@@ -737,4 +723,5 @@ public static class AgcLleExports
 
         return ctx.SetReturn(OrbisGen2Result.ORBIS_GEN2_ERROR_NOT_IMPLEMENTED);
     }
+
 }

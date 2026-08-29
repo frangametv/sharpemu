@@ -44,6 +44,7 @@ public sealed class Gen5VertexInputCaptureTests
 
         Assert.NotNull(evaluation.VertexInputs);
         Assert.Equal(2, evaluation.VertexInputs.Count);
+        Assert.Empty(evaluation.GlobalMemoryBindings);
         Assert.All(evaluation.VertexInputs, input => Assert.Equal(64, input.DataLength));
         Assert.All(evaluation.VertexInputs, input => Assert.Equal(VertexAddress, input.BaseAddress));
         Assert.Equal(0u, evaluation.VertexInputs[0].OffsetBytes);

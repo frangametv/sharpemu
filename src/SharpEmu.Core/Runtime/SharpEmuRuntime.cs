@@ -8,6 +8,7 @@ using SharpEmu.Core.Loader;
 using SharpEmu.Core.Memory;
 using SharpEmu.HLE;
 using SharpEmu.Libs.VideoOut;
+using SharpEmu.Libs.Agc;
 using SharpEmu.Libs.Kernel;
 using SharpEmu.Libs.AppContent;
 using SharpEmu.Libs.SaveData;
@@ -92,6 +93,26 @@ public sealed class SharpEmuRuntime : ISharpEmuRuntime
         // Callable SysAbi exports and addressable ABI objects intentionally use
         // separate registries. Data symbols must never enter callable dispatch.
         moduleManager.RegisterExports(SharpEmu.Generated.SysAbiExportRegistry.CreateExports(Generation.Gen4 | Generation.Gen5));
+        // Keep the two AGC rewind control-flow exports on their implemented HLE
+        // handlers.  Some generated/provider registration orders leave the shared
+        // fail-closed LLE stub active, which returns NOT_IMPLEMENTED millions of
+        // times while GTA V waits at the Ludendorff transition.
+        moduleManager.RegisterExports(
+        [
+            new ExportedFunction(
+                "libSceAgc",
+                "zfcxg-ewMK8",
+                "sceAgcDcbRewind",
+                Generation.Gen5,
+                AgcExports.DcbRewind),
+            new ExportedFunction(
+                "libSceAgc",
+                "ziVA3whp3p4",
+                "sceAgcRewindPatchSetRewindState",
+                Generation.Gen5,
+                AgcExports.RewindPatchSetRewindState),
+        ]);
+        Console.Error.WriteLine("[HLE][INFO] Forced implemented GTA AGC rewind handlers.");
         moduleManager.RegisterDataSymbols(DataSymbolRegistry.CreateRegistrations(Generation.Gen4 | Generation.Gen5));
         moduleManager.Freeze();
 

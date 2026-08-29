@@ -20698,6 +20698,73 @@ GuestImageWriteTracker.Track(
         PreferLle = true)]
     public static int DcbRewindGetSize(CpuContext ctx) => ReturnAgcSize(ctx, 8);
 
+    [SysAbiExport(
+        Nid = "zfcxg-ewMK8",
+        ExportName = "sceAgcDcbRewind",
+        Target = Generation.Gen5,
+        LibraryName = "libSceAgc")]
+    public static int DcbRewind(CpuContext ctx)
+    {
+        var dcb = ctx[CpuRegister.Rdi];
+        var flags = ctx[CpuRegister.Rsi];
+        var valid = (flags & 1UL) != 0;
+        var offloadEnable = (flags & 2UL) != 0;
+        if (dcb == 0)
+        {
+            return ReturnPointer(ctx, 0);
+        }
+
+        var body = (valid ? RewindValidBit : 0u) |
+                   (offloadEnable ? RewindOffloadEnableBit : 0u);
+        if (!TryAllocateCommandDwords(ctx, dcb, 2, out var commandAddress) ||
+            !ctx.TryWriteUInt32(commandAddress, Pm4(2, ItRewind, RZero)) ||
+            !ctx.TryWriteUInt32(commandAddress + sizeof(uint), body))
+        {
+            return ReturnPointer(ctx, 0);
+        }
+
+        TraceAgc($"agc.dcb_rewind buf=0x{dcb:X16} cmd=0x{commandAddress:X16} valid={valid} offload={offloadEnable}");
+        return ReturnPointer(ctx, commandAddress);
+    }
+
+    [SysAbiExport(
+        Nid = "ziVA3whp3p4",
+        ExportName = "sceAgcRewindPatchSetRewindState",
+        Target = Generation.Gen5,
+        LibraryName = "libSceAgc")]
+    public static int RewindPatchSetRewindState(CpuContext ctx)
+    {
+        var packetAddress = ctx[CpuRegister.Rdi];
+        var valid = (ctx[CpuRegister.Rsi] & 1UL) != 0;
+        if (packetAddress == 0 || (long)packetAddress < 0)
+        {
+            return SetReturn(ctx, OrbisGen2Result.ORBIS_GEN2_ERROR_INVALID_ARGUMENT);
+        }
+
+        var bodyAddress = packetAddress;
+        if (TryReadUInt32(ctx, packetAddress, out var header) &&
+            ((header >> 8) & 0xFFu) == ItRewind)
+        {
+            bodyAddress += sizeof(uint);
+        }
+
+        if (!TryReadUInt32(ctx, bodyAddress, out var body) ||
+            !TryWriteUInt32(ctx, bodyAddress, valid ? body | RewindValidBit : body & ~RewindValidBit) ||
+            !TryReadUInt32(ctx, bodyAddress, out var patched))
+        {
+            return SetReturn(ctx, OrbisGen2Result.ORBIS_GEN2_ERROR_MEMORY_FAULT);
+        }
+
+        if (valid)
+        {
+            GpuWaitRegistry.RecordProduced(ctx.Memory, bodyAddress, patched);
+        }
+
+        TraceAgc($"agc.rewind_patch addr=0x{bodyAddress:X16} valid={valid} body=0x{patched:X8}");
+        ctx[CpuRegister.Rax] = 0;
+        return (int)OrbisGen2Result.ORBIS_GEN2_OK;
+    }
+
     // VEGu4dixjUg at 0xcec0 is exactly `mov eax, 0x10; ret`.
     [SysAbiExport(
         Nid = "VEGu4dixjUg",
