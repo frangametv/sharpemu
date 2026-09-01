@@ -942,6 +942,12 @@ SPDX-License-Identifier: GPL-2.0-or-later
                           <ToggleSwitch x:Name="GameEnvLogNpToggle"
                                         Classes="optionToggle" />
                         </local:SettingRow>
+                        <local:SettingRow Classes="optionRow"
+                                          Label="SHARPEMU_NP_UNAVAILABLE"
+                                          Description="Report the local NP profile as signed out and unavailable.">
+                          <ToggleSwitch x:Name="GameEnvNpUnavailableToggle"
+                                        Classes="optionToggle" />
+                        </local:SettingRow>
 
                         <Border Classes="optionsGroupDivider" />
 
@@ -1478,6 +1484,11 @@ SPDX-License-Identifier: GPL-2.0-or-later
                       <local:SettingRow x:Name="EnvLogNpRow" Classes="optionRow" LabelFontFamily="Consolas,monospace" Label="SHARPEMU_LOG_NP"
                                         Description="{Binding [Options.Env.LogNp.Desc], Source={x:Static local:Localization.Instance}}">
                         <ToggleSwitch x:Name="EnvLogNpToggle" Classes="optionToggle" />
+                      </local:SettingRow>
+
+                      <local:SettingRow x:Name="EnvNpUnavailableRow" Classes="optionRow" LabelFontFamily="Consolas,monospace" Label="SHARPEMU_NP_UNAVAILABLE"
+                                        Description="Report the local NP profile as signed out and unavailable.">
+                        <ToggleSwitch x:Name="EnvNpUnavailableToggle" Classes="optionToggle" />
                       </local:SettingRow>
 
                       <Border Classes="optionsGroupDivider" />

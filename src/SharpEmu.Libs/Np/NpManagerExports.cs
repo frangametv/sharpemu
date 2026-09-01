@@ -16,6 +16,7 @@ public static class NpManagerExports
     private const int NpErrorCallbackAlreadyRegistered = unchecked((int)0x80550008);
     private const int NpErrorCallbackNotRegistered = unchecked((int)0x80550009);
     private const int NpErrorInvalidAsyncParameterSize = unchecked((int)0x80550011);
+    private const uint NpStateSignedOut = 1;
     private const uint NpStateSignedIn = 2;
     private const ulong NpAsyncParameterSize = 0x18;
 
@@ -542,10 +543,17 @@ public static class NpManagerExports
         }
 
         Span<byte> stateBytes = stackalloc byte[sizeof(uint)];
-        // SceNpState assigns SIGNED_IN value 2. GTA V compares this output
-        // against 2 before querying sceNpGetOnlineId and sceNpGetAccountIdA;
-        // value 1 is SIGNED_OUT and leaves its user/controller setup empty.
-        BinaryPrimitives.WriteUInt32LittleEndian(stateBytes, NpStateSignedIn);
+        // SceNpState assigns SIGNED_OUT value 1 and SIGNED_IN value 2. The
+        // default local profile stays signed in for compatibility. A title
+        // can opt into a fully unavailable NP profile to avoid entering PSN
+        // account/service paths which an offline emulator cannot satisfy.
+        var state = string.Equals(
+            Environment.GetEnvironmentVariable("SHARPEMU_NP_UNAVAILABLE"),
+            "1",
+            StringComparison.Ordinal)
+            ? NpStateSignedOut
+            : NpStateSignedIn;
+        BinaryPrimitives.WriteUInt32LittleEndian(stateBytes, state);
         return ctx.Memory.TryWrite(stateAddress, stateBytes)
             ? ctx.SetReturn(OrbisGen2Result.ORBIS_GEN2_OK)
             : ctx.SetReturn(OrbisGen2Result.ORBIS_GEN2_ERROR_MEMORY_FAULT);

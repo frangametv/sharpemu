@@ -287,6 +287,8 @@ public partial class MainWindow : Window
             SetEnvironmentToggle("SHARPEMU_LOG_IO", EnvLogIoToggle.IsChecked == true);
         EnvLogNpToggle.IsCheckedChanged += (_, _) =>
             SetEnvironmentToggle("SHARPEMU_LOG_NP", EnvLogNpToggle.IsChecked == true);
+        EnvNpUnavailableToggle.IsCheckedChanged += (_, _) =>
+            SetEnvironmentToggle("SHARPEMU_NP_UNAVAILABLE", EnvNpUnavailableToggle.IsChecked == true);
         EnvGuestImageCpuSyncToggle.IsCheckedChanged += (_, _) =>
             SetEnvironmentToggle(
                 "SHARPEMU_GUEST_IMAGE_CPU_SYNC",
@@ -1216,6 +1218,8 @@ public partial class MainWindow : Window
         EnvLogDirectMemoryToggle.IsChecked = _settings.EnvironmentToggles.Contains("SHARPEMU_LOG_DIRECT_MEMORY");
         EnvLogIoToggle.IsChecked = _settings.EnvironmentToggles.Contains("SHARPEMU_LOG_IO");
         EnvLogNpToggle.IsChecked = _settings.EnvironmentToggles.Contains("SHARPEMU_LOG_NP");
+        EnvNpUnavailableToggle.IsChecked =
+            _settings.EnvironmentToggles.Contains("SHARPEMU_NP_UNAVAILABLE");
         EnvGuestImageCpuSyncToggle.IsChecked =
             _settings.EnvironmentToggles.Contains("SHARPEMU_GUEST_IMAGE_CPU_SYNC");
         EnvForceSubmitOrphanPreamblesToggle.IsChecked =

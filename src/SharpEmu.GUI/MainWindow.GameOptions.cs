@@ -21,6 +21,7 @@ public partial class MainWindow
         "SHARPEMU_LOG_DIRECT_MEMORY",
         "SHARPEMU_LOG_IO",
         "SHARPEMU_LOG_NP",
+        "SHARPEMU_NP_UNAVAILABLE",
         "SHARPEMU_GUEST_IMAGE_CPU_SYNC",
         "SHARPEMU_RENDERDOC",
     ];
@@ -482,6 +483,7 @@ public partial class MainWindow
         ("SHARPEMU_LOG_DIRECT_MEMORY", GameEnvLogDirectMemoryToggle),
         ("SHARPEMU_LOG_IO", GameEnvLogIoToggle),
         ("SHARPEMU_LOG_NP", GameEnvLogNpToggle),
+        ("SHARPEMU_NP_UNAVAILABLE", GameEnvNpUnavailableToggle),
         ("SHARPEMU_GUEST_IMAGE_CPU_SYNC", GameEnvGuestImageCpuSyncToggle),
         ("SHARPEMU_FORCE_SUBMIT_ORPHAN_PREAMBLES", GameEnvForceSubmitOrphanPreamblesToggle),
         ("SHARPEMU_RENDERDOC", GameEnvRenderDocToggle),

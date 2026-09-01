@@ -103,14 +103,45 @@ public sealed class NpManagerExportsTests : IDisposable
     [Fact]
     public void GetState_WritesFirmwareSignedInValue()
     {
+        var previous = Environment.GetEnvironmentVariable("SHARPEMU_NP_UNAVAILABLE");
+        Environment.SetEnvironmentVariable("SHARPEMU_NP_UNAVAILABLE", null);
         _ctx[CpuRegister.Rdi] = 0x1000_0000;
         _ctx[CpuRegister.Rsi] = StateAddress;
 
-        AssertResult(0, NpManagerExports.NpGetState);
+        try
+        {
+            AssertResult(0, NpManagerExports.NpGetState);
 
-        Span<byte> state = stackalloc byte[sizeof(uint)];
-        Assert.True(_memory.TryRead(StateAddress, state));
-        Assert.Equal(2u, BinaryPrimitives.ReadUInt32LittleEndian(state));
+            Span<byte> state = stackalloc byte[sizeof(uint)];
+            Assert.True(_memory.TryRead(StateAddress, state));
+            Assert.Equal(2u, BinaryPrimitives.ReadUInt32LittleEndian(state));
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable("SHARPEMU_NP_UNAVAILABLE", previous);
+        }
+    }
+
+    [Fact]
+    public void GetState_WhenNpUnavailable_WritesFirmwareSignedOutValue()
+    {
+        var previous = Environment.GetEnvironmentVariable("SHARPEMU_NP_UNAVAILABLE");
+        Environment.SetEnvironmentVariable("SHARPEMU_NP_UNAVAILABLE", "1");
+        _ctx[CpuRegister.Rdi] = 0x1000_0000;
+        _ctx[CpuRegister.Rsi] = StateAddress;
+
+        try
+        {
+            AssertResult(0, NpManagerExports.NpGetState);
+
+            Span<byte> state = stackalloc byte[sizeof(uint)];
+            Assert.True(_memory.TryRead(StateAddress, state));
+            Assert.Equal(1u, BinaryPrimitives.ReadUInt32LittleEndian(state));
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable("SHARPEMU_NP_UNAVAILABLE", previous);
+        }
     }
 
     [Fact]
