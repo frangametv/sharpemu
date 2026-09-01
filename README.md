@@ -25,41 +25,33 @@ SPDX-License-Identifier: GPL-2.0-or-later
 </p>
 
 > [!IMPORTANT]
-> ### This is now a separate, independent public fork
-> This repository will remain public and will continue to follow and integrate
-> relevant changes from SharpEmu's upstream `main` branch. However, development
-> in this fork will no longer be submitted upstream through pull requests. Its
-> improvements will focus on this fork's specific goals rather than broad,
-> large-scale development intended for the upstream project.
-
-> [!TIP]
 > ### Fran7 is now in development: the focus is on gameplay!
 > **Fran6 has been released**, and I am now working on Fran7's rendering path,
 > stability and performance as both Astro Bot and GTA V progress beyond their introductions.
 > In my current tests, GTA V reaches the game menu for the first time on SharpEmu;
 > the next goal is to turn this progress into stable, rendered gameplay in both games.
 
+> [!WARNING]
+> SharpEmu is at a very early stage. Astro Bot and Grand Theft Auto V are
+> development targets in this fork. Crashes, missing graphics and
+> incorrect behaviour are expected.
+
 ## About this fork
 
 This repository is an unofficial development fork of
 [SharpEmu](https://github.com/sharpemu/sharpemu).
 
-This repository is maintained as a separate, independent fork. It continues to
-follow and integrate changes from SharpEmu's upstream `main` branch, but its own
-development remains exclusive to this fork. Pull requests opened here must
-target this repository and are not submitted or forwarded to upstream SharpEmu.
-
-Selected changes previously integrated from Acelogic's fork provided important
-groundwork for investigating real execution and rendering progress in
-**Astro Bot** and **Grand Theft Auto V**.
+The project is kept aligned with upstream SharpEmu while selected changes
+from Acelogic's fork are manually reviewed, integrated, adapted and maintained here.
+Those changes provided important groundwork for investigating real execution and
+rendering progress in **Astro Bot** and **Grand Theft Auto V**.
 
 The goal is practical and evidence-driven: test a game, study its logs, fix a
 verified problem and test again.
 
 ## Current focus
 
-- Follow useful upstream SharpEmu development while keeping this fork's own
-  changes independent and exclusive to this repository.
+- Keep the project synchronized with useful upstream SharpEmu development.
 - Preserve and improve the valuable Acelogic work already integrated.
 - Continue investigating Astro Bot's title/menu rendering, shader and runtime
   paths now that the intro video plays smoothly.

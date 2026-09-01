@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 
 using SharpEmu.HLE;
+using SharpEmu.ShaderCompiler.Ir;
 using System.Buffers.Binary;
 using System.Diagnostics;
 using System.Runtime.CompilerServices;
@@ -160,6 +161,21 @@ public static class Gen5ShaderTranslator
             return cache.CombinedPrograms.ContainsKey(entryAddress);
         }
     }
+
+    // StealUrKill calls the same two-part hardware shader relationship
+    // "fused"; Fran's translator already models it as a combined shader.
+    public static void RegisterFusedProgram(
+        CpuContext ctx,
+        ulong entryAddress,
+        ulong entryHeaderAddress,
+        ulong continuationAddress,
+        ulong continuationHeaderAddress) =>
+        RegisterCombinedShader(
+            ctx,
+            entryAddress,
+            entryHeaderAddress,
+            continuationAddress,
+            continuationHeaderAddress);
 
     private static readonly uint[] FullscreenBarycentricEs =
     [
@@ -784,6 +800,7 @@ public static class Gen5ShaderTranslator
         }
 
         var maximumInstructions = checked((int)(programLimitBytes / sizeof(uint)));
+        uint furthestForwardBranchTarget = 0;
         uint pc = 0;
         for (; instructionCount < maximumInstructions && pc < programLimitBytes;)
         {
@@ -864,8 +881,19 @@ public static class Gen5ShaderTranslator
             instructions.Add(instruction);
             instructionCount++;
 
+            if (Gen5IrBranchResolver.Instance.TryGetBranchTarget(
+                    instruction,
+                    out var branchTargetPc) &&
+                branchTargetPc > instruction.Pc)
+            {
+                furthestForwardBranchTarget = Math.Max(
+                    furthestForwardBranchTarget,
+                    branchTargetPc);
+            }
+
             pc += instructionBytes;
-            if (string.Equals(name, "SEndpgm", StringComparison.Ordinal))
+            if (string.Equals(name, "SEndpgm", StringComparison.Ordinal) &&
+                 pc > furthestForwardBranchTarget)
             {
                 program = new Gen5ShaderProgram(address, instructions);
                 termination = ShaderProgramTermination.EndProgram;
@@ -1275,6 +1303,9 @@ public static class Gen5ShaderTranslator
             0x12 => "STrap",
             0x16 => "STtraceData",
             0x17 => "SCbranchCdbgsys",
+            0x18 => "SCbranchCdbguser",
+            0x19 => "SCbranchCdbgsysOrUser",
+            0x1A => "SCbranchCdbgsysAndUser",
             0x20 => "SInstPrefetch",
             0x21 => "SClause",
             0x23 => "SWaitcntDepctr",
@@ -1306,7 +1337,7 @@ public static class Gen5ShaderTranslator
             0x0E => "SCmpkLeU32",
             0x0F => "SAddkI32",
             0x10 => "SMulkI32",
-            0x17 => "SWaitcntVscnt",
+            0x17 or 0x18 or 0x19 or 0x1A => "SWaitcnt",
             _ => string.Empty,
         };
 
@@ -2373,15 +2404,9 @@ public static class Gen5ShaderTranslator
                 ];
                 break;
             case Gen5ShaderEncoding.Sopk:
-                if (opcode == "SWaitcntVscnt")
+                if (opcode == "SWaitcnt")
                 {
-                    // Unlike ordinary SOPK instructions, the SDST-shaped field is an
-                    // optional scalar source (normally null/s125), not a destination.
-                    sources =
-                    [
-                        Gen5Operand.Scalar((word >> 16) & 0x7F),
-                        new Gen5Operand(Gen5OperandKind.EncodedConstant, word & 0xFFFF),
-                    ];
+                    sources = [new Gen5Operand(Gen5OperandKind.EncodedConstant, word & 0xFFFF)];
                 }
                 else
                 {
@@ -2478,6 +2503,11 @@ public static class Gen5ShaderTranslator
                 else
                 {
                     sources = [Gen5Operand.Source(word & 0x1FF, literal)];
+                }
+
+                if (opcode == "VMovrelsB32")
+                {
+                    sources = [sources[0], Gen5Operand.Scalar(124)];
                 }
 
                 // V_READFIRSTLANE_B32 is encoded as VOP1, but its destination
@@ -2673,7 +2703,7 @@ public static class Gen5ShaderTranslator
                 control = new Gen5DataShareControl(
                     word & 0xFF,
                     (word >> 8) & 0xFF,
-                    ((word >> 17) & 1) != 0);
+                    opcode is not ("DsConsume" or "DsAppend") && ((word >> 17) & 1) != 0);
                 sources = opcode switch
                 {
                     "DsWriteAddtidB32" => [
@@ -2708,7 +2738,7 @@ public static class Gen5ShaderTranslator
                     ],
                     "DsReadAddtidB32" => [],
                     "DsSwizzleB32" => [Gen5Operand.Vector(vectorData0)],
-                    "DsConsume" or "DsAppend" => [],
+                    "DsConsume" or "DsAppend" => [Gen5Operand.Scalar(124)],
                     "DsPermuteB32" => [
                         Gen5Operand.Vector(vectorAddress),
                         Gen5Operand.Vector(vectorData0),

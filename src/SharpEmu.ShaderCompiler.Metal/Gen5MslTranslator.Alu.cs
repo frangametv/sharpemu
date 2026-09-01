@@ -102,6 +102,32 @@ public static partial class Gen5MslTranslator
                         Temp("uint", ShuffleLane(value, lane)));
                     return true;
                 }
+                case "VMovrelsB32":
+                {
+                    if (instruction.Control is not null ||
+                        instruction.Destinations.Count == 0 ||
+                        instruction.Destinations[0].Kind != Gen5OperandKind.VectorRegister ||
+                        instruction.Sources.Count < 2 ||
+                        instruction.Sources[0].Kind != Gen5OperandKind.VectorRegister ||
+                        instruction.Sources[1].Kind != Gen5OperandKind.ScalarRegister)
+                    {
+                        error = "VMovrelsB32 expects an unmodified VGPR source and M0";
+                        return false;
+                    }
+
+                    var baseRegister = instruction.Sources[0].Value;
+                    var relativeRegister = Temp(
+                        "uint",
+                        $"{baseRegister}u + ({RawSource(instruction, 1)})");
+                    var selectedRegister = Temp(
+                        "uint",
+                        $"{relativeRegister} < {VectorRegisterFileCount}u ? " +
+                        $"{relativeRegister} : {baseRegister}u");
+                    StoreVector(
+                        instruction.Destinations[0].Value,
+                        $"v[{selectedRegister}]");
+                    return true;
+                }
                 case "VWritelaneB32":
                 {
                     // vdst[lane(src1)] = src0; a writelane lands regardless of EXEC.
@@ -251,8 +277,8 @@ public static partial class Gen5MslTranslator
                     $"(((({RawSource(instruction, 0)}) & 0xFFFFu) * (({RawSource(instruction, 1)}) & 0xFFFFu)) + ({RawSource(instruction, 2)}))",
                 "VAdd3U32" =>
                     $"(({RawSource(instruction, 0)}) + ({RawSource(instruction, 1)}) + ({RawSource(instruction, 2)}))",
-                "VXadU32" =>
-                    $"((({RawSource(instruction, 0)}) + ({RawSource(instruction, 1)})) ^ ({RawSource(instruction, 2)}))",
+                "VSadU32" =>
+                    $"((max({RawSource(instruction, 0)}, {RawSource(instruction, 1)}) - min({RawSource(instruction, 0)}, {RawSource(instruction, 1)})) + ({RawSource(instruction, 2)}))",
                 "VAddLshlU32" =>
                     $"((({RawSource(instruction, 0)}) + ({RawSource(instruction, 1)})) << (({RawSource(instruction, 2)}) & 31u))",
                 "VLshlAddU32" =>
@@ -280,8 +306,6 @@ public static partial class Gen5MslTranslator
                 "VAndB32" => $"(({RawSource(instruction, 0)}) & ({RawSource(instruction, 1)}))",
                 "VOrB32" => $"(({RawSource(instruction, 0)}) | ({RawSource(instruction, 1)}))",
                 "VXorB32" => $"(({RawSource(instruction, 0)}) ^ ({RawSource(instruction, 1)}))",
-                "VXor3B32" =>
-                    $"(({RawSource(instruction, 0)}) ^ ({RawSource(instruction, 1)}) ^ ({RawSource(instruction, 2)}))",
                 "VXnorB32" => $"~(({RawSource(instruction, 0)}) ^ ({RawSource(instruction, 1)}))",
                 "VNotB32" => $"~({RawSource(instruction, 0)})",
                 "VAndOrB32" =>
@@ -1037,12 +1061,20 @@ public static partial class Gen5MslTranslator
 
             if (instruction.Opcode == "SBcnt1I32B64")
             {
-                var source = Temp("ulong", RawSource64(instruction, 0));
+                var wide = Temp("ulong", RawSource64(instruction, 0));
+                var bitCountResult = Temp("uint", $"(uint)popcount({wide})");
+                StoreScalar(destination, bitCountResult);
+                Line($"scc = {bitCountResult} != 0u;");
+                return true;
+            }
+
+            if (instruction.Opcode == "SFF1I32B64")
+            {
+                var wide = Temp("ulong", RawSource64(instruction, 0));
                 var result = Temp(
                     "uint",
-                    $"popcount((uint){source}) + popcount((uint)({source} >> 32))");
+                    $"{wide} == 0ul ? 0xFFFFFFFFu : (uint)ctz({wide})");
                 StoreScalar(destination, result);
-                Line($"scc = {result} != 0u;");
                 return true;
             }
 
@@ -1100,11 +1132,12 @@ public static partial class Gen5MslTranslator
                     Line($"scc = {result} != 0u;");
                     return true;
                 }
-                case "SAbsI32":
+                case "SWqmB32":
                 {
-                    var result = Temp(
+                    var quadAny = Temp(
                         "uint",
-                        $"(({left} & 0x80000000u) != 0u ? (0u - {left}) : {left})");
+                        $"({left} | ({left} >> 1) | ({left} >> 2) | ({left} >> 3)) & 0x11111111u");
+                    var result = Temp("uint", $"{quadAny} * 0xFu");
                     StoreScalar(destination, result);
                     Line($"scc = {result} != 0u;");
                     return true;
@@ -1129,16 +1162,6 @@ public static partial class Gen5MslTranslator
                         "uint",
                         $"{left} == 0u ? 0xFFFFFFFFu : (uint)ctz({left})");
                     StoreScalar(destination, result);
-                    Line($"scc = {result} != 0u;");
-                    return true;
-                }
-                case "SFlbitI32B32":
-                {
-                    var result = Temp(
-                        "uint",
-                        $"{left} == 0u ? 0xFFFFFFFFu : (uint)clz({left})");
-                    StoreScalar(destination, result);
-                    Line($"scc = {result} != 0u;");
                     return true;
                 }
                 case "SBitset1B32":
@@ -1337,6 +1360,15 @@ public static partial class Gen5MslTranslator
             {
                 error = "missing scalar compare source";
                 return false;
+            }
+
+            if (instruction.Opcode is "SCmpEqU64" or "SCmpLgU64")
+            {
+                var wideLeft = Temp("ulong", RawSource64(instruction, 0));
+                var wideRight = Temp("ulong", RawSource64(instruction, 1));
+                var comparison = instruction.Opcode == "SCmpEqU64" ? "==" : "!=";
+                Line($"scc = {wideLeft} {comparison} {wideRight};");
+                return true;
             }
 
             var left = Temp("uint", RawSource(instruction, 0));

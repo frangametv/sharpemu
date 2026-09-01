@@ -52,17 +52,42 @@ public sealed class Gen5SpirvAtomicTranslationTests
     }
 
     [Fact]
-    public void DataShareRead64AndVscntWait_Compile()
+    public void DataShareWaveCounters_EmitOneWaveAtomicAndBroadcast()
     {
-        // DS_READ_B64 v[5:6], v3; S_WAITCNT_VSCNT null, 0.
         var opcodes = CompileCompute(
             [
-                0xD9D80000, 0x05000003,
-                0xBBFD0000,
+                0xD8FA0014, 0x07000000,
+                0xD8F60014, 0x08000000,
             ],
             new Dictionary<uint, uint>());
 
-        Assert.Contains((ushort)SpirvOp.Load, opcodes);
+        Assert.Contains((ushort)SpirvOp.AtomicIAdd, opcodes);
+        Assert.Contains((ushort)SpirvOp.AtomicISub, opcodes);
+        Assert.Contains((ushort)SpirvOp.BitCount, opcodes);
+        Assert.Contains((ushort)SpirvOp.GroupNonUniformShuffle, opcodes);
+        Assert.Contains((ushort)SpirvOp.ShiftRightLogical, opcodes);
+        Assert.Contains((ushort)SpirvOp.ULessThan, opcodes);
+    }
+
+    [Fact]
+    public void DataShareWaveCounters_InVertexStageUseWaveCountAndBroadcast()
+    {
+        var opcodes = CompileVertex(
+            [
+                0xD8FA0014, 0x07000000,
+                0xD8F60014, 0x08000000,
+            ]);
+
+        // Graphics stages use private LDS because Vulkan does not permit
+        // Workgroup storage there. They must still apply the counter once per
+        // active wave and broadcast its old value to every active lane.
+        Assert.Contains((ushort)SpirvOp.GroupNonUniformBallot, opcodes);
+        Assert.Contains((ushort)SpirvOp.BitCount, opcodes);
+        Assert.Contains((ushort)SpirvOp.GroupNonUniformShuffle, opcodes);
+        Assert.Contains((ushort)SpirvOp.IAdd, opcodes);
+        Assert.Contains((ushort)SpirvOp.ISub, opcodes);
+        Assert.DoesNotContain((ushort)SpirvOp.AtomicIAdd, opcodes);
+        Assert.DoesNotContain((ushort)SpirvOp.AtomicISub, opcodes);
     }
 
     [Fact]
@@ -128,6 +153,39 @@ public sealed class Gen5SpirvAtomicTranslationTests
                 1,
                 1,
                 1,
+                out var shader,
+                out error),
+            error);
+        return CollectOpcodes(shader.Spirv);
+    }
+
+    private static HashSet<ushort> CompileVertex(uint[] programWords)
+    {
+        var memory = new FakeCpuMemory(ShaderAddress, 0x2000);
+        var ctx = new CpuContext(memory, Generation.Gen5);
+        Gen5ShaderAtomicDecodeTests.WriteProgram(memory, ShaderAddress, programWords);
+        var shaderRegisters = new Dictionary<uint, uint>
+        {
+            [Gen5ShaderAtomicDecodeTests.ComputePgmRsrc2Register] = 16u << 1,
+        };
+
+        Assert.True(
+            Gen5ShaderTranslator.TryCreateState(
+                ctx,
+                ShaderAddress,
+                0,
+                shaderRegisters,
+                Gen5ShaderAtomicDecodeTests.ComputeUserDataRegister,
+                out var state,
+                out var error),
+            error);
+        Assert.True(
+            Gen5ShaderScalarEvaluator.TryEvaluate(ctx, state, out var evaluation, out error),
+            error);
+        Assert.True(
+            Gen5SpirvTranslator.TryCompileVertexShader(
+                state,
+                evaluation,
                 out var shader,
                 out error),
             error);

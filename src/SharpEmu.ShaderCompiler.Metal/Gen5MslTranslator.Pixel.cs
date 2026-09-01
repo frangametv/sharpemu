@@ -261,16 +261,6 @@ public static partial class Gen5MslTranslator
                 return false;
             }
 
-            if (instruction.Opcode == "ImageBvhIntersectRay")
-            {
-                for (uint component = 0; component < 4; component++)
-                {
-                    StoreVector(image.VectorData + component, "0xFFFFFFFFu");
-                }
-
-                return true;
-            }
-
             // The resolving instruction may differ from the one that defined the
             // binding (a store can dominate a load's binding); fold its access in.
             MarkImageBindingAccess(bindingIndex, instruction.Opcode);
@@ -697,6 +687,14 @@ public static partial class Gen5MslTranslator
                 return true;
             }
 
+            // EXP.VM communicates the current EXEC mask independently of the
+            // export data target. NULL exports are the hardware-defined way to
+            // update only fragment validity, and the final VM export wins.
+            if (export.ValidMask && _usesPixelValidMask)
+            {
+                Line("pixel_valid_mask_active = exec;");
+            }
+
             Gen5PixelOutputBinding? binding = null;
             foreach (var candidate in _pixelOutputBindings)
             {
@@ -727,15 +725,16 @@ public static partial class Gen5MslTranslator
                     var outputComponent = (uint)component;
                     if (!binding.Value.ComponentMapping.IsIdentity)
                     {
-                        for (var physical = 0u; physical < 4; physical++)
+                        for (var physicalComponent = 0u; physicalComponent < 4; physicalComponent++)
                         {
-                            if (binding.Value.ComponentMapping.Map(physical) == component)
+                            if (binding.Value.ComponentMapping.Map(physicalComponent) == component)
                             {
-                                outputComponent = physical;
+                                outputComponent = physicalComponent;
                                 break;
                             }
                         }
                     }
+
                     values[component] = $"{field}[{outputComponent}]";
                     continue;
                 }
@@ -762,7 +761,7 @@ public static partial class Gen5MslTranslator
                 };
             }
 
-            if (!binding.Value.ComponentMapping.IsIdentity)
+            if (binding.Value.ComponentMapping != Gen5ColorComponentMapping.Identity)
             {
                 var mappedValues = new string[4];
                 for (var component = 0; component < mappedValues.Length; component++)
@@ -770,6 +769,7 @@ public static partial class Gen5MslTranslator
                     mappedValues[component] = values[
                         binding.Value.ComponentMapping.Map((uint)component)];
                 }
+
                 values = mappedValues;
             }
 
@@ -834,20 +834,28 @@ public static partial class Gen5MslTranslator
             out string error)
         {
             error = string.Empty;
-            if (control.DwordCount == 0 || control.DwordCount > input.ComponentCount)
+            if (control.DwordCount == 0)
             {
                 error =
-                    $"invalid vertex input fetch components={control.DwordCount} " +
-                    $"input={input.ComponentCount}";
+                    $"invalid vertex input fetch components={control.DwordCount}";
                 return false;
             }
 
             for (uint component = 0; component < control.DwordCount; component++)
             {
-                var value = input.ComponentCount == 1
-                    ? $"sharpemu_vin.in{input.Location}"
-                    : $"sharpemu_vin.in{input.Location}[{component}]";
-                StoreVector(control.VectorData + component, AsUInt(value));
+                if (component >= input.ComponentCount)
+                {
+                    // Formatted buffer loads return zero for components that
+                    // are not present in the resource format.
+                    StoreVector(control.VectorData + component, "0u");
+                }
+                else
+                {
+                    var value = input.ComponentCount == 1
+                        ? $"sharpemu_vin.in{input.Location}"
+                        : $"sharpemu_vin.in{input.Location}[{component}]";
+                    StoreVector(control.VectorData + component, AsUInt(value));
+                }
             }
 
             return true;

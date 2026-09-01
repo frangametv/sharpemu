@@ -17,7 +17,7 @@ public sealed class Gen5DataShareTests
     private const ushort OpAtomicIAdd = 234;
     private const ushort OpAtomicISub = 235;
     private const ushort OpSelectionMerge = 247;
-    private const ushort OpGroupNonUniformBroadcast = 337;
+    private const ushort OpGroupNonUniformShuffle = 345;
     private const ushort OpGroupNonUniformBallot = 339;
 
     [Fact]
@@ -58,11 +58,11 @@ public sealed class Gen5DataShareTests
         var instruction = Assert.Single(
             program.Instructions,
             item => item.Opcode == "DsAppend");
-        Assert.Empty(instruction.Sources);
+        Assert.Equal([Gen5Operand.Scalar(124)], instruction.Sources);
         Assert.Equal(Gen5Operand.Vector(7), Assert.Single(instruction.Destinations));
         var control = Assert.IsType<Gen5DataShareControl>(instruction.Control);
         Assert.Equal(0x14U, control.Offset0);
-        Assert.True(control.Gds);
+        Assert.False(control.Gds);
     }
 
     [Fact]
@@ -73,11 +73,11 @@ public sealed class Gen5DataShareTests
         var instruction = Assert.Single(
             program.Instructions,
             item => item.Opcode == "DsConsume");
-        Assert.Empty(instruction.Sources);
+        Assert.Equal([Gen5Operand.Scalar(124)], instruction.Sources);
         Assert.Equal(Gen5Operand.Vector(7), Assert.Single(instruction.Destinations));
         var control = Assert.IsType<Gen5DataShareControl>(instruction.Control);
         Assert.Equal(4U, control.Offset0);
-        Assert.True(control.Gds);
+        Assert.False(control.Gds);
     }
 
     [Fact]
@@ -200,9 +200,9 @@ public sealed class Gen5DataShareTests
             error);
 
         var opcodes = ReadSpirvOpcodes(shader.Spirv);
-        Assert.Equal(1, opcodes.Count(opcode => opcode == OpAtomicIAdd));
+        Assert.Equal(0, opcodes.Count(opcode => opcode == OpAtomicIAdd));
         Assert.Contains(OpGroupNonUniformBallot, opcodes);
-        Assert.Contains(OpGroupNonUniformBroadcast, opcodes);
+        Assert.Contains(OpGroupNonUniformShuffle, opcodes);
     }
 
     [Fact]
@@ -233,7 +233,7 @@ public sealed class Gen5DataShareTests
         var opcodes = ReadSpirvOpcodes(shader.Spirv);
         Assert.Equal(1, opcodes.Count(opcode => opcode == OpAtomicISub));
         Assert.Contains(OpGroupNonUniformBallot, opcodes);
-        Assert.Contains(OpGroupNonUniformBroadcast, opcodes);
+        Assert.Contains(OpGroupNonUniformShuffle, opcodes);
     }
 
     [Fact]

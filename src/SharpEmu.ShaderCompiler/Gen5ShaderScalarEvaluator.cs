@@ -293,7 +293,8 @@ public static class Gen5ShaderScalarEvaluator
         out string error,
         bool resolveVertexInputs = false,
         uint? requiredVertexRecordCount = null,
-        bool captureVertexInputData = true)
+        bool captureVertexInputData = true,
+        bool captureVertexInputsOnly = false)
     {
         evaluation = default!;
         error = string.Empty;

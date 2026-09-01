@@ -112,7 +112,17 @@ public readonly record struct Gen5PixelOutputBinding(
     uint HostLocation,
     Gen5PixelOutputKind Kind,
     uint WriteMask = 0xFu,
-    Gen5ColorComponentMapping ComponentMapping = default);
+    Gen5ColorComponentMapping ComponentMapping = default)
+{
+    public Gen5PixelOutputBinding(
+        uint guestSlot,
+        uint hostLocation,
+        Gen5PixelOutputKind kind,
+        Gen5ColorComponentMapping componentMapping)
+        : this(guestSlot, hostLocation, kind, 0xFu, componentMapping)
+    {
+    }
+}
 
 public readonly record struct Gen5ShaderResourceMapping(
     Gen5ShaderResourceKind Kind,

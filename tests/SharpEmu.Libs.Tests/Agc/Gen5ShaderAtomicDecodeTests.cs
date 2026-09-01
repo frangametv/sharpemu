@@ -103,17 +103,20 @@ public sealed class Gen5ShaderAtomicDecodeTests
         Assert.Equal(new[] { Gen5Operand.Vector(3) }, instruction.Destinations);
     }
 
-    [Fact]
-    public void DsReadB64_ReturnsTwoConsecutiveRegisters()
+    [Theory]
+    [InlineData(0xD8FA3412u, "DsAppend")]
+    [InlineData(0xD8F63412u, "DsConsume")]
+    public void DsWaveCounter_UsesM0AndReturnsOldValue(uint word, string opcode)
     {
-        // DS_READ_B64 v[5:6], v3
-        var instruction = DecodeSingle(0xD9D80000, 0x05000003);
+        var instruction = DecodeSingle(word, 0x07000000);
 
-        Assert.Equal("DsReadB64", instruction.Opcode);
-        Assert.Equal(new[] { Gen5Operand.Vector(3) }, instruction.Sources);
-        Assert.Equal(
-            new[] { Gen5Operand.Vector(5), Gen5Operand.Vector(6) },
-            instruction.Destinations);
+        Assert.Equal(opcode, instruction.Opcode);
+        Assert.Equal(new[] { Gen5Operand.Scalar(124) }, instruction.Sources);
+        Assert.Equal(new[] { Gen5Operand.Vector(7) }, instruction.Destinations);
+        var control = Assert.IsType<Gen5DataShareControl>(instruction.Control);
+        Assert.Equal(0x12u, control.Offset0);
+        Assert.Equal(0x34u, control.Offset1);
+        Assert.False(control.Gds);
     }
 
     private static Gen5ShaderInstruction DecodeSingle(params uint[] words)

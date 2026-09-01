@@ -255,6 +255,7 @@ public static partial class Gen5MslTranslator
         private readonly ulong _storageBufferOffsetAlignment;
         private readonly Dictionary<uint, long[]> _scalarDefinitionsBeforePc = [];
         private readonly IReadOnlyList<Gen5PixelOutputBinding> _pixelOutputBindings;
+        private readonly bool _usesPixelValidMask;
         private readonly int _imageBindingBase;
         private readonly uint _pixelInputEnable;
         private readonly uint _pixelInputAddress;
@@ -317,6 +318,10 @@ public static partial class Gen5MslTranslator
             _stage = stage;
             _state = state;
             _evaluation = evaluation;
+            _usesPixelValidMask =
+                stage == Gen5MslStage.Pixel &&
+                state.Program.Instructions.Any(static instruction =>
+                    instruction.Control is Gen5ExportControl { ValidMask: true });
             _localSizeX = localSizeX;
             _localSizeY = localSizeY;
             _localSizeZ = localSizeZ;
@@ -467,7 +472,8 @@ public static partial class Gen5MslTranslator
                 if (instruction.Control is Gen5DppControl or Gen5Dpp8Control ||
                     instruction.Opcode is "VPermlane16B32" or "VPermlanex16B32"
                         or "VReadlaneB32" or "VReadfirstlaneB32"
-                        or "VMbcntLoU32B32" or "VMbcntHiU32B32" ||
+                        or "VMbcntLoU32B32" or "VMbcntHiU32B32"
+                        or "DsAppend" or "DsConsume" ||
                     instruction.Opcode.Contains("Saveexec", StringComparison.Ordinal) ||
                     instruction.Opcode.StartsWith("SCbranchExec", StringComparison.Ordinal) ||
                     instruction.Opcode.StartsWith("SCbranchVcc", StringComparison.Ordinal) ||
@@ -780,9 +786,13 @@ public static partial class Gen5MslTranslator
             source.AppendLine("    }");
             if (_stage == Gen5MslStage.Pixel)
             {
-                // A lane still removed from EXEC when the guest shader exits is
-                // a killed fragment; it must not contribute color or blending.
-                source.AppendLine("    if (!exec)");
+                // EXP.VM publishes EXEC as the pixel-valid mask. EXEC can be
+                // restored afterward, so only malformed shaders without VM
+                // fall back to the final EXEC value.
+                source.AppendLine(
+                    _usesPixelValidMask
+                        ? "    if (!pixel_valid_mask_active)"
+                        : "    if (!exec)");
                 source.AppendLine("    {");
                 source.AppendLine("        discard_fragment();");
                 source.AppendLine("    }");
@@ -921,6 +931,10 @@ public static partial class Gen5MslTranslator
             source.AppendLine($"    uint s[{ScalarRegisterFileCount}] = {{}};");
             source.AppendLine($"    uint v[{VectorRegisterFileCount}] = {{}};");
             source.AppendLine("    bool exec = true;");
+            if (_usesPixelValidMask)
+            {
+                source.AppendLine("    bool pixel_valid_mask_active = true;");
+            }
             source.AppendLine("    bool vcc = false;");
             source.AppendLine("    bool scc = false;");
             source.AppendLine("    uint pc = 0u;");
@@ -1081,7 +1095,7 @@ public static partial class Gen5MslTranslator
             {
                 var instruction = instructions[index];
                 var isTerminator = index == block.EndIndex - 1;
-                if (IsProgramTerminator(instruction.Opcode))
+                if (instruction.Opcode == "SEndpgm")
                 {
                     Line("active = false;");
                     return true;
@@ -1187,6 +1201,11 @@ public static partial class Gen5MslTranslator
                 "SCbranchVccnz" => $"(s[{VccLoRegister}] | s[{VccHiRegister}]) != 0u",
                 "SCbranchExecz" => $"(s[{ExecLoRegister}] | s[{ExecHiRegister}]) == 0u",
                 "SCbranchExecnz" => $"(s[{ExecLoRegister}] | s[{ExecHiRegister}]) != 0u",
+                // The emulator does not expose a shader debug session.
+                "SCbranchCdbgsys" or
+                "SCbranchCdbguser" or
+                "SCbranchCdbgsysOrUser" or
+                "SCbranchCdbgsysAndUser" => "false",
                 _ => string.Empty,
             };
             return condition.Length != 0;
@@ -1230,13 +1249,8 @@ public static partial class Gen5MslTranslator
             {
                 case "SNop":
                 case "SWaitcnt":
-                case "SWaitcntVscnt":
                 case "SInstPrefetch":
                 case "STtraceData":
-                // With no guest GPU debugger attached, S_TRAP has no host-side
-                // trap handler to enter. Match the hardware-facing emulator
-                // behavior by allowing the wave to continue.
-                case "STrap":
                 case "SClause":
                 case "VNop":
                 // NGG shaders bracket their exports with s_sendmsg
@@ -1497,7 +1511,7 @@ public static partial class Gen5MslTranslator
             out string error)
         {
             error = string.Empty;
-            if (control.Gds)
+            if (control.Gds && instruction.Opcode is not ("DsAppend" or "DsConsume"))
             {
                 error = "GDS data share is not implemented";
                 return false;
@@ -1580,6 +1594,88 @@ public static partial class Gen5MslTranslator
                         Temp("uint", ShuffleLane(RawSource(instruction, 0), targetLane)));
                     return true;
                 }
+                case "DsReadAddtidB32":
+                {
+                    if (instruction.Destinations.Count < 1)
+                    {
+                        error = "missing LDS add-thread-id read destination";
+                        return false;
+                    }
+
+                    var address = Temp(
+                        "uint",
+                        $"({ScalarExpression(124)} & 0xFFFFu) + (sharpemu_lane * {sizeof(uint)}u)");
+                    StoreVector(
+                        instruction.Destinations[0].Value,
+                        $"sharpemu_lds[{LdsIndex(address, EffectiveDsSingleOffsetBytes(control))}]");
+                    return true;
+                }
+                case "DsAppend":
+                case "DsConsume":
+                {
+                    if (instruction.Destinations.Count < 1)
+                    {
+                        error = $"missing {instruction.Opcode} operand";
+                        return false;
+                    }
+
+                    var offset = control.Offset0 | (control.Offset1 << 8);
+                    var m0 = Temp(
+                        "uint",
+                        instruction.Sources.Count > 0
+                            ? RawSource(instruction, 0)
+                            : "s[124]");
+                    var baseAddress = Temp("uint", $"{m0} >> 16u");
+                    var sizeBytes = Temp("uint", $"{m0} & 0xFFFFu");
+                    var inBounds = Temp("bool", $"{offset + 3}u < {sizeBytes}");
+                    var index = LdsIndex(baseAddress, offset);
+                    var destination = instruction.Destinations[0].Value;
+                    var operation = instruction.Opcode == "DsAppend" ? "add" : "sub";
+
+                    // Graphics stages use the existing one-lane LDS model.
+                    if (_stage != Gen5MslStage.Compute)
+                    {
+                        var original = Temp("uint", $"sharpemu_lds[{index}]");
+                        var assignment = operation == "add" ? "+=" : "-=";
+                        Line($"if (exec && {inBounds}) {{ sharpemu_lds[{index}] {assignment} 1u; }}");
+                        StoreVector(destination, $"{inBounds} ? {original} : 0u");
+                        return true;
+                    }
+
+                    string count;
+                    string first;
+                    if (IsWave64)
+                    {
+                        Line("sharpemu_wave_scratch[(sharpemu_lane >> 5) & 1u] = sharpemu_ballot(exec);");
+                        Line("threadgroup_barrier(mem_flags::mem_threadgroup);");
+                        var low = Temp("uint", "sharpemu_wave_scratch[0]");
+                        var high = Temp("uint", "sharpemu_wave_scratch[1]");
+                        count = Temp("uint", $"popcount({low}) + popcount({high})");
+                        first = Temp(
+                            "uint",
+                            $"({low} != 0u) ? (uint)ctz({low}) : (({high} != 0u) ? (32u + (uint)ctz({high})) : 0u)");
+                        Line("threadgroup_barrier(mem_flags::mem_threadgroup);");
+                        var atomic =
+                            $"atomic_fetch_{operation}_explicit((threadgroup atomic_uint*)&sharpemu_lds[{index}], {count}, memory_order_relaxed)";
+                        var broadcast = EmitWave64ReadFirstLane($"{inBounds} ? {atomic} : 0u");
+                        StoreVector(destination, $"{inBounds} ? {broadcast} : 0u");
+                        return true;
+                    }
+
+                    var mask = Temp("uint", "sharpemu_ballot(exec)");
+                    count = Temp("uint", $"popcount({mask})");
+                    first = Temp("uint", $"{mask} == 0u ? 0u : (uint)ctz({mask})");
+                    var firstValue = Temp("uint", "0u");
+                    Line($"if (exec && {inBounds} && sharpemu_lane == {first})");
+                    Line("{");
+                    _indent++;
+                    Line($"{firstValue} = atomic_fetch_{operation}_explicit((threadgroup atomic_uint*)&sharpemu_lds[{index}], {count}, memory_order_relaxed);");
+                    _indent--;
+                    Line("}");
+                    var result = Temp("uint", $"simd_broadcast({firstValue}, {first})");
+                    StoreVector(destination, $"{inBounds} ? {result} : 0u");
+                    return true;
+                }
                 case "DsAddU32":
                 {
                     var address = Temp("uint", RawSource(instruction, 0));
@@ -1596,38 +1692,6 @@ public static partial class Gen5MslTranslator
                 {
                     var address = Temp("uint", RawSource(instruction, 0));
                     StoreLds(LdsIndex(address, control.Offset0), RawSource(instruction, 1));
-                    return true;
-                }
-                case "DsWriteAddtidB32":
-                {
-                    if (instruction.Sources.Count < 1)
-                    {
-                        error = "missing LDS add-thread-id write source";
-                        return false;
-                    }
-
-                    var address = Temp(
-                        "uint",
-                        $"({ScalarExpression(124)} & 0xFFFFu) + (sharpemu_lane * {sizeof(uint)}u)");
-                    StoreLds(
-                        LdsIndex(address, EffectiveDsSingleOffsetBytes(control)),
-                        RawSource(instruction, 0));
-                    return true;
-                }
-                case "DsReadAddtidB32":
-                {
-                    if (instruction.Destinations.Count < 1)
-                    {
-                        error = "missing LDS add-thread-id read destination";
-                        return false;
-                    }
-
-                    var address = Temp(
-                        "uint",
-                        $"({ScalarExpression(124)} & 0xFFFFu) + (sharpemu_lane * {sizeof(uint)}u)");
-                    StoreVector(
-                        instruction.Destinations[0].Value,
-                        $"sharpemu_lds[{LdsIndex(address, EffectiveDsSingleOffsetBytes(control))}]");
                     return true;
                 }
                 case "DsWriteB64":
@@ -1669,25 +1733,7 @@ public static partial class Gen5MslTranslator
                     var address = Temp("uint", RawSource(instruction, 0));
                     StoreVector(
                         instruction.Destinations[0].Value,
-                        $"sharpemu_lds[{LdsIndex(address, EffectiveDsSingleOffsetBytes(control))}]");
-                    return true;
-                }
-                case "DsReadB64":
-                {
-                    if (instruction.Destinations.Count < 2)
-                    {
-                        error = "missing LDS read64 operand";
-                        return false;
-                    }
-
-                    var address = Temp("uint", RawSource(instruction, 0));
-                    var offset = EffectiveDsSingleOffsetBytes(control);
-                    StoreVector(
-                        instruction.Destinations[0].Value,
-                        $"sharpemu_lds[{LdsIndex(address, offset)}]");
-                    StoreVector(
-                        instruction.Destinations[1].Value,
-                        $"sharpemu_lds[{LdsIndex(address, offset + sizeof(uint))}]");
+                        $"sharpemu_lds[{LdsIndex(address, control.Offset0)}]");
                     return true;
                 }
                 case "DsReadB96":
@@ -1727,29 +1773,6 @@ public static partial class Gen5MslTranslator
                     StoreVector(
                         instruction.Destinations[1].Value,
                         $"sharpemu_lds[{LdsIndex(address, EffectiveDsPairOffsetBytes(control.Offset1, st64))}]");
-                    return true;
-                }
-                case "DsRead2B64":
-                {
-                    if (instruction.Destinations.Count < 4)
-                    {
-                        error = "missing LDS read2-64 operand";
-                        return false;
-                    }
-
-                    var address = Temp("uint", RawSource(instruction, 0));
-                    var firstBase = control.Offset0 * 2u * sizeof(uint);
-                    var secondBase = control.Offset1 * 2u * sizeof(uint);
-                    for (var dword = 0; dword < 2; dword++)
-                    {
-                        StoreVector(
-                            instruction.Destinations[dword].Value,
-                            $"sharpemu_lds[{LdsIndex(address, firstBase + (uint)(dword * sizeof(uint)))}]");
-                        StoreVector(
-                            instruction.Destinations[dword + 2].Value,
-                            $"sharpemu_lds[{LdsIndex(address, secondBase + (uint)(dword * sizeof(uint)))}]");
-                    }
-
                     return true;
                 }
                 default:
@@ -2116,7 +2139,7 @@ public static partial class Gen5MslTranslator
                     leaders.Add(targetPc);
                 }
 
-                if ((IsBranch(instruction.Opcode) || IsProgramTerminator(instruction.Opcode)) &&
+                if ((IsBranch(instruction.Opcode) || instruction.Opcode == "SEndpgm") &&
                     index + 1 < instructions.Count)
                 {
                     leaders.Add(instructions[index + 1].Pc);
@@ -2151,12 +2174,6 @@ public static partial class Gen5MslTranslator
         private static bool IsBranch(string opcode) =>
             opcode == "SBranch" ||
             opcode.StartsWith("SCbranch", StringComparison.Ordinal);
-
-        // S_SETPC_B64 transfers control to a runtime address outside the
-        // standalone program known to this translator. Continuing linearly
-        // would treat a different function or trailing data as instructions.
-        private static bool IsProgramTerminator(string opcode) =>
-            opcode is "SEndpgm" or "SSetpcB64";
 
         private static bool TryGetBranchTargetPc(
             Gen5ShaderInstruction instruction,
@@ -2242,7 +2259,7 @@ public static partial class Gen5MslTranslator
                 var block = blocks[blockIndex];
                 var terminator = instructions[block.EndIndex - 1];
                 var hasFallthrough = blockIndex + 1 < blocks.Count;
-                if (IsProgramTerminator(terminator.Opcode))
+                if (terminator.Opcode == "SEndpgm")
                 {
                     continue;
                 }
