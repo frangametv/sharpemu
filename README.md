@@ -24,12 +24,12 @@ SPDX-License-Identifier: GPL-2.0-or-later
   <img src="https://img.shields.io/badge/Discord-%40FranGameTv-5865F2?style=for-the-badge&logo=discord&logoColor=white" alt="Discord @FranGameTv">
 </p>
 
-> [!IMPORTANT]
-> ### Fran7 is now in development: the focus is on gameplay!
-> **Fran6 has been released**, and I am now working on Fran7's rendering path,
-> stability and performance as both Astro Bot and GTA V progress beyond their introductions.
-> In my current tests, GTA V reaches the game menu for the first time on SharpEmu;
-> the next goal is to turn this progress into stable, rendered gameplay in both games.
+> [!TIP]
+> ### Fran7: GTA V now loads into game (and crashes)!
+> **Fran7 has been released.** Grand Theft Auto V now completes its introduction
+> and reaches the game menu and then loads into story mode (and crashes); 
+> this is the first time this milestone has been reached on SharpEmu.
+> Development will be taking a break for the time being.
 
 > [!WARNING]
 > SharpEmu is at a very early stage. Astro Bot and Grand Theft Auto V are
