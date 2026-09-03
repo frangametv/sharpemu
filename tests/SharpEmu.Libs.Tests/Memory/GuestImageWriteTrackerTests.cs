@@ -532,7 +532,14 @@ public sealed unsafe class GuestImageWriteTrackerTests
     [Fact]
     public void ProtectedTrackPreservesExecutePermission()
     {
-        if (!GuestImageWriteTracker.Enabled)
+        // macos-latest executes the tests as an arm64 process even though the
+        // release RID is osx-x64. Apple Silicon's W^X policy can reject the
+        // initial anonymous RWX mapping before the tracker is exercised; the
+        // shipped x64 process runs under Rosetta with the 4 KiB page model
+        // covered by this test on x64 hosts.
+        if (!GuestImageWriteTracker.Enabled ||
+            (OperatingSystem.IsMacOS() &&
+             RuntimeInformation.ProcessArchitecture == Architecture.Arm64))
         {
             return;
         }
