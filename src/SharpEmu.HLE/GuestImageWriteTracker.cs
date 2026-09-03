@@ -57,9 +57,6 @@ public static unsafe class GuestImageWriteTracker
         long Generation,
         bool Active);
 
-    private const int ProtRead = 0x1;
-    private const int ProtWrite = 0x2;
-    private const int ProtExec = 0x4;
     private const int ClockMonotonicRaw = 4;
     private const ulong TrackingPageSize = 0x1000UL;
     private const int RangeDisarmed = 0;
@@ -210,18 +207,8 @@ public static unsafe class GuestImageWriteTracker
     private const uint PageReadonly = 0x02;
     private const uint PageReadWrite = 0x04;
 
-    [DllImport("libc", EntryPoint = "mprotect", SetLastError = true)]
-    private static extern int Mprotect(nint address, nuint length, int protection);
-
     [DllImport("libc", EntryPoint = "clock_gettime", SetLastError = false)]
     private static extern int ClockGetTime(int clockId, Timespec* time);
-
-    [DllImport("kernel32.dll", SetLastError = true)]
-    private static extern int VirtualProtect(
-        nint lpAddress,
-        nuint dwSize,
-        uint flNewProtect,
-        out uint lpflOldProtect);
 
     [DllImport("kernel32.dll", SetLastError = true)]
     private static extern nint VirtualAlloc(
@@ -1407,28 +1394,18 @@ public static unsafe class GuestImageWriteTracker
             return true;
         }
 
-        if (OperatingSystem.IsWindows())
-        {
-            return VirtualProtect(
-                (nint)start,
-                (nuint)length,
-                executable
-                    ? writable
-                        ? HostMemory.PAGE_EXECUTE_READWRITE
-                        : HostMemory.PAGE_EXECUTE_READ
-                    : writable
-                        ? PageReadWrite
-                        : PageReadonly,
-                out _) != 0;
-        }
-
-        var protection = ProtRead |
-            (writable ? ProtWrite : 0) |
-            (executable ? ProtExec : 0);
-        return Mprotect(
-            (nint)start,
+        var protection = executable
+            ? writable
+                ? HostMemory.PAGE_EXECUTE_READWRITE
+                : HostMemory.PAGE_EXECUTE_READ
+            : writable
+                ? PageReadWrite
+                : PageReadonly;
+        return HostMemory.Protect(
+            (void*)start,
             (nuint)length,
-            protection) == 0;
+            protection,
+            out _);
     }
 
     private static bool IsExecutableMapping(ulong address)

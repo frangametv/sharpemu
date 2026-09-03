@@ -185,6 +185,12 @@ jobs:
             "$SPIRV_TARGET_ENV" \
             artifacts/shader-dump
 
+      # macos-latest is an arm64 runner, while this release intentionally
+      # ships an x64 build for Rosetta. Restore the publish RID explicitly so
+      # --no-restore does not reuse only the host osx-arm64 assets target.
+      - name: Restore ${{ matrix.rid }} publish target
+        run: dotnet restore src/SharpEmu.CLI/SharpEmu.CLI.csproj -r ${{ matrix.rid }}
+
       - name: Publish ${{ matrix.rid }} CLI
         run: dotnet publish src/SharpEmu.CLI/SharpEmu.CLI.csproj -c Release -r ${{ matrix.rid }} --self-contained true --no-restore -p:PublishDir="$PUBLISH_DIR"
 

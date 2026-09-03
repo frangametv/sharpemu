@@ -957,7 +957,9 @@ public sealed class KernelMemoryCompatExportsTests
         // The in-out pointer points outside the FakeCpuMemory backing store, so
         // the first TryReadUInt64 must fail before any reservation is attempted.
         const ulong memoryBase = 0x1_0000_0000;
-        const ulong unreachableInOut = memoryBase + 0x10_0000;
+        // Use a non-canonical host address so this remains unreachable even
+        // when macOS maps the executable near the guest's 4 GiB base.
+        const ulong unreachableInOut = 0x0000_8000_0000_0000;
         var memory = new FakeCpuMemory(memoryBase, 0x1000);
         var context = new CpuContext(memory, Generation.Gen5);
         context[CpuRegister.Rdi] = unreachableInOut;

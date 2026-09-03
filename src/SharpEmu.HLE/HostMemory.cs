@@ -336,7 +336,25 @@ public static unsafe class HostMemory
             {
                 if (!TryFindRegionLocked(start, out var region) || end > region.End)
                 {
-                    return false;
+                    // NativeMemory/Marshal allocations are valid protection
+                    // targets too. They are absent from our shadow table, so
+                    // validate the complete host mapping and let the kernel
+                    // remain the source of truth for subsequent queries.
+                    if (!TryQueryExternalMapping(start, out var external) ||
+                        external.State != MEM_COMMIT ||
+                        external.BaseAddress > start ||
+                        external.RegionSize == 0 ||
+                        external.BaseAddress > ulong.MaxValue - external.RegionSize ||
+                        end > external.BaseAddress + external.RegionSize)
+                    {
+                        return false;
+                    }
+
+                    oldProtect = external.Protect;
+                    return mprotect(
+                        (nint)start,
+                        (nuint)(end - start),
+                        ToPosixProtect(newProtect)) == 0;
                 }
 
                 oldProtect = region.ProtectAt(start);
@@ -544,14 +562,13 @@ public static unsafe class HostMemory
         {
             public int Protection;
             public int MaxProtection;
-            public uint Inheritance;
-            public byte Shared;
-            public byte Reserved;
-            public ushort Padding;
+            public int Inheritance;
+            public int Shared;
+            public int Reserved;
             public ulong Offset;
-            public uint Behavior;
+            public int Behavior;
             public ushort UserWiredCount;
-            public ushort Padding2;
+            public ushort Padding;
         }
 
         private static bool OverlapsTrackedRegionLocked(ulong start, ulong size)

@@ -11,7 +11,8 @@ namespace SharpEmu.Libs.Tests.Agc;
 [Collection("GuestImageWriteTracker")]
 public sealed unsafe class AgcGuestImageDirtyRefreshTests
 {
-    private const nuint PageSize = 4096;
+    private const nuint GuestPageSize = 4096;
+    private static readonly nuint HostPageSize = checked((nuint)Environment.SystemPageSize);
 
     [Fact]
     public void CleanAvailableGuestImageKeepsEmptyPixelShortcut()
@@ -109,11 +110,11 @@ public sealed unsafe class AgcGuestImageDirtyRefreshTests
 
     private static byte* AllocateTrackedPage(out ulong address)
     {
-        var page = (byte*)NativeMemory.AlignedAlloc(PageSize, PageSize);
+        var page = (byte*)NativeMemory.AlignedAlloc(HostPageSize, HostPageSize);
         Assert.NotEqual(nint.Zero, (nint)page);
-        new Span<byte>(page, checked((int)PageSize)).Clear();
+        new Span<byte>(page, checked((int)HostPageSize)).Clear();
         address = (ulong)page;
-        GuestImageWriteTracker.Track(address, checked((ulong)PageSize));
+        GuestImageWriteTracker.Track(address, checked((ulong)GuestPageSize));
         return page;
     }
 
